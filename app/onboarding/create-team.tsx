@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
+import NetInfo from '@react-native-community/netinfo'; // <--- 1. ΝΕΟ IMPORT
 import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import React, { useState } from 'react';
 import { ActivityIndicator, Alert, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-// FIREBASE IMPORTS (Για να αποθηκεύσουμε κατευθείαν εδώ)
+// Επαναφέρουμε τα direct Firebase imports
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../../firebaseConfig';
 
@@ -21,10 +22,20 @@ export default function CreateTeamScreen() {
   };
 
   const handleCreateTeam = async () => {
+    // --- 2. Ο ΠΟΡΤΙΕΡΗΣ (NETWORK CHECK) ---
+    const networkState = await NetInfo.fetch();
+    if (!networkState.isConnected) {
+        Alert.alert(
+            "Δεν υπάρχει σύνδεση", 
+            "Για να δημιουργήσετε νέα ομάδα πρέπει να είστε συνδεδεμένοι στο ίντερνετ."
+        );
+        return; // Σταματάμε εδώ.
+    }
+    // --------------------------------------
+
     // 1. Έλεγχοι
     if (teamName.trim().length === 0) return Alert.alert("Προσοχή", "Δώστε ένα όνομα στην ομάδα.");
     if (teamType.trim().length === 0) return Alert.alert("Προσοχή", "Δώστε το αντικείμενο εργασιών.");
-    // Το email είναι προαιρετικό, αλλά αν το βάλει πρέπει να είναι σωστό
     if (teamEmail.trim().length > 0 && !teamEmail.includes('@')) return Alert.alert("Προσοχή", "Συνδέστε ένα έγκυρο Team Gmail.");
 
     const user = auth.currentUser;
@@ -33,19 +44,17 @@ export default function CreateTeamScreen() {
     setLoading(true);
 
     try {
-      // 2. Αποθήκευση στο Firebase (Firestore)
+      // 2. Αποθήκευση στο Firebase (Firestore) απευθείας
       await addDoc(collection(db, "teams"), {
         name: teamName,
         type: teamType,
         contactEmail: teamEmail,
         createdAt: serverTimestamp(),
-        
-        // Σε βάζουμε κατευθείαν ως Founder
         memberIds: [user.uid],
         roles: {
           [user.uid]: 'Founder' 
         },
-        groups: [] // Ξεκινάει χωρίς projects
+        groups: []
       });
 
       // 3. Τέλος! Πάμε Dashboard
@@ -64,13 +73,10 @@ export default function CreateTeamScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
-        {/* Αφαιρέθηκε το "Βήμα 1/2" */}
         <Text style={styles.headerTitle}>Νέα Ομάδα</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
-        
-        {/* TEAM NAME */}
         <View style={styles.formGroup}>
           <Text style={styles.label}>Όνομα Ομάδας</Text>
           <TextInput
@@ -82,7 +88,6 @@ export default function CreateTeamScreen() {
           />
         </View>
 
-        {/* TEAM TYPE */}
         <View style={styles.formGroup}>
           <Text style={styles.label}>Αντικείμενο Εργασιών</Text>
           <TextInput
@@ -96,9 +101,7 @@ export default function CreateTeamScreen() {
         <View style={styles.separator} />
 
         <Text style={styles.label}>Λογαριασμός Gmail Ομάδας (Προαιρετικό)</Text>
-        <Text style={styles.helperText}>
-          Χρήσιμο για τη διαχείριση αρχείων της ομάδας.
-        </Text>
+        <Text style={styles.helperText}>Χρήσιμο για τη διαχείριση αρχείων της ομάδας.</Text>
 
         <View style={styles.gmailOptions}>
           <TouchableOpacity style={styles.optionButton} onPress={handleCreateGmail}>
@@ -117,7 +120,6 @@ export default function CreateTeamScreen() {
           autoCapitalize="none"
         />
         
-        {/* ΚΟΥΜΠΙ ΔΗΜΙΟΥΡΓΙΑΣ */}
         <TouchableOpacity style={styles.createButton} onPress={handleCreateTeam} disabled={loading}>
           {loading ? (
             <ActivityIndicator color="white" />

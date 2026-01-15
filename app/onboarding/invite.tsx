@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
+import NetInfo from '@react-native-community/netinfo'; // <--- 1. ΝΕΟ IMPORT
 import * as Linking from 'expo-linking';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, SafeAreaView, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-// FIREBASE
 import { addDoc, collection, doc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../../firebaseConfig';
 
@@ -19,11 +19,17 @@ export default function InviteMembersScreen() {
 
   useEffect(() => {
       const fetchMyRole = async () => {
+          // Μικρή προστασία: Αν δεν έχουμε ίντερνετ, δεν θα μπορέσει να φέρει τον ρόλο,
+          // αλλά δεν πειράζει γιατί ούτως ή άλλως δεν θα τον αφήσουμε να στείλει invite.
           const user = auth.currentUser;
           if (user && teamId) {
-              const teamSnap = await getDoc(doc(db, "teams", teamId as string));
-              if (teamSnap.exists()) {
-                  setMyRole(teamSnap.data().roles[user.uid] || 'User');
+              try {
+                const teamSnap = await getDoc(doc(db, "teams", teamId as string));
+                if (teamSnap.exists()) {
+                    setMyRole(teamSnap.data().roles[user.uid] || 'User');
+                }
+              } catch(e) {
+                  console.log("Offline or error fetching role");
               }
           }
       };
@@ -31,6 +37,17 @@ export default function InviteMembersScreen() {
   }, [teamId]);
 
   const handleShareInvite = async () => {
+    // --- 2. Ο ΠΟΡΤΙΕΡΗΣ (NETWORK CHECK) ---
+    const networkState = await NetInfo.fetch();
+    if (!networkState.isConnected) {
+        Alert.alert(
+            "Δεν υπάρχει σύνδεση", 
+            "Για να στείλετε πρόσκληση πρέπει να είστε συνδεδεμένοι στο ίντερνετ."
+        );
+        return; 
+    }
+    // --------------------------------------
+
     if (!teamId) return Alert.alert("Σφάλμα", "Λείπει το Team ID.");
     const user = auth.currentUser;
     if (!user) return Alert.alert("Σφάλμα", "Δεν είστε συνδεδεμένος.");
@@ -41,6 +58,7 @@ export default function InviteMembersScreen() {
         let shortCode = '';
         for (let i = 0; i < 6; i++) shortCode += chars.charAt(Math.floor(Math.random() * chars.length));
         
+        // Απευθείας εγγραφή στη βάση
         await addDoc(collection(db, "invites"), {
             code: shortCode, 
             teamId: teamId,
@@ -51,21 +69,18 @@ export default function InviteMembersScreen() {
             status: 'active'
         });
 
-        // Το βαθύ λινκ (δουλεύει ΜΟΝΟ αν έχεις την εφαρμογή)
         const deepLink = Linking.createURL('/join', {
             queryParams: { inviteCode: shortCode },
         });
 
-        // ΕΔΩ ΒΑΖΕΙΣ ΤΟ ΛΙΝΚ ΓΙΑ ΝΑ ΚΑΤΕΒΑΣΟΥΝ ΤΟ APK
-        // (Π.χ. Google Drive Link, WeTransfer, ή Play Store αργότερα)
         const downloadLink = "https://expo.dev/artifacts/eas/oLjY8ZFBfmc9UWMXcabkcG.apk"
-        // ΔΗΜΙΟΥΡΓΙΑ ΕΞΥΠΝΟΥ ΜΗΝΥΜΑΤΟΣ
+        
         const message = `Γεια! Σε προσκαλώ στην ομάδα "${teamName}" στο TeamCamera.
 
-Βήμα 1: Κατέβασε την εφαρμογή από εδώ (αν δεν την έχεις):
+Βήμα 1: Κατέβασε την εφαρμογή:
 ${downloadLink}
 
-Βήμα 2: Αφού την εγκαταστήσεις, πάτα αυτό το λινκ για να μπεις στην ομάδα:
+Βήμα 2: Πάτα το λινκ για να μπεις:
 ${deepLink}
 
 Ή χρησιμοποίησε τον κωδικό: ${shortCode}

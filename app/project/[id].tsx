@@ -1,18 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import * as Network from 'expo-network';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
+import { onAuthStateChanged } from 'firebase/auth';
+import { arrayRemove, arrayUnion, doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Modal, SafeAreaView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-
-// FILE SYSTEM (Καθαρό import)
-import * as FileSystem from 'expo-file-system';
-
-// FIREBASE
-import { onAuthStateChanged } from 'firebase/auth';
-import { arrayRemove, arrayUnion, disableNetwork, doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../../firebaseConfig';
 
 import InputModal from '../components/InputModal';
@@ -23,19 +20,23 @@ type Task = {
   type: 'photo' | 'measurement' | 'general';
   status: 'pending' | 'completed';
   value: string | null;
-  isLocal?: boolean;
+  isLocal?: boolean; 
 };
+
+const OFFLINE_QUEUE_KEY = 'offline_tasks_queue_';
 
 export default function ProjectDetailsScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams(); 
   const projectId = id as string;
 
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [cloudTasks, setCloudTasks] = useState<Task[]>([]);
+  const [localTasks, setLocalTasks] = useState<Task[]>([]);
+  const [combinedTasks, setCombinedTasks] = useState<Task[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [projectName, setProjectName] = useState(''); 
-  const [canEdit, setCanEdit] = useState(false); 
   
   // UI States
   const [inputModalVisible, setInputModalVisible] = useState(false);
@@ -48,81 +49,194 @@ export default function ProjectDetailsScreen() {
   
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
-  // 1. DATA FETCHING
+  // 1. Fetch Cloud Data
   useEffect(() => {
     if (!projectId) return;
-
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
         if (user) {
             const projectRef = doc(db, "projects", projectId);
-            // includeMetadataChanges: true -> Για να βλέπουμε αμέσως τις αλλαγές offline
-            const unsubscribeSnapshot = onSnapshot(projectRef, { includeMetadataChanges: true }, (docSnap) => {
+            const unsubscribeSnapshot = onSnapshot(projectRef, (docSnap) => {
               if (docSnap.exists()) {
                 const data = docSnap.data();
-                setTasks(data.tasks || []);
+                setCloudTasks(data.tasks || []);
                 setProjectName(data.name || 'Project');
-                setCanEdit(true); 
               }
               setLoading(false);
             }, (error) => {
-                console.log("Error loading project:", error);
+                console.log("Cloud fetch error (normal if offline):", error);
                 setLoading(false);
             });
             return () => unsubscribeSnapshot();
-        } else {
-            setLoading(false);
-        }
+        } else { setLoading(false); }
     });
     return () => unsubscribeAuth();
   }, [projectId]);
 
-  // --- HELPER: DATA SAVER MODE ---
-  // Ελέγχει αν είμαστε με 4G/5G και κλείνει το ίντερνετ για να μην χρεωθούμε
-  const checkAndLockNetwork = async () => {
-      const net = await Network.getNetworkStateAsync();
-      const isCellular = net.isInternetReachable && net.type !== Network.NetworkStateType.WIFI;
-      
-      if (isCellular) {
-          console.log("🔒 Cellular Detected: Switching to Offline Queue.");
-          await disableNetwork(db).catch(() => {});
-          return true; // Γυρίσαμε σε Offline Mode
-      }
-      
-      if (!net.isInternetReachable) return true; // Ήδη offline
+  // 2. Fetch Local Data
+  useEffect(() => {
+      loadLocalTasks();
+  }, [projectId]);
 
-      return false; // WiFi (στέλνουμε κανονικά)
+  const loadLocalTasks = async () => {
+      try {
+          const json = await AsyncStorage.getItem(OFFLINE_QUEUE_KEY + projectId);
+          if (json) setLocalTasks(JSON.parse(json));
+      } catch (e) { console.log("Local load error", e); }
   };
 
-  // --- ACTIONS ---
+  // 3. ΣΩΣΤΗ ΣΥΓΧΩΝΕΥΣΗ (Αποφυγή διπλότυπων)
+  useEffect(() => {
+      // Αν ένα Cloud Task έχει γίνει Local, το κρύβουμε από τη λίστα Cloud για να μην φαίνεται διπλό
+      const localIds = new Set(localTasks.map(t => t.id));
+      const filteredCloudTasks = cloudTasks.filter(t => !localIds.has(t.id));
 
-  const handleShare = async () => {
-      if (!selectedTask?.value) return;
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (!isAvailable) return;
+      setCombinedTasks([...localTasks, ...filteredCloudTasks]);
+  }, [cloudTasks, localTasks]);
+
+
+  // --- HELPERS ---
+
+  const saveImageToDevice = async (tempUri: string) => {
       try {
-          if (selectedTask.value.startsWith('data:image')) {
-             
-             // SDK 54 FIX: @ts-ignore για το cacheDirectory
-             // @ts-ignore 
-             const filename = FileSystem.cacheDirectory + 'temp_share.jpg';
-             
-             const base64Code = selectedTask.value.split('base64,')[1];
-             
-             // SDK 54 FIX: encoding: 'base64' (string)
-             await FileSystem.writeAsStringAsync(filename, base64Code, { encoding: 'base64' });
-             
-             await Sharing.shareAsync(filename);
-          } else { await Sharing.shareAsync(selectedTask.value); }
-      } catch (error: any) {}
+          // @ts-ignore
+          const docDir = FileSystem.documentDirectory; 
+          if (!docDir) return tempUri;
+
+          const fileName = tempUri.split('/').pop(); 
+          const newPath = docDir + fileName; 
+          
+          await FileSystem.moveAsync({ from: tempUri, to: newPath });
+          return newPath; 
+      } catch (e) {
+          console.log("Error moving file:", e);
+          return tempUri; 
+      }
+  };
+
+  const shouldSaveLocally = async () => {
+      const net = await Network.getNetworkStateAsync();
+      // Αν δεν έχει ίντερνετ Ή δεν είναι WIFI -> Τοπικά
+      if (!net.isConnected || !net.isInternetReachable || net.type !== Network.NetworkStateType.WIFI) {
+          return true;
+      }
+      return false;
+  };
+
+  const saveToLocalStorage = async (updatedLocalTasks: Task[]) => {
+      setLocalTasks(updatedLocalTasks);
+      await AsyncStorage.setItem(OFFLINE_QUEUE_KEY + projectId, JSON.stringify(updatedLocalTasks));
+  };
+
+
+  // --- CRUD ACTIONS ---
+
+  const handleAddTask = async () => {
+    if (!newTaskTitle.trim()) return Alert.alert("Προσοχή", "Γράψτε έναν τίτλο.");
+    
+    const goLocal = await shouldSaveLocally();
+
+    const newTask: Task = { 
+        id: Date.now().toString(), 
+        title: newTaskTitle, 
+        type: newTaskType, 
+        status: 'pending', 
+        value: null,
+        isLocal: goLocal 
+    };
+    
+    if (goLocal) {
+        const newLocalList = [newTask, ...localTasks];
+        await saveToLocalStorage(newLocalList);
+        Alert.alert("Τοπική Αποθήκευση", "Η εργασία αποθηκεύτηκε στο κινητό.");
+    } else {
+        try {
+            await updateDoc(doc(db, "projects", projectId), { tasks: arrayUnion(newTask) });
+        } catch (error: any) { Alert.alert("Σφάλμα", error.message); }
+    }
+    setNewTaskTitle('');
+    setCreateModalVisible(false);
+  };
+
+  const updateTaskValue = async (taskId: string, val: string | null, status: 'completed' | 'pending' = 'completed') => {
+    const goLocal = await shouldSaveLocally();
+    const isAlreadyLocal = localTasks.find(t => t.id === taskId);
+
+    // ΑΝ ΔΕΝ ΕΧΟΥΜΕ WIFI ή ΑΝ Η ΕΡΓΑΣΙΑ ΕΙΝΑΙ ΗΔΗ ΤΟΠΙΚΗ
+    if (isAlreadyLocal || goLocal) {
+        
+        let newLocalList = [...localTasks];
+
+        if (isAlreadyLocal) {
+            // Περίπτωση 1: Η εργασία είναι ήδη τοπική -> Απλά την ενημερώνουμε
+            newLocalList = newLocalList.map(t => t.id === taskId ? { ...t, status, value: val } : t);
+        } else {
+            // Περίπτωση 2: Η εργασία ήταν Cloud, αλλά δεν έχουμε Wi-Fi
+            // Την "κλωνοποιούμε" τοπικά για να μην χαθεί η αλλαγή
+            const taskToConvert = cloudTasks.find(t => t.id === taskId);
+            if (taskToConvert) {
+                const convertedTask: Task = {
+                    ...taskToConvert,
+                    status: status,
+                    value: val,
+                    isLocal: true // Την μαρκάρουμε ως τοπική
+                };
+                newLocalList.push(convertedTask);
+            }
+        }
+        
+        await saveToLocalStorage(newLocalList);
+        
+        if (goLocal && !isAlreadyLocal) {
+             Alert.alert("Offline Save", "Η εργασία μετατράπηκε σε τοπική μέχρι να βρείτε Wi-Fi.");
+        }
+
+    } else {
+        // --- ONLINE UPDATE (FIREBASE) ---
+        const updatedTasks = cloudTasks.map(t => t.id === taskId ? { ...t, status, value: val } : t);
+        updateDoc(doc(db, "projects", projectId), { tasks: updatedTasks }).catch(e => console.log(e));
+    }
+  };
+
+  // --- CAMERA LOGIC ---
+  const launchCamera = async (taskId: string) => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) return Alert.alert("Προσοχή", "Δώστε άδεια κάμερας.");
+    
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.7, 
+    });
+    
+    if (!result.canceled && result.assets[0].uri) {
+      setProcessing(true);
+      try {
+        const manipResult = await ImageManipulator.manipulateAsync(
+            result.assets[0].uri,
+            [{ resize: { width: 1024 } }], 
+            { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG }
+        );
+
+        const permanentUri = await saveImageToDevice(manipResult.uri);
+        
+        await updateTaskValue(taskId, permanentUri, 'completed');
+        
+        setProcessing(false); 
+      } catch (error: any) {
+          setProcessing(false);
+          console.log(error);
+          Alert.alert("Σφάλμα", "Η φωτογραφία δεν αποθηκεύτηκε.");
+      } 
+    }
   };
 
   const handleDeletePhoto = () => {
       if (!selectedTask) return;
-      Alert.alert("Διαγραφή Φωτογραφίας", "Η εργασία θα γίνει ξανά εκκρεμής.", [
+      Alert.alert("Διαγραφή Φωτογραφίας", "Η φωτογραφία θα διαγραφεί.", [
           { text: "Άκυρο", style: "cancel" },
           { text: "Διαγραφή", style: "destructive", onPress: async () => {
+              const taskId = selectedTask.id;
               setSelectedTask(null);
-              await updateTaskValue(selectedTask.id, null, 'pending', false); 
+              await updateTaskValue(taskId, null, 'pending'); 
           }}
       ]);
   };
@@ -133,89 +247,24 @@ export default function ProjectDetailsScreen() {
       setSelectedTask(null);
       setTimeout(() => launchCamera(taskId), 500);
   };
-
+  
   const handleDeleteTaskCompletely = (task: Task) => {
-    Alert.alert("Διαγραφή Εργασίας", `Διαγραφή "${task.title}";`, [
+    Alert.alert("Διαγραφή", `Διαγραφή "${task.title}";`, [
         { text: "Άκυρο", style: "cancel" },
         { text: "Διαγραφή", style: "destructive", onPress: async () => {
-            try {
-                await updateDoc(doc(db, "projects", projectId), {
-                    tasks: arrayRemove(task)
-                });
-            } catch (error: any) { Alert.alert("Σφάλμα", error.message); }
+            if (task.isLocal) {
+                const newLocal = localTasks.filter(t => t.id !== task.id);
+                await saveToLocalStorage(newLocal);
+            } else {
+                const goLocal = await shouldSaveLocally();
+                if (!goLocal) {
+                    await updateDoc(doc(db, "projects", projectId), { tasks: arrayRemove(task) });
+                } else {
+                    Alert.alert("Αδύνατο", "Χρειάζεστε Wi-Fi για να διαγράψετε Cloud εργασίες.");
+                }
+            }
         }}
     ]);
-  };
-
-  // --- CAMERA LOGIC ---
-  const launchCamera = async (taskId: string) => {
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) return Alert.alert("Προσοχή", "Δώστε άδεια κάμερας.");
-    
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.8, 
-      base64: true, 
-    });
-    
-    if (!result.canceled && result.assets[0].base64) {
-      setProcessing(true);
-
-      try {
-        const manipResult = await ImageManipulator.manipulateAsync(
-            result.assets[0].uri,
-            [{ resize: { width: 1024 } }], 
-            { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
-        );
-        const imageBase64 = `data:image/jpeg;base64,${manipResult.base64}`;
-
-        // 1. ΤΡΑΒΑΜΕ ΤΟΝ ΔΙΑΚΟΠΤΗ
-        const isLocalMode = await checkAndLockNetwork();
-
-        // 2. ΑΠΟΘΗΚΕΥΣΗ
-        const savePromise = updateTaskValue(taskId, imageBase64, 'completed', isLocalMode);
-        const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 2000));
-
-        await Promise.race([savePromise, timeoutPromise]);
-
-        setProcessing(false); 
-
-        if (isLocalMode) {
-            setTimeout(() => {
-                Alert.alert("Data Saver", "Η φωτογραφία κρατήθηκε τοπικά. Θα σταλεί με Sync ή WiFi.");
-            }, 500);
-        }
-
-      } catch (error: any) {
-          setProcessing(false);
-          console.log("Camera Error:", error);
-          Alert.alert("Σφάλμα", "Η φωτογραφία δεν αποθηκεύτηκε.");
-      } 
-    }
-  };
-
-  const updateTaskValue = async (taskId: string, val: string | null, status: 'completed' | 'pending' = 'completed', isLocal: boolean = false) => {
-    const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, status, value: val, isLocal } : t);
-    updateDoc(doc(db, "projects", projectId), { tasks: updatedTasks })
-      .catch(e => console.log("Update Error (Background):", e));
-  };
-
-  const handleAddTask = async () => {
-    if (!newTaskTitle.trim()) return Alert.alert("Προσοχή", "Γράψτε έναν τίτλο.");
-    
-    const isLocalMode = await checkAndLockNetwork();
-
-    const newTask: Task = { id: Date.now().toString(), title: newTaskTitle, type: newTaskType, status: 'pending', value: null, isLocal: isLocalMode };
-    
-    try {
-      await updateDoc(doc(db, "projects", projectId), { tasks: arrayUnion(newTask) });
-      setNewTaskTitle('');
-      setCreateModalVisible(false);
-      
-      if (isLocalMode) {
-         Alert.alert("Data Saver", "Η εργασία αποθηκεύτηκε τοπικά.");
-      }
-    } catch (error: any) { Alert.alert("Σφάλμα", error.message); }
   };
 
   const handleTaskPress = (task: Task) => {
@@ -226,25 +275,32 @@ export default function ProjectDetailsScreen() {
             launchCamera(task.id);
         }
     } else {
-      setCurrentTaskId(task.id); setCurrentTaskType(task.type); setInputValue(task.value || ''); setInputModalVisible(true);
+      setCurrentTaskId(task.id); 
+      setCurrentTaskType(task.type); 
+      setInputValue(task.value || ''); 
+      setInputModalVisible(true);
     }
   };
 
   const saveInput = async () => {
     if (inputValue && currentTaskId) {
-        const isLocalMode = await checkAndLockNetwork();
-
-        await updateTaskValue(currentTaskId, inputValue, 'completed', isLocalMode);
+        await updateTaskValue(currentTaskId, inputValue, 'completed');
         setInputModalVisible(false);
-
-        if (isLocalMode) {
-            Alert.alert("Data Saver", "Η μέτρηση αποθηκεύτηκε τοπικά.");
-        }
     }
   };
 
-  const totalTasks = tasks.length;
-  const completedTasks = tasks.filter(t => t.status === 'completed').length;
+  const handleShare = async () => {
+      if (!selectedTask?.value) return;
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (!isAvailable) return;
+      try {
+        await Sharing.shareAsync(selectedTask.value); 
+      } catch (error: any) {}
+  };
+
+  // --- RENDER ---
+  const totalTasks = combinedTasks.length;
+  const completedTasks = combinedTasks.filter(t => t.status === 'completed').length;
   const progressPercent = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
 
   if (loading) return <SafeAreaView style={styles.center}><ActivityIndicator size="large" color="#2563eb"/></SafeAreaView>;
@@ -255,7 +311,7 @@ export default function ProjectDetailsScreen() {
         <View style={styles.loadingOverlay}>
             <View style={styles.loadingBox}>
                 <ActivityIndicator size="large" color="#2563eb" />
-                <Text style={styles.loadingText}>Επεξεργασία...</Text>
+                <Text style={styles.loadingText}>Αποθήκευση...</Text>
             </View>
         </View>
       )}
@@ -276,11 +332,11 @@ export default function ProjectDetailsScreen() {
       )}
 
       <FlatList 
-        data={tasks}
+        data={combinedTasks}
         keyExtractor={item => item.id}
         contentContainerStyle={styles.content}
         renderItem={({ item }) => (
-          <View style={styles.taskCard}>
+          <View style={[styles.taskCard, item.isLocal && { borderColor: '#f97316', borderWidth: 1 }]}>
             <TouchableOpacity 
               style={{flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}} 
               onPress={() => handleTaskPress(item)}
@@ -294,10 +350,10 @@ export default function ProjectDetailsScreen() {
                   <View style={{flex: 1}}>
                     <Text style={[styles.taskTitle, item.status === 'completed' && {color:'#64748b'}]} numberOfLines={2}>{item.title}</Text>
                     {item.isLocal && (
-                        <View style={{flexDirection:'row', alignItems:'center', marginTop: 2}}>
-                            <Ionicons name="cloud-offline" size={12} color="#f59e0b" />
-                            <Text style={{fontSize: 10, color: '#f59e0b', marginLeft: 4}}>
-                                {item.status === 'completed' ? 'Αναμονή Sync' : 'Τοπική Εργασία'}
+                        <View style={{flexDirection:'row', alignItems:'center', marginTop: 4}}>
+                            <Ionicons name="cloud-offline" size={12} color="#f97316" />
+                            <Text style={{fontSize: 10, color: '#f97316', marginLeft: 4, fontWeight:'bold'}}>
+                                Αποθηκευμένο στο κινητό
                             </Text>
                         </View>
                     )}
@@ -311,29 +367,24 @@ export default function ProjectDetailsScreen() {
         )}
       />
 
-      {/* --- FAB --- */}
       <TouchableOpacity style={styles.fab} onPress={() => setCreateModalVisible(true)}><Ionicons name="add" size={32} color="white" /></TouchableOpacity>
 
-      {/* --- FULL SCREEN MODAL --- */}
+      {/* --- Modals --- */}
       <Modal visible={!!selectedTask} transparent={true} onRequestClose={() => setSelectedTask(null)}>
         <View style={styles.modalBackground}>
             {selectedTask?.value && <Image source={{ uri: selectedTask.value }} style={styles.fullImage} resizeMode="contain" />}
-            
             <TouchableOpacity style={styles.closeModal} onPress={() => setSelectedTask(null)}>
                 <Ionicons name="close-circle" size={40} color="white" />
             </TouchableOpacity>
-            
             <View style={styles.toolBar}>
                 <TouchableOpacity style={styles.toolBtn} onPress={handleDeletePhoto}>
                     <Ionicons name="trash-outline" size={28} color="#ef4444" />
                     <Text style={[styles.toolText, {color:'#ef4444'}]}>Διαγραφή</Text>
                 </TouchableOpacity>
-
                 <TouchableOpacity style={styles.toolBtn} onPress={handleShare}>
                     <Ionicons name="share-outline" size={28} color="white" />
                     <Text style={styles.toolText}>Κοινοποίηση</Text>
                 </TouchableOpacity>
-
                 <TouchableOpacity style={styles.toolBtn} onPress={handleRetakePhoto}>
                     <Ionicons name="camera-outline" size={28} color="#3b82f6" />
                     <Text style={[styles.toolText, {color:'#3b82f6'}]}>Νέα Λήψη</Text>
@@ -342,7 +393,6 @@ export default function ProjectDetailsScreen() {
         </View>
       </Modal>
 
-      {/* CREATE TASK MODAL */}
       <Modal visible={createModalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
