@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardTypeOptions, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 interface InputModalProps {
   visible: boolean;
@@ -11,9 +11,20 @@ interface InputModalProps {
   onChangeText: (text: string) => void;
   placeholder?: string;
   isMultiline?: boolean;
+  keyboardType?: KeyboardTypeOptions; // <--- ΤΟ ΝΕΟ ΠΕΔΙΟ
 }
 
-export default function InputModal({ visible, onClose, onSave, title, value, onChangeText, placeholder, isMultiline }: InputModalProps) {
+export default function InputModal({ 
+  visible, 
+  onClose, 
+  onSave, 
+  title, 
+  value, 
+  onChangeText, 
+  placeholder, 
+  isMultiline,
+  keyboardType = 'default' // <--- Default τιμή αν δεν οριστεί
+}: InputModalProps) {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
@@ -32,6 +43,7 @@ export default function InputModal({ visible, onClose, onSave, title, value, onC
             onChangeText={onChangeText}
             multiline={isMultiline}
             autoFocus
+            keyboardType={keyboardType} // <--- ΤΟ ΣΥΝΔΕΣΑΜΕ ΕΔΩ
           />
 
           <View style={styles.footer}>

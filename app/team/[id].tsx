@@ -1,5 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
+import * as Network from 'expo-network'; // <--- ΓΙΑ ΕΛΕΓΧΟ ΙΝΤΕΡΝΕΤ
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Modal, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -42,10 +44,32 @@ export default function TeamProjectsScreen() {
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const [moveModalVisible, setMoveModalVisible] = useState(false);
 
-  // 1. ΦΟΡΤΩΣΗ ΔΕΔΟΜΕΝΩΝ (OFFLINE READY)
+  // CACHE KEY
+  const CACHE_KEY = `cached_team_${teamId}`;
+
+  // --- 1. ФΟΡΤΩΣΗ (CACHE FIRST) ---
   useEffect(() => {
     if (!teamId) return;
 
+    // A. Φόρτωση από Cache (για να βλέπεις offline)
+    const loadCache = async () => {
+        try {
+            const cached = await AsyncStorage.getItem(CACHE_KEY);
+            if (cached) {
+                const data = JSON.parse(cached);
+                setTeamName(data.name);
+                setTeamContact(data.contactEmail || '');
+                setTeamLogo(data.logo || null);
+                setGroups(data.groups || []);
+                if (data.myRole) setMyRole(data.myRole);
+                if (data.users) setUsers(data.users);
+                setLoading(false);
+            }
+        } catch (e) {}
+    };
+    loadCache();
+
+    // B. Realtime Listener (Μόνο αν έχει ίντερνετ θα ενημερώσει)
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
         if (user) {
             setCurrentUserId(user.uid);
@@ -60,18 +84,21 @@ export default function TeamProjectsScreen() {
                 setTeamLogo(data.logo || null);
                 setGroups(data.groups || []);
 
+                let role = 'User';
                 if (data.roles && data.roles[user.uid]) {
-                  setMyRole(data.roles[user.uid] as Role);
+                  role = data.roles[user.uid] as Role;
+                  setMyRole(role as Role);
                 }
 
+                // Φόρτωση Χρηστών
+                let loadedUsers: User[] = [];
                 if (data.memberIds && data.memberIds.length > 0) {
-                    const loadedUsers: User[] = [];
                     for (const uid of data.memberIds) {
-                        let userData = { fullname: 'Μέλος (Offline)', email: '...' };
+                        let userData = { fullname: 'Μέλος', email: '...' };
                         try {
                             const userDoc = await getDoc(doc(db, "users", uid));
                             if (userDoc.exists()) { userData = userDoc.data() as any; }
-                        } catch (e) { console.log(`User ${uid} not found locally.`); }
+                        } catch (e) {}
 
                         loadedUsers.push({
                             id: uid,
@@ -82,13 +109,22 @@ export default function TeamProjectsScreen() {
                     }
                     setUsers(loadedUsers);
                 }
+
+                // Αποθήκευση Cache για την επόμενη φορά
+                const cacheData = {
+                    name: data.name,
+                    contactEmail: data.contactEmail,
+                    logo: data.logo,
+                    groups: data.groups,
+                    myRole: role,
+                    users: loadedUsers
+                };
+                AsyncStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
+                
                 setLoading(false);
-              } else {
-                Alert.alert("Σφάλμα", "Η ομάδα δεν βρέθηκε.");
-                router.back();
               }
             }, (error) => {
-                console.log("Team Snapshot Error:", error);
+                console.log("Team Snapshot Error (Offline is OK):", error);
                 setLoading(false);
             });
 
@@ -101,14 +137,34 @@ export default function TeamProjectsScreen() {
     return () => unsubscribeAuth();
   }, [teamId]);
 
+  // --- HELPER: CHECK ONLINE ---
+  const checkOnline = async () => {
+      const net = await Network.getNetworkStateAsync();
+      if (!net.isConnected || !net.isInternetReachable) {
+          Alert.alert("Offline", "Δεν έχετε ίντερνετ. Αυτή η ενέργεια δεν είναι διαθέσιμη.");
+          return false;
+      }
+      return true;
+  };
+
   // --- ACTIONS ---
 
   const updateTeamData = async (field: string, value: any) => {
+    const isOnline = await checkOnline();
+    if (!isOnline) return;
+
     try { await updateDoc(doc(db, "teams", teamId), { [field]: value }); } 
     catch (err: any) { Alert.alert("Σφάλμα", err.message); }
   };
 
   const handleSaveInput = async () => {
+    // 1. Έλεγχος Ίντερνετ ΠΡΙΝ κάνουμε οτιδήποτε
+    const isOnline = await checkOnline();
+    if (!isOnline) {
+        setInputVisible(false); // Κλείνουμε το modal
+        return;
+    }
+
     if (!tempValue.trim()) return;
     
     try {
@@ -124,14 +180,18 @@ export default function TeamProjectsScreen() {
                 teamId: teamId 
             };
             const updatedGroups = groups.map(g => g.id === activeGroupId ? { ...g, projects: [...g.projects, newProject] } : g);
+            
+            // Online Update
             await updateTeamData('groups', updatedGroups);
             await setDoc(doc(db, "projects", newProjectId), { ...newProject, tasks: [], createdAt: serverTimestamp() });
 
         } else if (inputMode === 'newGroup') {
             const newGroup: Group = { id: Date.now().toString(), title: tempValue, projects: [] };
             await updateTeamData('groups', [...groups, newGroup]);
+
         } else if (inputMode === 'teamName') {
             await updateTeamData('name', tempValue);
+
         } else if (inputMode === 'teamContact') {
             await updateTeamData('contactEmail', tempValue);
         }
@@ -142,6 +202,9 @@ export default function TeamProjectsScreen() {
   };
 
   const handleDeleteProject = async () => {
+    const isOnline = await checkOnline();
+    if (!isOnline) return;
+
     if (!selectedProject) return;
     const { groupId, project } = selectedProject;
     
@@ -157,6 +220,9 @@ export default function TeamProjectsScreen() {
   };
 
   const changeUserRole = async (targetUser: User, action: 'promote' | 'demote' | 'kick') => {
+    const isOnline = await checkOnline();
+    if (!isOnline) return;
+
     if (myRole === 'Supervisor' && targetUser.role !== 'User') return Alert.alert("Απαγορεύεται", "Μπορείτε να διαχειριστείτε μόνο απλούς χρήστες.");
     if (targetUser.role === 'Founder') return Alert.alert("Απαγορεύεται", "Δεν πειράζουμε τον Ιδρυτή.");
 
@@ -179,6 +245,9 @@ export default function TeamProjectsScreen() {
   };
   
   const toggleProjectRole = async (userId: string, type: 'supervisor' | 'member') => {
+    const isOnline = await checkOnline();
+    if (!isOnline) return;
+
     if (!selectedProject) return;
     const { groupId, project } = selectedProject;
     let updatedProject = { ...project };
@@ -193,17 +262,24 @@ export default function TeamProjectsScreen() {
             : updatedProject.members.push(userId);
     }
     const updatedGroups = groups.map(g => g.id === groupId ? { ...g, projects: g.projects.map(p => p.id === project.id ? updatedProject : p) } : g);
+    
     await updateTeamData('groups', updatedGroups);
     try { await updateDoc(doc(db, "projects", project.id), { supervisors: updatedProject.supervisors, members: updatedProject.members }); } catch(e) {}
     setSelectedProject({ groupId, project: updatedProject });
   };
 
   const pickLogo = async () => {
+    const isOnline = await checkOnline();
+    if (!isOnline) return;
+
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.5 });
     if (!result.canceled) await updateTeamData('logo', result.assets[0].uri);
   };
 
-  const openInput = (mode: typeof inputMode, groupId?: string) => {
+  const openInput = async (mode: typeof inputMode, groupId?: string) => {
+    const isOnline = await checkOnline();
+    if (!isOnline) return;
+
     setInputMode(mode);
     setTempValue('');
     if (groupId) setActiveGroupId(groupId);
@@ -211,7 +287,10 @@ export default function TeamProjectsScreen() {
     setInputVisible(true);
   };
 
-  const handleInvite = () => {
+  const handleInvite = async () => {
+      const isOnline = await checkOnline();
+      if (!isOnline) return;
+
       setMenuVisible(false); 
       router.push({ pathname: '/onboarding/invite', params: { teamId: teamId, teamName: teamName } });
   };
@@ -220,6 +299,9 @@ export default function TeamProjectsScreen() {
     Alert.alert("Διαγραφή Ομάδας", "ΠΡΟΣΟΧΗ: Θα διαγραφούν τα πάντα.", [
         { text: "Ακύρωση" },
         { text: "ΔΙΑΓΡΑΦΗ", style: 'destructive', onPress: async () => {
+            const isOnline = await checkOnline();
+            if (!isOnline) return;
+
             await deleteDoc(doc(db, "teams", teamId));
             router.replace('/dashboard');
         }}
@@ -227,6 +309,9 @@ export default function TeamProjectsScreen() {
   };
 
   const handleDeleteGroup = async (groupId: string, projectCount: number) => {
+    const isOnline = await checkOnline();
+    if (!isOnline) return;
+
     if (projectCount > 0) return Alert.alert("Αδύνατη Διαγραφή", "Το Group δεν είναι άδειο.");
     Alert.alert("Διαγραφή Group", "Είστε σίγουροι;", [{ text: "Όχι" }, { text: "Ναι", style: 'destructive', onPress: async () => {
         const updatedGroups = groups.filter(g => g.id !== groupId);
@@ -235,6 +320,9 @@ export default function TeamProjectsScreen() {
   };
 
   const handleMoveProject = async (targetGroupId: string) => {
+    const isOnline = await checkOnline();
+    if (!isOnline) return;
+
     if (!selectedProject) return;
     const { groupId: oldGroupId, project } = selectedProject;
     const updatedGroups = groups.map(g => {

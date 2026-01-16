@@ -1,54 +1,63 @@
 import { Ionicons } from '@expo/vector-icons';
+import NetInfo from '@react-native-community/netinfo'; // <--- 1. ΕΛΕΓΧΟΣ ΙΝΤΕΡΝΕΤ
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, SafeAreaView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 // FIREBASE
-import { onAuthStateChanged } from 'firebase/auth'; // <--- ΤΟ ΚΛΕΙΔΙ ΓΙΑ ΤΟΝ ΕΛΕΓΧΟ
+import { onAuthStateChanged } from 'firebase/auth';
 import { arrayUnion, collection, deleteDoc, doc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import { auth, db } from '../firebaseConfig';
 
 export default function JoinTeamScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams(); 
+  
+  // Διαβάζουμε και το 'inviteCode' (από το deep link) και το 'code' (χειροκίνητο)
+  const { inviteCode, code: paramCode } = useLocalSearchParams(); 
   
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
-  const [checkingAuth, setCheckingAuth] = useState(true); // Νέο state για τον έλεγχο
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
-  // 1. ΑΥΣΤΗΡΟΣ ΕΛΕΓΧΟΣ ΣΥΝΔΕΣΗΣ
+  // 1. ΑΥΣΤΗΡΟΣ ΕΛΕΓΧΟΣ ΣΥΝΔΕΣΗΣ ΧΡΗΣΤΗ
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
         if (!user) {
-            // Αν δεν βρει χρήστη, τον διώχνει αμέσως
-            Alert.alert("Προσοχή", "Πρέπει να συνδεθείτε ή να κάνετε εγγραφή πρώτα.", [
+            Alert.alert("Προσοχή", "Πρέπει να συνδεθείτε πρώτα.", [
                 { text: "OK", onPress: () => router.replace('/') }
             ]);
         } else {
-            // Αν βρει χρήστη, σταματάει το loading
             setCheckingAuth(false);
         }
     });
-
     return () => unsubscribe();
   }, []);
 
-  // 2. Εισαγωγή κωδικού από το Link
+  // 2. ΑΥΤΟΜΑΤΗ ΣΥΜΠΛΗΡΩΣΗ ΑΠΟ LINK
   useEffect(() => {
-    if (params.code) {
-      setCode((params.code as string).toUpperCase());
+    if (inviteCode) {
+        setCode(String(inviteCode).toUpperCase());
+    } else if (paramCode) {
+        setCode(String(paramCode).toUpperCase());
     }
-  }, [params.code]);
+  }, [inviteCode, paramCode]);
 
   const handleJoin = async () => {
+    // --- ΕΛΕΓΧΟΣ ΙΝΤΕΡΝΕΤ ---
+    const netState = await NetInfo.fetch();
+    if (!netState.isConnected) {
+        return Alert.alert("Offline", "Απαιτείται σύνδεση στο ίντερνετ για να μπείτε σε ομάδα.");
+    }
+    // ------------------------
+
     if (!code || code.length < 6) return Alert.alert("Προσοχή", "Εισάγετε έγκυρο κωδικό.");
 
     const userId = auth.currentUser?.uid;
-    // Διπλός έλεγχος (αν και το onAuthStateChanged μας καλύπτει)
     if (!userId) return;
 
     setLoading(true);
     try {
+        // Αναζήτηση πρόσκλησης
         const q = query(collection(db, "invites"), where("code", "==", code.trim().toUpperCase()));
         const snapshot = await getDocs(q);
 
@@ -61,30 +70,31 @@ export default function JoinTeamScreen() {
         const inviteDoc = snapshot.docs[0];
         const inviteData = inviteDoc.data();
 
-        // Έλεγχος 2 λεπτών
+        // Έλεγχος Χρόνου (2 λεπτά)
         const now = new Date();
         const createdAt = inviteData.createdAt?.toDate(); 
 
         if (createdAt) {
             const diffInSeconds = (now.getTime() - createdAt.getTime()) / 1000;
-            if (diffInSeconds > 120) {
-                await deleteDoc(inviteDoc.ref);
+            if (diffInSeconds > 120) { // 120 δευτερόλεπτα = 2 λεπτά
+                await deleteDoc(inviteDoc.ref); // Διαγραφή ληγμένου
                 Alert.alert("Έληξε", "Ο κωδικός έληξε. Ζητήστε νέο.");
                 setLoading(false);
                 return;
             }
         }
 
-        // Εγγραφή
+        // ΕΓΓΡΑΦΗ ΣΤΗΝ ΟΜΑΔΑ
         const teamRef = doc(db, "teams", inviteData.teamId);
         await updateDoc(teamRef, {
             memberIds: arrayUnion(userId),
             [`roles.${userId}`]: inviteData.role 
         });
 
+        // Διαγραφή της πρόσκλησης αφού χρησιμοποιήθηκε
         await deleteDoc(inviteDoc.ref);
 
-        // Άμεση μετάβαση
+        Alert.alert("Επιτυχία", "Καλωσήρθατε στην ομάδα!");
         router.replace('/dashboard');
 
     } catch (error: any) {
@@ -93,12 +103,10 @@ export default function JoinTeamScreen() {
     }
   };
 
-  // Όσο ελέγχει αν είσαι συνδεδεμένος, δείχνει Loading
   if (checkingAuth) {
       return (
           <SafeAreaView style={[styles.container, {justifyContent:'center', alignItems:'center'}]}>
               <ActivityIndicator size="large" color="#2563eb" />
-              <Text style={{marginTop:10, color:'#666'}}>Έλεγχος ταυτότητας...</Text>
           </SafeAreaView>
       );
   }
@@ -106,25 +114,29 @@ export default function JoinTeamScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.replace('/')}><Ionicons name="close" size={28} color="#333" /></TouchableOpacity>
+        <TouchableOpacity onPress={() => router.back()}><Ionicons name="close" size={28} color="#333" /></TouchableOpacity>
         <Text style={styles.headerTitle}>Είσοδος με Κωδικό</Text>
       </View>
 
       <View style={styles.content}>
         <View style={styles.iconBox}>
-            <Ionicons name="key-outline" size={50} color="#2563eb" />
+            <Ionicons name="enter-outline" size={50} color="#2563eb" />
         </View>
+        
         <Text style={styles.label}>Εισάγετε τον 6ψήφιο κωδικό:</Text>
+        
         <TextInput
             style={styles.input}
             value={code}
             onChangeText={(t) => setCode(t.toUpperCase())}
-            placeholder="A7X9Z2"
+            placeholder="XXXXXX"
             maxLength={6}
             autoCapitalize="characters"
             autoCorrect={false}
         />
-        <Text style={styles.helperText}>Λήγει σε 2 λεπτά.</Text>
+        
+        <Text style={styles.helperText}>Ο κωδικός λήγει σε 2 λεπτά.</Text>
+        
         <TouchableOpacity style={styles.btn} onPress={handleJoin} disabled={loading}>
             {loading ? <ActivityIndicator color="white"/> : <Text style={styles.btnText}>Είσοδος</Text>}
         </TouchableOpacity>
@@ -137,11 +149,11 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'white' },
   header: { padding: 20, paddingTop: 50, flexDirection:'row', alignItems:'center', gap: 20 },
   headerTitle: { fontSize: 20, fontWeight:'bold' },
-  content: { padding: 30, paddingTop: 20, alignItems: 'center' },
+  content: { padding: 30, paddingTop: 40, alignItems: 'center' },
   iconBox: { width: 100, height: 100, backgroundColor: '#eff6ff', borderRadius: 50, justifyContent: 'center', alignItems: 'center', marginBottom: 30 },
   label: { fontWeight:'bold', marginBottom: 15, color:'#333', fontSize: 16 },
-  input: { borderWidth: 2, borderColor: '#2563eb', borderRadius: 12, padding: 15, fontSize: 28, textAlign:'center', letterSpacing: 5, fontWeight:'bold', color: '#333', width: '100%', marginBottom: 10 },
-  helperText: { textAlign:'center', color:'#ef4444', marginTop: 10, marginBottom: 30, fontSize: 14, fontWeight:'bold' },
+  input: { borderWidth: 2, borderColor: '#2563eb', borderRadius: 12, padding: 15, fontSize: 28, textAlign:'center', letterSpacing: 5, fontWeight:'bold', color: '#333', width: '100%', marginBottom: 10, backgroundColor: '#f9fafb' },
+  helperText: { textAlign:'center', color:'#ef4444', marginTop: 5, marginBottom: 30, fontSize: 13, fontWeight:'600' },
   btn: { backgroundColor: '#2563eb', padding: 18, borderRadius: 12, alignItems:'center', width: '100%', elevation: 3 },
   btnText: { color:'white', fontWeight:'bold', fontSize: 18 }
 });

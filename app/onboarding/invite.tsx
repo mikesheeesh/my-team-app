@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import NetInfo from '@react-native-community/netinfo'; // <--- 1. ΝΕΟ IMPORT
+import NetInfo from '@react-native-community/netinfo';
+import Constants from 'expo-constants'; // <--- ΓΙΑ ΝΑ ΞΕΧΩΡΙΖΕΙ EXPO GO / APK
 import * as Linking from 'expo-linking';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -17,10 +18,9 @@ export default function InviteMembersScreen() {
   const [loading, setLoading] = useState(false);
   const [myRole, setMyRole] = useState('User'); 
 
+  // Ανάκτηση του ρόλου μου για να δω τι δικαιώματα έχω
   useEffect(() => {
       const fetchMyRole = async () => {
-          // Μικρή προστασία: Αν δεν έχουμε ίντερνετ, δεν θα μπορέσει να φέρει τον ρόλο,
-          // αλλά δεν πειράζει γιατί ούτως ή άλλως δεν θα τον αφήσουμε να στείλει invite.
           const user = auth.currentUser;
           if (user && teamId) {
               try {
@@ -28,25 +28,18 @@ export default function InviteMembersScreen() {
                 if (teamSnap.exists()) {
                     setMyRole(teamSnap.data().roles[user.uid] || 'User');
                 }
-              } catch(e) {
-                  console.log("Offline or error fetching role");
-              }
+              } catch(e) { console.log("Role fetch error"); }
           }
       };
       fetchMyRole();
   }, [teamId]);
 
   const handleShareInvite = async () => {
-    // --- 2. Ο ΠΟΡΤΙΕΡΗΣ (NETWORK CHECK) ---
+    // 1. ΕΛΕΓΧΟΣ ΙΝΤΕΡΝΕΤ
     const networkState = await NetInfo.fetch();
     if (!networkState.isConnected) {
-        Alert.alert(
-            "Δεν υπάρχει σύνδεση", 
-            "Για να στείλετε πρόσκληση πρέπει να είστε συνδεδεμένοι στο ίντερνετ."
-        );
-        return; 
+        return Alert.alert("Offline", "Χρειάζεστε ίντερνετ για να δημιουργήσετε πρόσκληση.");
     }
-    // --------------------------------------
 
     if (!teamId) return Alert.alert("Σφάλμα", "Λείπει το Team ID.");
     const user = auth.currentUser;
@@ -54,11 +47,12 @@ export default function InviteMembersScreen() {
 
     setLoading(true);
     try {
+        // 2. ΔΗΜΙΟΥΡΓΙΑ ΚΩΔΙΚΟΥ (6 γράμματα)
         const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; 
         let shortCode = '';
         for (let i = 0; i < 6; i++) shortCode += chars.charAt(Math.floor(Math.random() * chars.length));
         
-        // Απευθείας εγγραφή στη βάση
+        // 3. ΕΓΓΡΑΦΗ ΣΤΗ ΒΑΣΗ
         await addDoc(collection(db, "invites"), {
             code: shortCode, 
             teamId: teamId,
@@ -69,26 +63,37 @@ export default function InviteMembersScreen() {
             status: 'active'
         });
 
-        const deepLink = Linking.createURL('/join', {
+        // 4. ΔΗΜΙΟΥΡΓΙΑ ΕΞΥΠΝΟΥ LINK
+        // Αν τρέχεις Expo Go, θέλουμε exp://. Αν είναι APK, θέλουμε teamcamera://
+        const isExpoGo = Constants.appOwnership === 'expo';
+        const scheme = isExpoGo ? 'exp' : 'teamcamera';
+
+        const deepLink = Linking.createURL('join', {
+            scheme: scheme,
             queryParams: { inviteCode: shortCode },
         });
 
-        const downloadLink = "https://expo.dev/artifacts/eas/oLjY8ZFBfmc9UWMXcabkcG.apk"
-        
-        const message = `Γεια! Σε προσκαλώ στην ομάδα "${teamName}" στο TeamCamera.
+        console.log("Created Link:", deepLink); // Δες το στην κονσόλα
 
-Βήμα 1: Κατέβασε την εφαρμογή:
+        // ΣΗΜΑΝΤΙΚΟ: Βάλε εδώ το link του APK σου από το Expo Dashboard
+        const downloadLink = "https://expo.dev/artifacts/eas/....apk"; 
+        
+        const message = `👋 Πρόσκληση για την ομάδα "${teamName}"
+
+1️⃣ Κατέβασε το App (αν δεν το έχεις):
 ${downloadLink}
 
-Βήμα 2: Πάτα το λινκ για να μπεις:
+2️⃣ Πάτα για είσοδο:
 ${deepLink}
 
-Ή χρησιμοποίησε τον κωδικό: ${shortCode}
-(Ο κωδικός λήγει σε 2 λεπτά)`;
+🔑 Κωδικός: ${shortCode}
+(Λήγει σε 2 λεπτά)`;
         
+        // 5. ΚΟΙΝΟΠΟΙΗΣΗ
+        // Προσοχή: Στείλτο με Viber/WhatsApp/Messenger για να είναι μπλε το Link
         await Share.share({
             message: message,
-            title: `Πρόσκληση για ${teamName}`,
+            title: `TeamCamera: ${teamName}`,
         });
 
     } catch (error: any) {
@@ -98,9 +103,7 @@ ${deepLink}
     }
   };
 
-  const availableRoles = (myRole === 'Founder' || myRole === 'Admin') 
-      ? ['Admin', 'Supervisor', 'User'] 
-      : ['User'];
+  const availableRoles = (myRole === 'Founder' || myRole === 'Admin') ? ['Admin', 'Supervisor', 'User'] : ['User'];
 
   return (
     <SafeAreaView style={styles.container}>
@@ -116,7 +119,9 @@ ${deepLink}
         <View style={styles.infoBox}>
             <Ionicons name="information-circle" size={24} color="#2563eb" />
             <Text style={styles.infoText}>
-                Δημιουργήστε έναν σύνδεσμο και στείλτε τον. Αν ο χρήστης δεν έχει την εφαρμογή, θα του στείλουμε και το link λήψης.
+                Ο σύνδεσμος ανοίγει αυτόματα την εφαρμογή. 
+                {"\n"}- Στείλτε το μέσω Viber/WhatsApp/Messenger.
+                {"\n"}- Τα Email συχνά μπλοκάρουν αυτά τα links.
             </Text>
         </View>
 
@@ -124,11 +129,11 @@ ${deepLink}
             <Text style={styles.summaryTitle}>Ομάδα: {teamName}</Text>
             <View style={styles.timerTag}>
                 <Ionicons name="timer-outline" size={14} color="#b45309" />
-                <Text style={styles.timerText}>Ο κωδικός λήγει σε 2 λεπτά</Text>
+                <Text style={styles.timerText}>Λήξη σε 2 λεπτά</Text>
             </View>
         </View>
 
-        <Text style={styles.sectionTitle}>Ρόλος Νέου Μέλους</Text>
+        <Text style={styles.sectionTitle}>Ρόλος:</Text>
         <View style={styles.rolesContainer}>
         {availableRoles.map((r) => (
             <TouchableOpacity key={r} style={[styles.roleBtn, role === r && styles.roleBtnActive]} onPress={() => setRole(r)}>
@@ -141,7 +146,7 @@ ${deepLink}
           {loading ? <ActivityIndicator color="white"/> : (
              <>
                 <Ionicons name="share-social-outline" size={24} color="white" style={{marginRight: 10}} />
-                <Text style={styles.actionButtonText}>Δημιουργία & Κοινοποίηση</Text>
+                <Text style={styles.actionButtonText}>Κοινοποίηση</Text>
              </>
           )}
         </TouchableOpacity>

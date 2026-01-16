@@ -1,7 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Network from 'expo-network';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 // FIREBASE
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -10,45 +12,67 @@ import { auth, db } from '../firebaseConfig';
 
 import InputModal from './components/InputModal';
 
+const PROFILE_CACHE_KEY = 'user_profile_data_cache';
+
 export default function ProfileScreen() {
   const router = useRouter();
   
   const [loading, setLoading] = useState(true);
   const [userData, setUserData] = useState<any>(null);
+  const [isOffline, setIsOffline] = useState(false);
   
   // Edit States
   const [modalVisible, setModalVisible] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [editField, setEditField] = useState<'fullname' | 'phone'>('fullname');
 
-  // --- 1. OFFLINE DATA FETCHING ---
+  // 1. INITIAL LOAD (CACHE FIRST)
   useEffect(() => {
-    // Βήμα 1: Περιμένουμε το Auth να διαβάσει από τη μνήμη
+      const initLoad = async () => {
+          try {
+              // Φόρτωση από Cache για άμεση εμφάνιση
+              const cached = await AsyncStorage.getItem(PROFILE_CACHE_KEY);
+              if (cached) {
+                  setUserData(JSON.parse(cached));
+              }
+
+              const net = await Network.getNetworkStateAsync();
+              if (!net.isConnected || !net.isInternetReachable) {
+                  setIsOffline(true);
+              }
+          } catch (e) { console.log(e); }
+          setLoading(false);
+      };
+      initLoad();
+  }, []);
+
+  // 2. LISTENER ΓΙΑ REALTIME ΑΛΛΑΓΕΣ
+  useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (user) {
         const userRef = doc(db, "users", user.uid);
-
-        // Βήμα 2: Ακούμε τις αλλαγές (και από Cache)
-        const unsubscribeSnapshot = onSnapshot(userRef, { includeMetadataChanges: true }, (docSnap) => {
+        const unsubscribeSnapshot = onSnapshot(userRef, (docSnap) => {
           if (docSnap.exists()) {
-            setUserData(docSnap.data());
-          } else {
-            // Αν δεν υπάρχει έγγραφο user (σπάνιο), δείχνουμε τα βασικά από το Auth
-            setUserData({ fullname: user.displayName || 'Χρήστης', email: user.email });
+            const data = docSnap.data();
+            const fullData = { ...data, email: user.email };
+            
+            // Ενημέρωση State
+            setUserData(fullData);
+            
+            // Ενημέρωση Cache (ΠΑΝΤΑ)
+            AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(fullData));
           }
           setLoading(false);
         }, (error) => {
-            console.log("Profile Fetch Error:", error);
+            console.log("Offline mode, keeping cached data.");
+            setIsOffline(true);
             setLoading(false);
         });
-
         return () => unsubscribeSnapshot();
       } else {
-        // Αν δεν βρεθεί χρήστης, τον στέλνουμε στο login
-        router.replace('/login');
+        router.replace('/');
       }
     });
-
     return () => unsubscribeAuth();
   }, []);
 
@@ -57,35 +81,54 @@ export default function ProfileScreen() {
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      router.replace('/login');
+      await AsyncStorage.removeItem(PROFILE_CACHE_KEY); // Καθαρισμός cache
+      router.replace('/');
     } catch (error: any) {
       Alert.alert("Σφάλμα", error.message);
     }
   };
 
-  const openEdit = (field: 'fullname' | 'phone', currentValue: string) => {
+  const openEdit = async (field: 'fullname' | 'phone', currentValue: string) => {
+      const net = await Network.getNetworkStateAsync();
+      if (!net.isConnected) {
+          Alert.alert("Offline", "Δεν μπορείτε να κάνετε αλλαγές χωρίς ίντερνετ.");
+          return;
+      }
       setEditField(field);
       setEditValue(currentValue || '');
       setModalVisible(true);
   };
 
   const saveEdit = async () => {
-      if (!auth.currentUser) return;
+      if (!auth.currentUser || !userData) return;
       
+      const net = await Network.getNetworkStateAsync();
+      if (!net.isConnected) return Alert.alert("Σφάλμα", "Χάθηκε η σύνδεση.");
+
+      // 1. Ενημέρωση UI ΑΜΕΣΩΣ (Optimistic Update)
+      const updatedData = { ...userData, [editField]: editValue };
+      setUserData(updatedData);
+      setModalVisible(false);
+
+      // 2. Ενημέρωση Cache ΑΜΕΣΩΣ
+      await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(updatedData));
+
+      // 3. Ενημέρωση Firebase (Στο παρασκήνιο)
       try {
-          // Το updateDoc δουλεύει offline (μπαίνει σε ουρά)
           const userRef = doc(db, "users", auth.currentUser.uid);
           await updateDoc(userRef, { [editField]: editValue });
-          setModalVisible(false);
       } catch (error: any) {
-          Alert.alert("Σφάλμα", "Η αποθήκευση απέτυχε: " + error.message);
+          Alert.alert("Σφάλμα", "Η αποθήκευση στο cloud απέτυχε, αλλά κρατήθηκε τοπικά.");
+          // Αν θες, μπορείς να κάνεις revert εδώ, αλλά συνήθως δεν χρειάζεται
       }
   };
 
-  if (loading) return <SafeAreaView style={styles.center}><ActivityIndicator size="large" color="#2563eb"/></SafeAreaView>;
+  if (loading && !userData) return <SafeAreaView style={styles.center}><ActivityIndicator size="large" color="#2563eb"/></SafeAreaView>;
 
   return (
     <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+      
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color="#333" />
@@ -96,56 +139,75 @@ export default function ProfileScreen() {
 
       <ScrollView contentContainerStyle={styles.content}>
         
-        {/* AVATAR SECTION */}
+        {/* AVATAR */}
         <View style={styles.avatarSection}>
-            <View style={styles.avatarContainer}>
+            <View style={[styles.avatarContainer, isOffline && {backgroundColor: '#94a3b8'}]}>
                 <Text style={styles.avatarText}>
                     {userData?.fullname ? userData.fullname.charAt(0).toUpperCase() : 'U'}
                 </Text>
             </View>
-            <Text style={styles.nameText}>{userData?.fullname || 'Ανώνυμος'}</Text>
+            <Text style={styles.nameText}>{userData?.fullname || 'Χρήστης'}</Text>
             <Text style={styles.emailText}>{userData?.email}</Text>
+            
+            {isOffline && (
+                <View style={styles.offlineBadge}>
+                    <Ionicons name="cloud-offline" size={12} color="white" />
+                    <Text style={styles.offlineText}>Offline Mode</Text>
+                </View>
+            )}
         </View>
 
-        {/* DETAILS SECTION */}
+        {/* INFO FORM */}
         <View style={styles.section}>
-            <Text style={styles.sectionHeader}>Προσωπικά Στοιχεία</Text>
+            <Text style={styles.sectionHeader}>Στοιχεία</Text>
             
-            <TouchableOpacity style={styles.row} onPress={() => openEdit('fullname', userData?.fullname)}>
+            {/* ΟΝΟΜΑ */}
+            <TouchableOpacity 
+                style={styles.row} 
+                onPress={() => openEdit('fullname', userData?.fullname)}
+                disabled={isOffline}
+            >
                 <View style={styles.rowIcon}>
-                    <Ionicons name="person-outline" size={20} color="#666" />
+                    <Ionicons name="person-outline" size={20} color="#64748b" />
                 </View>
                 <View style={styles.rowData}>
                     <Text style={styles.label}>Ονοματεπώνυμο</Text>
                     <Text style={styles.value}>{userData?.fullname || '-'}</Text>
                 </View>
-                <Ionicons name="create-outline" size={20} color="#2563eb" />
+                {!isOffline && <Ionicons name="pencil" size={18} color="#2563eb" />}
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.row} onPress={() => openEdit('phone', userData?.phone)}>
+            {/* ΤΗΛΕΦΩΝΟ */}
+            <TouchableOpacity 
+                style={styles.row} 
+                onPress={() => openEdit('phone', userData?.phone)}
+                disabled={isOffline}
+            >
                 <View style={styles.rowIcon}>
-                    <Ionicons name="call-outline" size={20} color="#666" />
+                    <Ionicons name="call-outline" size={20} color="#64748b" />
                 </View>
                 <View style={styles.rowData}>
                     <Text style={styles.label}>Τηλέφωνο</Text>
-                    <Text style={styles.value}>{userData?.phone || 'Προσθέστε τηλέφωνο'}</Text>
+                    <Text style={[styles.value, !userData?.phone && {color: '#94a3b8', fontStyle: 'italic'}]}>
+                        {userData?.phone ? userData.phone : 'Πατήστε για προσθήκη'}
+                    </Text>
                 </View>
-                <Ionicons name="create-outline" size={20} color="#2563eb" />
+                {!isOffline && <Ionicons name="pencil" size={18} color="#2563eb" />}
             </TouchableOpacity>
 
+            {/* EMAIL (Read Only) */}
             <View style={styles.row}>
                 <View style={styles.rowIcon}>
-                    <Ionicons name="mail-outline" size={20} color="#666" />
+                    <Ionicons name="mail-outline" size={20} color="#64748b" />
                 </View>
                 <View style={styles.rowData}>
                     <Text style={styles.label}>Email</Text>
-                    <Text style={[styles.value, {color:'#999'}]}>{userData?.email}</Text>
+                    <Text style={[styles.value, {color:'#94a3b8'}]}>{userData?.email}</Text>
                 </View>
-                {/* Email cannot be edited easily */}
+                <Ionicons name="lock-closed-outline" size={18} color="#cbd5e1" />
             </View>
         </View>
 
-        {/* LOGOUT BUTTON */}
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
             <Ionicons name="log-out-outline" size={24} color="#ef4444" />
             <Text style={styles.logoutText}>Αποσύνδεση</Text>
@@ -160,31 +222,34 @@ export default function ProfileScreen() {
         title={editField === 'fullname' ? "Αλλαγή Ονόματος" : "Αλλαγή Τηλεφώνου"}
         value={editValue} 
         onChangeText={setEditValue} 
-        placeholder="Γράψτε εδώ..."
+        placeholder={editField === 'phone' ? "69..." : "Ονοματεπώνυμο"}
+        keyboardType={editField === 'phone' ? 'phone-pad' : 'default'}
       />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
+  container: { flex: 1, backgroundColor: '#f1f5f9' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, paddingTop: 50, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#eee' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, paddingTop: 50, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
   backButton: { padding: 5 },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e293b' },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#0f172a' },
   content: { padding: 20 },
-  avatarSection: { alignItems: 'center', marginBottom: 30 },
-  avatarContainer: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#2563eb', justifyContent: 'center', alignItems: 'center', marginBottom: 15, elevation: 5 },
-  avatarText: { fontSize: 40, color: 'white', fontWeight: 'bold' },
-  nameText: { fontSize: 22, fontWeight: 'bold', color: '#1e293b' },
+  avatarSection: { alignItems: 'center', marginBottom: 25 },
+  avatarContainer: { width: 90, height: 90, borderRadius: 45, backgroundColor: '#2563eb', justifyContent: 'center', alignItems: 'center', marginBottom: 10, elevation: 5, shadowColor:'#2563eb', shadowOpacity:0.3, shadowRadius:5 },
+  avatarText: { fontSize: 36, color: 'white', fontWeight: 'bold' },
+  nameText: { fontSize: 20, fontWeight: 'bold', color: '#1e293b' },
   emailText: { fontSize: 14, color: '#64748b' },
-  section: { backgroundColor: 'white', borderRadius: 16, padding: 5, elevation: 2, marginBottom: 20 },
-  sectionHeader: { fontSize: 16, fontWeight: 'bold', color: '#334155', margin: 15, marginBottom: 5 },
-  row: { flexDirection: 'row', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  rowIcon: { width: 40, alignItems: 'center' },
+  offlineBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#64748b', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginTop: 8 },
+  offlineText: { color: 'white', fontSize: 10, fontWeight: 'bold', marginLeft: 4 },
+  section: { backgroundColor: 'white', borderRadius: 16, paddingVertical: 10, elevation: 2, marginBottom: 20 },
+  sectionHeader: { fontSize: 14, fontWeight: 'bold', color: '#94a3b8', marginHorizontal: 20, marginTop: 10, marginBottom: 5, textTransform: 'uppercase' },
+  row: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  rowIcon: { width: 30, alignItems: 'center', marginRight: 10 },
   rowData: { flex: 1 },
-  label: { fontSize: 12, color: '#64748b' },
+  label: { fontSize: 12, color: '#64748b', marginBottom: 2 },
   value: { fontSize: 16, color: '#1e293b', fontWeight: '500' },
-  logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 15, backgroundColor: '#fee2e2', borderRadius: 12 },
+  logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 15, backgroundColor: '#fee2e2', borderRadius: 12, marginTop: 10 },
   logoutText: { color: '#ef4444', fontWeight: 'bold', fontSize: 16, marginLeft: 10 },
 });

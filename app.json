@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "TeamCamera",
-    "slug": "team-camera",
+    "slug": "team-camera-v2",
     "version": "1.0.0",
     "sdkVersion": "54.0.0",
     "orientation": "portrait",
@@ -62,7 +62,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "d12b8a2d-9f76-4d21-8cc1-058fc343c37e"
+        "projectId": "f02b16d8-a834-4199-9fe1-7bdbb881a96a"
       }
     }
   }

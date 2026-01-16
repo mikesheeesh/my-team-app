@@ -11,23 +11,31 @@ export default function LandingScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   
-  // 1. Έλεγχος Deep Link (Αν ανοίξει από Link, το κρατάμε ώστε να δουλεύει στο background)
+  // 1. ΕΛΕΓΧΟΣ DEEP LINK (Για να ανοίγει η πρόσκληση)
   const url = Linking.useURL(); 
+  
   useEffect(() => {
     if (url) {
-      const regex = /[?&]inviteCode=([^&#]+)/;
+      // Ψάχνουμε για inviteCode ή code μέσα στο Link
+      // Καλύπτει και το teamcamera://... και το exp://...
+      const regex = /[?&](inviteCode|code)=([^&#]+)/;
       const match = url.match(regex);
-      if (match && match[1]) {
-        // Αν βρει κωδικό, τον στέλνει στο Join (εκεί θα του ζητηθεί login αν δεν έχει κάνει)
-        setTimeout(() => router.push(`/join?code=${match[1]}`), 500);
+      
+      if (match && match[2]) {
+        // Αν βρει κωδικό, περιμένουμε λίγο να φορτώσει η εφαρμογή και πάμε στο Join
+        // Στέλνουμε inviteCode για να ταιριάζει με το join.tsx
+        setTimeout(() => {
+            router.push(`/join?inviteCode=${match[2]}`);
+        }, 500);
       }
     }
   }, [url]);
 
-  // 2. Έλεγχος αν είναι ήδη συνδεδεμένος
+  // 2. ΕΛΕΓΧΟΣ ΑΝ ΕΙΝΑΙ ΗΔΗ ΣΥΝΔΕΔΕΜΕΝΟΣ
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
+        // Αν βρούμε χρήστη, κάνουμε REPLACE για να μην μπορεί να πατήσει Back και να γυρίσει εδώ
         router.replace('/dashboard');
       } else {
         setLoading(false);
@@ -36,7 +44,14 @@ export default function LandingScreen() {
     return () => unsubscribe();
   }, []);
 
-  if (loading) return <View style={styles.center}><ActivityIndicator size="large" color="#2563eb"/></View>;
+  if (loading) {
+      return (
+        <View style={styles.center}>
+            <ActivityIndicator size="large" color="#2563eb"/>
+            <Text style={{marginTop: 10, color: '#666'}}>Φόρτωση...</Text>
+        </View>
+      );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -51,7 +66,7 @@ export default function LandingScreen() {
          <Text style={styles.tagline}>Οργάνωση έργων & φωτογραφιών</Text>
       </View>
 
-      {/* ΚΟΥΜΠΙ ΕΝΕΡΓΕΙΑΣ (ΜΟΝΟ ΕΝΑ ΠΛΕΟΝ) */}
+      {/* ΚΟΥΜΠΙ ΕΝΕΡΓΕΙΑΣ */}
       <View style={styles.content}>
         <TouchableOpacity style={styles.primaryButton} onPress={() => router.push('/login')}>
           <Text style={styles.primaryButtonText}>Σύνδεση / Εγγραφή</Text>
