@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import * as Network from 'expo-network';
@@ -7,7 +8,6 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Modal, SafeAreaView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-// Fix για UI
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Fix για Expo SDK 52+
 import * as FileSystem from 'expo-file-system/legacy';
@@ -37,7 +37,6 @@ export default function ProjectDetailsScreen() {
   const { id } = useLocalSearchParams(); 
   const projectId = id as string;
   
-  // 1. ΛΗΨΗ ΤΩΝ ΠΕΡΙΘΩΡΙΩΝ ΤΗΣ ΣΥΣΚΕΥΗΣ (Safe Area)
   const insets = useSafeAreaInsets(); 
 
   const PROJECT_CACHE_KEY = `cached_project_tasks_${projectId}`;
@@ -51,18 +50,22 @@ export default function ProjectDetailsScreen() {
   const [isSyncing, setIsSyncing] = useState(false); 
   const [projectName, setProjectName] = useState(''); 
   
+  // MODALS STATE
   const [inputModalVisible, setInputModalVisible] = useState(false);
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [galleryModalVisible, setGalleryModalVisible] = useState(false);
 
+  // CURRENT TASK STATE
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   const [currentTaskType, setCurrentTaskType] = useState<string>('measurement');
   const [inputValue, setInputValue] = useState('');
   
+  // NEW TASK CREATION STATE
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskDescription, setNewTaskDescription] = useState('');
   const [newTaskType, setNewTaskType] = useState<'photo' | 'measurement' | 'general'>('photo');
   
+  // GALLERY STATE
   const [activeTaskForGallery, setActiveTaskForGallery] = useState<Task | null>(null);
   const [selectedImageForView, setSelectedImageForView] = useState<string | null>(null);
 
@@ -116,7 +119,19 @@ export default function ProjectDetailsScreen() {
     return () => unsubscribeAuth();
   }, [projectId]);
 
-  // 3. MERGE LISTS
+  // 3. AUTO-SYNC LISTENER
+  useEffect(() => {
+    const unsubscribeNet = NetInfo.addEventListener(state => {
+        if (state.isConnected && state.type === 'wifi' && localTasks.length > 0 && !isSyncing) {
+            console.log("Auto-Sync Triggered via WiFi!");
+            performSync(localTasks);
+        }
+    });
+    return () => unsubscribeNet();
+  }, [localTasks, isSyncing]); 
+
+
+  // 4. MERGE LISTS
   useEffect(() => {
       const taskMap = new Map<string, Task>();
       cloudTasks.forEach(task => taskMap.set(task.id, task));
@@ -142,6 +157,8 @@ export default function ProjectDetailsScreen() {
 
   const performSync = async (tasksToUpload: Task[]) => {
       if (tasksToUpload.length === 0) return;
+      if (isSyncing) return;
+      
       setIsSyncing(true);
       
       try {
@@ -211,8 +228,8 @@ export default function ProjectDetailsScreen() {
           setActiveTaskForGallery(task);
       }
 
-      Network.getNetworkStateAsync().then(net => {
-          if (net.isConnected && net.type === Network.NetworkStateType.WIFI) {
+      NetInfo.fetch().then(state => {
+          if (state.isConnected && state.type === 'wifi') {
               performSync(newLocalList); 
           }
       });
@@ -278,6 +295,13 @@ export default function ProjectDetailsScreen() {
           setInputModalVisible(false); 
           await updateTaskValue(currentTaskId, inputValue, 'completed'); 
       } 
+  };
+
+  const handleClearValue = async () => {
+      if (currentTaskId) {
+          setInputModalVisible(false);
+          await updateTaskValue(currentTaskId, null, 'pending');
+      }
   };
 
   const handleShare = async (uri: string) => {
@@ -380,10 +404,11 @@ export default function ProjectDetailsScreen() {
         </View>
       )}
 
+      {/* HEADER */}
       <View style={styles.header}>
         <View style={{flexDirection:'row', alignItems:'center', flex:1}}>
             <TouchableOpacity onPress={() => router.back()} style={styles.backButton}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
-            <View style={styles.projectLogoPlaceholder}><Ionicons name="document-text" size={20} color="white" /></View>
+            <View style={styles.projectLogoPlaceholder}><Ionicons name="document-text" size={24} color="white" /></View>
             <View style={{marginLeft: 15, flex:1}}>
                 <Text style={styles.headerTitle} numberOfLines={1}>{projectName}</Text>
                 <Text style={styles.headerSubtitle}>{completedTasks}/{totalTasks} Ολοκληρώθηκαν</Text>
@@ -393,23 +418,24 @@ export default function ProjectDetailsScreen() {
              <View style={styles.syncingBadge}><ActivityIndicator size="small" color="#ea580c" /></View>
         ) : localTasks.length > 0 && (
              <TouchableOpacity style={styles.syncButtonHeader} onPress={handleProjectSync}>
-                 <Ionicons name="cloud-upload" size={24} color="#fff" />
+                 <Ionicons name="cloud-upload" size={20} color="#fff" />
                  <Text style={{color:'white', fontWeight:'bold', fontSize:12, marginLeft:5}}>Sync</Text>
              </TouchableOpacity>
         )}
       </View>
 
+      {/* PROGRESS BAR */}
       {totalTasks > 0 && (
         <View style={styles.progressSection}>
             <View style={styles.progressBarBg}><View style={[styles.progressBarFill, { width: `${progressPercent}%` }]} /></View>
         </View>
       )}
 
+      {/* TASKS LIST */}
       <FlatList 
         data={combinedTasks}
         keyExtractor={item => item.id}
-        // Προσθέτουμε padding στο τέλος ανάλογα με το safe area (insets.bottom) + λίγο extra
-        contentContainerStyle={[styles.content, { paddingBottom: 80 + insets.bottom }]}
+        contentContainerStyle={[styles.content, { paddingBottom: 100 + insets.bottom }]}
         renderItem={({ item }) => (
           <View style={[styles.taskCard, item.isLocal && { borderColor: '#f97316', borderWidth: 1, backgroundColor: '#fff7ed' }]}>
             <TouchableOpacity 
@@ -420,7 +446,7 @@ export default function ProjectDetailsScreen() {
             >
               <View style={{flexDirection:'row', alignItems:'center', flex:1}}>
                   <View style={[styles.iconBox, item.status === 'completed' ? styles.iconBoxCompleted : styles.iconBoxPending]}>
-                    <Ionicons name={item.type === 'photo' ? "camera" : item.type === 'measurement' ? "speedometer" : "document-text"} size={20} color={item.status === 'completed' ? "#059669" : "#2563eb"} />
+                    <Ionicons name={item.type === 'photo' ? "camera" : item.type === 'measurement' ? "construct" : "document-text"} size={22} color={item.status === 'completed' ? "#059669" : "#2563eb"} />
                   </View>
                   <View style={{flex: 1}}>
                     <Text style={[styles.taskTitle, item.status === 'completed' && {color:'#64748b'}]} numberOfLines={2}>{item.title}</Text>
@@ -453,7 +479,7 @@ export default function ProjectDetailsScreen() {
         )}
       />
 
-      {/* ΤΟ ΚΟΥΜΠΙ + ΑΝΕΒΑΙΝΕΙ ΑΥΤΟΜΑΤΑ ΠΑΝΩ ΑΠΟ ΤΗΝ ΜΠΑΡΑ */}
+      {/* FAB BUTTON */}
       <TouchableOpacity 
         style={[styles.fab, { bottom: 30 + insets.bottom }]} 
         onPress={() => setCreateModalVisible(true)}
@@ -498,7 +524,7 @@ export default function ProjectDetailsScreen() {
         <View style={styles.modalBackground}>
             {selectedImageForView && <Image source={{ uri: selectedImageForView }} style={styles.fullImage} resizeMode="contain" />}
             <TouchableOpacity style={styles.closeModal} onPress={() => setSelectedImageForView(null)}>
-                <Ionicons name="close-circle" size={40} color="white" />
+                <Ionicons name="close" size={30} color="white" />
             </TouchableOpacity>
             <View style={styles.toolBar}>
                 <TouchableOpacity style={styles.toolBtn} onPress={() => {
@@ -509,90 +535,173 @@ export default function ProjectDetailsScreen() {
                         ]);
                     }
                 }}>
-                    <Ionicons name="trash-outline" size={28} color="#ef4444" />
+                    <Ionicons name="trash-outline" size={24} color="#ef4444" />
                     <Text style={[styles.toolText, {color:'#ef4444'}]}>Διαγραφή</Text>
                 </TouchableOpacity>
 
-                {/* SHARE BUTTON */}
                 <TouchableOpacity style={styles.toolBtn} onPress={() => selectedImageForView && handleShare(selectedImageForView)}>
-                    <Ionicons name="share-outline" size={28} color="white" />
+                    <Ionicons name="share-outline" size={24} color="white" />
                     <Text style={styles.toolText}>Κοινοποίηση</Text>
                 </TouchableOpacity>
             </View>
         </View>
       </Modal>
 
-      {/* CREATE TASK MODAL */}
+      {/* CREATE TASK MODAL - NEW DESIGN */}
       <Modal visible={createModalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalHeader}>Νέα Ανάθεση</Text>
-            <TextInput style={styles.input} placeholder="Τίτλος..." autoFocus value={newTaskTitle} onChangeText={setNewTaskTitle} />
-            <TextInput style={[styles.input, {height: 80, textAlignVertical: 'top'}]} placeholder="Περιγραφή (προαιρετικό)..." value={newTaskDescription} onChangeText={setNewTaskDescription} multiline={true} numberOfLines={3}/>
-            <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom: 20}}>
-              {['photo', 'measurement', 'general'].map((t) => (
-                 <TouchableOpacity key={t} style={[styles.typeBtn, newTaskType === t && styles.typeBtnActive]} onPress={() => setNewTaskType(t as any)}>
-                    <Text style={[styles.typeBtnText, newTaskType === t && {color:'white'}]}>{t === 'photo' ? 'Φώτο' : t === 'measurement' ? 'Μέτρηση' : 'Κείμενο'}</Text>
-                 </TouchableOpacity>
-              ))}
+            
+            <View style={styles.modalHeaderRow}>
+               <Text style={styles.modalHeader}>Νέα Ανάθεση</Text>
+               <TouchableOpacity onPress={() => setCreateModalVisible(false)}>
+                 <Ionicons name="close" size={24} color="#999" />
+               </TouchableOpacity>
             </View>
-            <View style={{flexDirection:'row', justifyContent:'space-between'}}>
-              <TouchableOpacity style={[styles.btn, {backgroundColor:'#f3f4f6'}]} onPress={() => setCreateModalVisible(false)}><Text style={{color:'#666'}}>Ακύρωση</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.btn, {backgroundColor:'#2563eb'}]} onPress={handleAddTask}><Text style={{color:'white', fontWeight:'bold'}}>Προσθήκη</Text></TouchableOpacity>
+
+            <Text style={styles.label}>Τίτλος</Text>
+            <TextInput 
+                style={styles.input} 
+                placeholder="π.χ. Έλεγχος Κουζίνας" 
+                autoFocus 
+                value={newTaskTitle} 
+                onChangeText={setNewTaskTitle} 
+            />
+
+            <Text style={styles.label}>Περιγραφή</Text>
+            <TextInput 
+                style={[styles.input, {height: 60, textAlignVertical: 'top'}]} 
+                placeholder="Λεπτομέρειες..." 
+                value={newTaskDescription} 
+                onChangeText={setNewTaskDescription} 
+                multiline={true} 
+                numberOfLines={2}
+            />
+
+            <Text style={styles.label}>Τύπος Εργασίας</Text>
+            <View style={styles.optionsContainer}>
+                {/* 1. PHOTO OPTION */}
+                <TouchableOpacity 
+                    style={[styles.optionCard, newTaskType === 'photo' && styles.optionCardActive]} 
+                    onPress={() => setNewTaskType('photo')}
+                >
+                    <Ionicons name="camera" size={28} color={newTaskType === 'photo' ? 'white' : '#64748b'} />
+                    <Text style={[styles.optionText, newTaskType === 'photo' && {color:'white'}]}>Φωτογραφία</Text>
+                </TouchableOpacity>
+
+                {/* 2. MEASUREMENT OPTION */}
+                <TouchableOpacity 
+                    style={[styles.optionCard, newTaskType === 'measurement' && styles.optionCardActive]} 
+                    onPress={() => setNewTaskType('measurement')}
+                >
+                    <Ionicons name="construct" size={28} color={newTaskType === 'measurement' ? 'white' : '#64748b'} />
+                    <Text style={[styles.optionText, newTaskType === 'measurement' && {color:'white'}]}>Μέτρηση</Text>
+                </TouchableOpacity>
+
+                {/* 3. GENERAL TEXT OPTION */}
+                <TouchableOpacity 
+                    style={[styles.optionCard, newTaskType === 'general' && styles.optionCardActive]} 
+                    onPress={() => setNewTaskType('general')}
+                >
+                    <Ionicons name="document-text" size={28} color={newTaskType === 'general' ? 'white' : '#64748b'} />
+                    <Text style={[styles.optionText, newTaskType === 'general' && {color:'white'}]}>Κείμενο</Text>
+                </TouchableOpacity>
             </View>
+
+            <TouchableOpacity style={styles.mainButton} onPress={handleAddTask}>
+              <Text style={styles.mainButtonText}>ΔΗΜΙΟΥΡΓΙΑ</Text>
+            </TouchableOpacity>
+
           </View>
         </View>
       </Modal>
 
-      <InputModal visible={inputModalVisible} onClose={() => setInputModalVisible(false)} onSave={saveInput} title="Καταγραφή" value={inputValue} onChangeText={setInputValue} />
+      {/* INPUT MODAL ΜΕ CLEAR OPTION & KEYBOARD FIX */}
+      <InputModal 
+        visible={inputModalVisible} 
+        onClose={() => setInputModalVisible(false)} 
+        onSave={saveInput}
+        onClear={handleClearValue} 
+        title={currentTaskType === 'measurement' ? "Καταγραφή Μέτρησης" : "Σημείωση Κειμένου"} 
+        value={inputValue} 
+        onChangeText={setInputValue}
+        keyboardType="default" // <--- DEFAULT για όλα, ώστε να γράφεις 10x10, m, cm κλπ.
+        isMultiline={currentTaskType === 'general'}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f3f4f6', marginTop: 20 },
+  container: { flex: 1, backgroundColor: '#f8fafc', marginTop: 20 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingOverlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', zIndex: 9999 },
-  loadingBox: { backgroundColor: 'white', padding: 25, borderRadius: 15, alignItems: 'center', elevation: 10 },
-  loadingText: { marginTop: 15, fontWeight: 'bold', fontSize: 16, color: '#333' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, paddingTop: 30, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
-  syncButtonHeader: { flexDirection:'row', alignItems:'center', padding: 8, backgroundColor: '#ea580c', borderRadius: 20, paddingHorizontal: 12, elevation: 3 },
+  
+  // --- HEADER & LIST ---
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, paddingTop: 30, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  headerTitle: { fontSize: 18, fontWeight: '800', color: '#0f172a' },
+  headerSubtitle: { color: '#64748b', fontSize: 12, fontWeight: '600' },
+  backButton: { marginRight: 15, padding: 5 },
+  projectLogoPlaceholder: { width: 42, height: 42, borderRadius: 12, backgroundColor: '#2563eb', justifyContent: 'center', alignItems: 'center', shadowColor: '#2563eb', shadowOpacity: 0.3, shadowRadius: 5 },
+  
+  syncButtonHeader: { flexDirection:'row', alignItems:'center', paddingVertical: 6, paddingHorizontal: 12, backgroundColor: '#f97316', borderRadius: 20 },
   syncingBadge: { padding: 10 },
-  backButton: { marginRight: 10 },
-  projectLogoPlaceholder: { width: 40, height: 40, borderRadius: 8, backgroundColor: '#10b981', justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#111827' },
-  headerSubtitle: { color: '#666', fontSize: 12 },
+
   progressSection: { backgroundColor: 'white', paddingBottom: 0 },
-  progressBarBg: { height: 4, backgroundColor: '#e5e7eb', width: '100%' },
+  progressBarBg: { height: 3, backgroundColor: '#e2e8f0', width: '100%' },
   progressBarFill: { height: '100%', backgroundColor: '#10b981' },
-  content: { padding: 20 }, // ΤΟ PADDING BOTTOM ΤΟ ΟΡΙΖΟΥΜΕ ΔΥΝΑΜΙΚΑ ΣΤΟ RENDER
-  taskCard: { backgroundColor: 'white', padding: 15, borderRadius: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center', elevation: 1, shadowColor:'#000', shadowOpacity:0.05, shadowRadius:2, shadowOffset:{width:0, height:1} },
-  iconBox: { width: 36, height: 36, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+
+  content: { padding: 20 },
+  
+  // --- TASK CARD ---
+  taskCard: { backgroundColor: 'white', padding: 16, borderRadius: 16, marginBottom: 12, flexDirection: 'row', alignItems: 'center', shadowColor:'#64748b', shadowOpacity:0.05, shadowRadius:4, shadowOffset:{width:0, height:2}, elevation: 2 },
+  iconBox: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 15 },
   iconBoxPending: { backgroundColor: '#eff6ff' },
   iconBoxCompleted: { backgroundColor: '#dcfce7' },
-  taskTitle: { fontSize: 15, fontWeight: '600', color: '#334155' },
-  taskDesc: { fontSize: 12, color: '#64748b', marginTop: 2, fontStyle: 'italic' }, 
-  taskThumbnail: { width: 50, height: 50, borderRadius: 8, borderWidth: 1, borderColor: '#eee' },
-  badge: { position: 'absolute', bottom: -5, right: -5, backgroundColor: '#2563eb', borderRadius: 10, width: 20, height: 20, justifyContent: 'center', alignItems: 'center' },
-  badgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
-  taskValueText: { fontWeight: 'bold', color: '#059669', fontSize: 16 },
-  // Αφαιρέσαμε το σταθερό bottom: 30 από εδώ, το βάζουμε δυναμικά
-  fab: { position: 'absolute', right: 20, backgroundColor: '#2563eb', width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', elevation: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, zIndex: 999 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { backgroundColor: 'white', width: '90%', borderRadius: 16, padding: 20, elevation: 5 },
-  modalHeader: { fontSize: 18, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
-  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 12, marginBottom: 15, fontSize: 16 }, 
-  typeBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderWidth: 1, borderColor: '#ddd', borderRadius: 8, marginHorizontal: 3 },
-  typeBtnActive: { backgroundColor: '#2563eb', borderColor: '#2563eb' },
-  typeBtnText: { fontSize: 12, fontWeight: 'bold', color: '#333' },
-  btn: { flex: 1, padding: 12, borderRadius: 8, alignItems: 'center', marginHorizontal: 5 },
-  modalBackground: { flex: 1, backgroundColor: 'black', justifyContent: 'center', alignItems: 'center' },
-  fullImage: { width: '100%', height: '80%' },
-  closeModal: { position: 'absolute', top: 50, right: 20, zIndex: 10 },
-  toolBar: { position: 'absolute', bottom: 40, flexDirection: 'row', justifyContent: 'space-around', width: '100%', paddingHorizontal: 20 },
-  toolBtn: { alignItems: 'center', padding: 10 },
-  toolText: { color: 'white', fontSize: 12, marginTop: 4, fontWeight: 'bold' },
-  galleryHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingTop: 50, backgroundColor: '#111' },
+  
+  taskTitle: { fontSize: 15, fontWeight: '700', color: '#1e293b', marginBottom: 2 },
+  taskDesc: { fontSize: 12, color: '#94a3b8' },
+  taskValueText: { fontWeight: '700', color: '#059669', fontSize: 15 },
+  
+  taskThumbnail: { width: 48, height: 48, borderRadius: 10, borderWidth: 2, borderColor: '#f1f5f9' },
+  badge: { position: 'absolute', bottom: -6, right: -6, backgroundColor: '#2563eb', borderRadius: 8, width: 20, height: 20, justifyContent: 'center', alignItems: 'center', borderWidth:2, borderColor:'white' },
+  badgeText: { color: 'white', fontSize: 9, fontWeight: 'bold' },
+
+  // --- FAB ---
+  fab: { position: 'absolute', right: 20, backgroundColor: '#2563eb', width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center', elevation: 8, shadowColor: '#2563eb', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 6, zIndex: 999 },
+
+  // --- MODAL STYLES (NEW) ---
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.6)', justifyContent: 'flex-end' }, 
+  modalContent: { backgroundColor: 'white', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, elevation: 20 },
+  
+  modalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  modalHeader: { fontSize: 20, fontWeight: '800', color: '#0f172a' },
+  
+  label: { fontSize: 13, fontWeight: '700', color: '#64748b', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
+  input: { backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, padding: 14, marginBottom: 20, fontSize: 16, color: '#0f172a' },
+  
+  // Options Grid
+  optionsContainer: { flexDirection: 'row', justifyContent: 'space-between', gap: 10, marginBottom: 25 },
+  optionCard: { flex: 1, backgroundColor: 'white', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, paddingVertical: 15, alignItems: 'center', justifyContent: 'center' },
+  optionCardActive: { backgroundColor: '#2563eb', borderColor: '#2563eb' },
+  optionText: { marginTop: 8, fontSize: 12, fontWeight: '700', color: '#64748b' },
+
+  // Main Button
+  mainButton: { backgroundColor: '#0f172a', paddingVertical: 16, borderRadius: 12, alignItems: 'center' },
+  mainButtonText: { color: 'white', fontWeight: 'bold', fontSize: 16, letterSpacing: 1 },
+
+  // --- LOADING & FULL SCREEN ---
+  loadingOverlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(255,255,255,0.8)', justifyContent: 'center', alignItems: 'center', zIndex: 9999 },
+  loadingBox: { padding: 20, backgroundColor: 'white', borderRadius: 10, elevation: 5 },
+  loadingText: { marginTop: 10, color: '#333', fontWeight: 'bold' },
+
+  modalBackground: { flex: 1, backgroundColor: '#000', justifyContent: 'center' },
+  fullImage: { width: '100%', height: '100%' },
+  closeModal: { position: 'absolute', top: 50, right: 20, zIndex: 20, backgroundColor:'rgba(0,0,0,0.5)', borderRadius:20, padding: 5 },
+  toolBar: { position: 'absolute', bottom: 40, flexDirection: 'row', justifyContent: 'space-around', width: '100%' },
+  toolBtn: { alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.1)', padding: 15, borderRadius: 50 },
+  toolText: { color: 'white', fontSize: 10, marginTop: 5, fontWeight: '600' },
+
+  galleryHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingTop: 50, backgroundColor: '#000' },
   photoTile: { flex: 1/3, aspectRatio: 1, margin: 1, backgroundColor: '#222' },
-  addPhotoTile: { flex: 1/3, aspectRatio: 1, margin: 1, backgroundColor: '#ddd', justifyContent: 'center', alignItems: 'center' },
+  addPhotoTile: { flex: 1/3, aspectRatio: 1, margin: 1, backgroundColor: '#333', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#444' },
 });
