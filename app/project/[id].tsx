@@ -4,9 +4,11 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import * as Network from 'expo-network';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import * as Sharing from 'expo-sharing'; // <--- Σιγουρέψου ότι υπάρχει
+import * as Sharing from 'expo-sharing';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Modal, SafeAreaView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+// Fix για UI
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Fix για Expo SDK 52+
 import * as FileSystem from 'expo-file-system/legacy';
 
@@ -34,6 +36,9 @@ export default function ProjectDetailsScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams(); 
   const projectId = id as string;
+  
+  // 1. ΛΗΨΗ ΤΩΝ ΠΕΡΙΘΩΡΙΩΝ ΤΗΣ ΣΥΣΚΕΥΗΣ (Safe Area)
+  const insets = useSafeAreaInsets(); 
 
   const PROJECT_CACHE_KEY = `cached_project_tasks_${projectId}`;
 
@@ -54,12 +59,10 @@ export default function ProjectDetailsScreen() {
   const [currentTaskType, setCurrentTaskType] = useState<string>('measurement');
   const [inputValue, setInputValue] = useState('');
   
-  // Create Task States
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskDescription, setNewTaskDescription] = useState('');
   const [newTaskType, setNewTaskType] = useState<'photo' | 'measurement' | 'general'>('photo');
   
-  // Selection States
   const [activeTaskForGallery, setActiveTaskForGallery] = useState<Task | null>(null);
   const [selectedImageForView, setSelectedImageForView] = useState<string | null>(null);
 
@@ -277,50 +280,31 @@ export default function ProjectDetailsScreen() {
       } 
   };
 
-  // --- SMART SHARE FUNCTION (FIXED) ---
   const handleShare = async (uri: string) => {
     if (!uri) return;
-
-    // 1. Έλεγχος αν η συσκευή υποστηρίζει Sharing
     const isAvailable = await Sharing.isAvailableAsync();
     if (!isAvailable) {
         Alert.alert("Σφάλμα", "Η κοινοποίηση δεν είναι διαθέσιμη στη συσκευή σας.");
         return;
     }
-
     try {
         let fileUri = uri;
-
-        // 2. Αν είναι Base64 (δηλαδή Offline/Sync δεδομένο), πρέπει να το κάνουμε αρχείο
         if (uri.startsWith('data:')) {
-            // Καθαρίζουμε το header "data:image/jpeg;base64,"
             const base64Code = uri.split(',')[1];
-            
-            // Δημιουργούμε ένα προσωρινό όνομα αρχείου
             const filename = FileSystem.cacheDirectory + 'share_temp.jpg';
-            
-            // Γράφουμε τα δεδομένα στο δίσκο
-            await FileSystem.writeAsStringAsync(filename, base64Code, {
-                encoding: FileSystem.EncodingType.Base64
-            });
-            
-            // Πλέον μοιραζόμαστε το αρχείο, όχι το κείμενο Base64
+            await FileSystem.writeAsStringAsync(filename, base64Code, { encoding: 'base64' });
             fileUri = filename;
         }
-
-        // 3. Κοινοποίηση
         await Sharing.shareAsync(fileUri, {
             mimeType: 'image/jpeg',
             dialogTitle: 'Κοινοποίηση Φωτογραφίας'
         });
-
     } catch (error: any) {
         console.log("Share Error:", error);
         Alert.alert("Σφάλμα", "Απέτυχε η κοινοποίηση.");
     }
   };
 
-  // --- CAMERA & HELPERS ---
   const saveImageToDevice = async (tempUri: string) => {
       try {
           // @ts-ignore
@@ -424,7 +408,8 @@ export default function ProjectDetailsScreen() {
       <FlatList 
         data={combinedTasks}
         keyExtractor={item => item.id}
-        contentContainerStyle={styles.content}
+        // Προσθέτουμε padding στο τέλος ανάλογα με το safe area (insets.bottom) + λίγο extra
+        contentContainerStyle={[styles.content, { paddingBottom: 80 + insets.bottom }]}
         renderItem={({ item }) => (
           <View style={[styles.taskCard, item.isLocal && { borderColor: '#f97316', borderWidth: 1, backgroundColor: '#fff7ed' }]}>
             <TouchableOpacity 
@@ -468,7 +453,13 @@ export default function ProjectDetailsScreen() {
         )}
       />
 
-      <TouchableOpacity style={styles.fab} onPress={() => setCreateModalVisible(true)}><Ionicons name="add" size={32} color="white" /></TouchableOpacity>
+      {/* ΤΟ ΚΟΥΜΠΙ + ΑΝΕΒΑΙΝΕΙ ΑΥΤΟΜΑΤΑ ΠΑΝΩ ΑΠΟ ΤΗΝ ΜΠΑΡΑ */}
+      <TouchableOpacity 
+        style={[styles.fab, { bottom: 30 + insets.bottom }]} 
+        onPress={() => setCreateModalVisible(true)}
+      >
+        <Ionicons name="add" size={32} color="white" />
+      </TouchableOpacity>
 
       {/* GALLERY MODAL */}
       <Modal visible={galleryModalVisible} animationType="slide" onRequestClose={() => setGalleryModalVisible(false)}>
@@ -521,6 +512,7 @@ export default function ProjectDetailsScreen() {
                     <Ionicons name="trash-outline" size={28} color="#ef4444" />
                     <Text style={[styles.toolText, {color:'#ef4444'}]}>Διαγραφή</Text>
                 </TouchableOpacity>
+
                 {/* SHARE BUTTON */}
                 <TouchableOpacity style={styles.toolBtn} onPress={() => selectedImageForView && handleShare(selectedImageForView)}>
                     <Ionicons name="share-outline" size={28} color="white" />
@@ -573,7 +565,7 @@ const styles = StyleSheet.create({
   progressSection: { backgroundColor: 'white', paddingBottom: 0 },
   progressBarBg: { height: 4, backgroundColor: '#e5e7eb', width: '100%' },
   progressBarFill: { height: '100%', backgroundColor: '#10b981' },
-  content: { padding: 20, paddingBottom: 100 },
+  content: { padding: 20 }, // ΤΟ PADDING BOTTOM ΤΟ ΟΡΙΖΟΥΜΕ ΔΥΝΑΜΙΚΑ ΣΤΟ RENDER
   taskCard: { backgroundColor: 'white', padding: 15, borderRadius: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center', elevation: 1, shadowColor:'#000', shadowOpacity:0.05, shadowRadius:2, shadowOffset:{width:0, height:1} },
   iconBox: { width: 36, height: 36, borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   iconBoxPending: { backgroundColor: '#eff6ff' },
@@ -584,7 +576,8 @@ const styles = StyleSheet.create({
   badge: { position: 'absolute', bottom: -5, right: -5, backgroundColor: '#2563eb', borderRadius: 10, width: 20, height: 20, justifyContent: 'center', alignItems: 'center' },
   badgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
   taskValueText: { fontWeight: 'bold', color: '#059669', fontSize: 16 },
-  fab: { position: 'absolute', bottom: 30, right: 20, backgroundColor: '#2563eb', width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', elevation: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, zIndex: 999 },
+  // Αφαιρέσαμε το σταθερό bottom: 30 από εδώ, το βάζουμε δυναμικά
+  fab: { position: 'absolute', right: 20, backgroundColor: '#2563eb', width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', elevation: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, zIndex: 999 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { backgroundColor: 'white', width: '90%', borderRadius: 16, padding: 20, elevation: 5 },
   modalHeader: { fontSize: 18, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
@@ -602,4 +595,4 @@ const styles = StyleSheet.create({
   galleryHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingTop: 50, backgroundColor: '#111' },
   photoTile: { flex: 1/3, aspectRatio: 1, margin: 1, backgroundColor: '#222' },
   addPhotoTile: { flex: 1/3, aspectRatio: 1, margin: 1, backgroundColor: '#ddd', justifyContent: 'center', alignItems: 'center' },
-}); 
+});
