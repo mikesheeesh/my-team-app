@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
-import * as Network from 'expo-network'; // <--- ΓΙΑ ΕΛΕΓΧΟ ΙΝΤΕΡΝΕΤ
+import * as Network from 'expo-network';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Modal, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -10,7 +10,7 @@ import InputModal from '../components/InputModal';
 
 // FIREBASE
 import { onAuthStateChanged } from 'firebase/auth';
-import { arrayRemove, deleteDoc, doc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { arrayRemove, deleteDoc, deleteField, doc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../../firebaseConfig';
 
 type Role = 'Founder' | 'Admin' | 'Supervisor' | 'User';
@@ -38,20 +38,22 @@ export default function TeamProjectsScreen() {
   const [usersModalVisible, setUsersModalVisible] = useState(false);
   const [projectSettingsVisible, setProjectSettingsVisible] = useState(false);
   const [selectedProject, setSelectedProject] = useState<{groupId: string, project: Project} | null>(null);
+  
   const [inputVisible, setInputVisible] = useState(false);
   const [inputMode, setInputMode] = useState<'teamName' | 'teamContact' | 'newGroup' | 'newProject'>('teamName');
   const [tempValue, setTempValue] = useState('');
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+  
   const [moveModalVisible, setMoveModalVisible] = useState(false);
 
   // CACHE KEY
   const CACHE_KEY = `cached_team_${teamId}`;
 
-  // --- 1. ФΟΡΤΩΣΗ (CACHE FIRST) ---
+  // --- 1. DATA LOADING (CACHE + REALTIME) ---
   useEffect(() => {
     if (!teamId) return;
 
-    // A. Φόρτωση από Cache (για να βλέπεις offline)
+    // A. Φόρτωση από Cache
     const loadCache = async () => {
         try {
             const cached = await AsyncStorage.getItem(CACHE_KEY);
@@ -69,7 +71,7 @@ export default function TeamProjectsScreen() {
     };
     loadCache();
 
-    // B. Realtime Listener (Μόνο αν έχει ίντερνετ θα ενημερώσει)
+    // B. Realtime Listener
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
         if (user) {
             setCurrentUserId(user.uid);
@@ -110,7 +112,7 @@ export default function TeamProjectsScreen() {
                     setUsers(loadedUsers);
                 }
 
-                // Αποθήκευση Cache για την επόμενη φορά
+                // Update Cache
                 const cacheData = {
                     name: data.name,
                     contactEmail: data.contactEmail,
@@ -152,16 +154,14 @@ export default function TeamProjectsScreen() {
   const updateTeamData = async (field: string, value: any) => {
     const isOnline = await checkOnline();
     if (!isOnline) return;
-
     try { await updateDoc(doc(db, "teams", teamId), { [field]: value }); } 
     catch (err: any) { Alert.alert("Σφάλμα", err.message); }
   };
 
   const handleSaveInput = async () => {
-    // 1. Έλεγχος Ίντερνετ ΠΡΙΝ κάνουμε οτιδήποτε
     const isOnline = await checkOnline();
     if (!isOnline) {
-        setInputVisible(false); // Κλείνουμε το modal
+        setInputVisible(false);
         return;
     }
 
@@ -181,7 +181,6 @@ export default function TeamProjectsScreen() {
             };
             const updatedGroups = groups.map(g => g.id === activeGroupId ? { ...g, projects: [...g.projects, newProject] } : g);
             
-            // Online Update
             await updateTeamData('groups', updatedGroups);
             await setDoc(doc(db, "projects", newProjectId), { ...newProject, tasks: [], createdAt: serverTimestamp() });
 
@@ -219,6 +218,7 @@ export default function TeamProjectsScreen() {
     ]);
   };
 
+  // --- ROLE MANAGEMENT & CLEANUP ---
   const changeUserRole = async (targetUser: User, action: 'promote' | 'demote' | 'kick') => {
     const isOnline = await checkOnline();
     if (!isOnline) return;
@@ -226,8 +226,30 @@ export default function TeamProjectsScreen() {
     if (myRole === 'Supervisor' && targetUser.role !== 'User') return Alert.alert("Απαγορεύεται", "Μπορείτε να διαχειριστείτε μόνο απλούς χρήστες.");
     if (targetUser.role === 'Founder') return Alert.alert("Απαγορεύεται", "Δεν πειράζουμε τον Ιδρυτή.");
 
+    if (action === 'kick') {
+        Alert.alert(
+            "Διαγραφή Μέλους",
+            `Είστε σίγουρος ότι θέλετε να αφαιρέσετε τον/την "${targetUser.name}" από την ομάδα;`,
+            [
+                { text: "Άκυρο", style: "cancel" },
+                { 
+                    text: "Διαγραφή", 
+                    style: "destructive", 
+                    onPress: async () => {
+                        setUsers(prev => prev.filter(u => u.id !== targetUser.id));
+                        await updateDoc(doc(db, "teams", teamId), { 
+                            memberIds: arrayRemove(targetUser.id),
+                            [`roles.${targetUser.id}`]: deleteField() 
+                        });
+                    }
+                }
+            ]
+        );
+        return;
+    }
+
+    // --- LOGIC ΑΛΛΑΓΗΣ ΡΟΛΟΥ ---
     let newRole: Role = targetUser.role;
-    let shouldKick = false;
 
     if (action === 'promote') {
       if (targetUser.role === 'User') newRole = 'Supervisor';
@@ -235,13 +257,70 @@ export default function TeamProjectsScreen() {
     } else if (action === 'demote') {
       if (targetUser.role === 'Admin') newRole = 'Supervisor';
       else if (targetUser.role === 'Supervisor') newRole = 'User';
-    } else if (action === 'kick') { shouldKick = true; }
-
-    if (shouldKick) {
-        await updateDoc(doc(db, "teams", teamId), { memberIds: arrayRemove(targetUser.id) });
-    } else {
-        await updateDoc(doc(db, "teams", teamId), { [`roles.${targetUser.id}`]: newRole });
     }
+
+    // 1. Optimistic Update (UI Users List)
+    setUsers(prevUsers => prevUsers.map(u => 
+        u.id === targetUser.id ? { ...u, role: newRole } : u
+    ));
+
+    // 2. Firebase Update Team Role
+    await updateDoc(doc(db, "teams", teamId), { [`roles.${targetUser.id}`]: newRole });
+
+    // 3. --- DEEP CLEANUP ΣΕ ΟΛΑ ΤΑ ΕΠΙΠΕΔΑ ---
+    // Εδώ υπολογίζουμε τη νέα δομή των Groups καθαρίζοντας τον χρήστη
+    
+    const updatedGroups = groups.map(group => {
+        const updatedProjects = group.projects.map(project => {
+            let pSupervisors = [...project.supervisors];
+            let pMembers = [...project.members];
+            let changed = false;
+
+            if (newRole === 'User') {
+                // Έγινε User -> Τον πετάμε από Supervisors
+                if (pSupervisors.includes(targetUser.id)) {
+                    pSupervisors = pSupervisors.filter(id => id !== targetUser.id);
+                    changed = true;
+                }
+            } else if (newRole === 'Supervisor') {
+                // Έγινε Supervisor -> Τον πετάμε από Members
+                if (pMembers.includes(targetUser.id)) {
+                    pMembers = pMembers.filter(id => id !== targetUser.id);
+                    changed = true;
+                }
+            } else if (newRole === 'Admin' || newRole === 'Founder') {
+                // Έγινε Admin -> Τον πετάμε από ΟΛΑ
+                if (pSupervisors.includes(targetUser.id)) {
+                    pSupervisors = pSupervisors.filter(id => id !== targetUser.id);
+                    changed = true;
+                }
+                if (pMembers.includes(targetUser.id)) {
+                    pMembers = pMembers.filter(id => id !== targetUser.id);
+                    changed = true;
+                }
+            }
+
+            if (changed) {
+                // Ενημέρωση του ανεξάρτητου Project document
+                updateDoc(doc(db, "projects", project.id), {
+                    supervisors: pSupervisors,
+                    members: pMembers
+                }).catch(e => console.log("Project update failed:", e));
+
+                return { ...project, supervisors: pSupervisors, members: pMembers };
+            }
+            return project;
+        });
+        return { ...group, projects: updatedProjects };
+    });
+
+    // 4. --- ΤΟ ΒΑΣΙΚΟ ΒΗΜΑ ΠΟΥ ΕΛΕΙΠΕ ---
+    // Στέλνουμε τη νέα δομή Groups (με τα καθαρισμένα projects) πίσω στην ΟΜΑΔΑ
+    // ώστε να μην τα ξανακατεβάσει λάθος.
+    await updateTeamData('groups', updatedGroups);
+    
+    // Ενημέρωση UI
+    setGroups(updatedGroups);
   };
   
   const toggleProjectRole = async (userId: string, type: 'supervisor' | 'member') => {
@@ -268,12 +347,37 @@ export default function TeamProjectsScreen() {
     setSelectedProject({ groupId, project: updatedProject });
   };
 
+  // --- PICK LOGO ---
   const pickLogo = async () => {
     const isOnline = await checkOnline();
     if (!isOnline) return;
 
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.5 });
-    if (!result.canceled) await updateTeamData('logo', result.assets[0].uri);
+    const result = await ImagePicker.launchImageLibraryAsync({ 
+        mediaTypes: ImagePicker.MediaTypeOptions.Images, 
+        allowsEditing: true, aspect: [1, 1], quality: 0.2, base64: true 
+    });
+
+    if (!result.canceled && result.assets[0].base64) {
+        const imageUri = `data:image/jpeg;base64,${result.assets[0].base64}`;
+        await updateTeamData('logo', imageUri);
+    }
+  };
+
+  const handleDeleteLogo = async () => {
+    const isOnline = await checkOnline();
+    if (!isOnline) return;
+
+    Alert.alert("Διαγραφή Logo", "Θέλετε να αφαιρέσετε το λογότυπο και να επιστρέψετε στο αρχικό;", [
+        { text: "Άκυρο" },
+        {
+            text: "Διαγραφή", style: 'destructive',
+            onPress: async () => {
+                await updateTeamData('logo', null);
+                setMenuVisible(false);
+                setTeamLogo(null);
+            }
+        }
+    ]);
   };
 
   const openInput = async (mode: typeof inputMode, groupId?: string) => {
@@ -301,7 +405,6 @@ export default function TeamProjectsScreen() {
         { text: "ΔΙΑΓΡΑΦΗ", style: 'destructive', onPress: async () => {
             const isOnline = await checkOnline();
             if (!isOnline) return;
-
             await deleteDoc(doc(db, "teams", teamId));
             router.replace('/dashboard');
         }}
@@ -430,6 +533,14 @@ export default function TeamProjectsScreen() {
                 {(myRole === 'Founder' || myRole === 'Admin') && (
                     <>
                         <TouchableOpacity style={styles.menuItem} onPress={pickLogo}><Ionicons name="image-outline" size={20} color="#333" /><Text style={styles.menuText}>Αλλαγή Logo</Text></TouchableOpacity>
+                        
+                        {teamLogo && (
+                            <TouchableOpacity style={styles.menuItem} onPress={handleDeleteLogo}>
+                                <Ionicons name="trash-outline" size={20} color="red" />
+                                <Text style={[styles.menuText, {color: 'red'}]}>Διαγραφή Logo</Text>
+                            </TouchableOpacity>
+                        )}
+                        
                         <TouchableOpacity style={styles.menuItem} onPress={() => openInput('teamContact')}><Ionicons name="call-outline" size={20} color="#333" /><Text style={styles.menuText}>Αλλαγή Επικοινωνίας</Text></TouchableOpacity>
                         <TouchableOpacity style={styles.menuItem} onPress={() => openInput('teamName')}><Ionicons name="create-outline" size={20} color="#333" /><Text style={styles.menuText}>Αλλαγή Ονόματος</Text></TouchableOpacity>
                     </>
@@ -447,21 +558,31 @@ export default function TeamProjectsScreen() {
                 <TouchableOpacity onPress={() => setProjectSettingsVisible(false)}><Ionicons name="close" size={28} color="#333" /></TouchableOpacity>
             </View>
             <ScrollView style={{padding: 20}}>
+                
+                {/* --- 1. SUPERVISORS LIST (ONLY SUPERVISORS SHOW HERE) --- */}
                 <Text style={styles.sectionTitle}>1. Supervisors</Text>
-                {users.map(u => (
+                {users
+                    .filter(u => u.role === 'Supervisor') 
+                    .map(u => (
                     <TouchableOpacity key={u.id} style={styles.checkItem} onPress={() => toggleProjectRole(u.id, 'supervisor')}>
                          <Ionicons name={selectedProject?.project.supervisors.includes(u.id) ? "checkbox" : "square-outline"} size={24} color="#2563eb" />
-                        <Text style={{marginLeft: 10}}>{u.name}</Text>
+                        <Text style={{marginLeft: 10}}>{u.name} <Text style={{fontSize:10, color:'#666'}}>({u.role})</Text></Text>
                     </TouchableOpacity>
                 ))}
+                
                 <View style={{height: 20}} />
+                
+                {/* --- 2. MEMBERS LIST (ONLY USERS SHOW HERE) --- */}
                 <Text style={styles.sectionTitle}>2. Μέλη (Users)</Text>
-                {users.map(u => (
+                {users
+                    .filter(u => u.role === 'User') 
+                    .map(u => (
                     <TouchableOpacity key={u.id} style={styles.checkItem} onPress={() => toggleProjectRole(u.id, 'member')}>
                          <Ionicons name={selectedProject?.project.members.includes(u.id) ? "checkbox" : "square-outline"} size={24} color="#16a34a" />
                         <Text style={{marginLeft: 10}}>{u.name}</Text>
                     </TouchableOpacity>
                 ))}
+                
                 <View style={{height: 30}} />
                 <TouchableOpacity style={styles.actionBtn} onPress={() => setMoveModalVisible(true)}><Ionicons name="folder-outline" size={20} color="#333" /><Text style={{fontWeight:'bold', marginLeft: 10}}>Μεταφορά σε άλλο Group</Text></TouchableOpacity>
                 {myRole !== 'User' && (

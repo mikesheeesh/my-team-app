@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Network from 'expo-network';
-import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router'; // <--- ΠΡΟΣΘΗΚΗ useFocusEffect
+import React, { useCallback, useEffect, useState } from 'react'; // <--- ΠΡΟΣΘΗΚΗ useCallback
 import { ActivityIndicator, Alert, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 // Fix για Expo SDK 52+
 import * as FileSystem from 'expo-file-system/legacy';
@@ -23,8 +23,9 @@ interface Team {
 }
 
 const TEAMS_CACHE_KEY = 'cached_my_teams';
+const OFFLINE_QUEUE_PREFIX = 'offline_tasks_queue_';
 
-// Βοηθητική: Καθαρίζει τα δεδομένα από undefined για να μην σκάει η Firebase
+// Βοηθητική: Καθαρίζει τα δεδομένα από undefined
 const sanitizeData = (data: any) => {
     return JSON.parse(JSON.stringify(data, (key, value) => {
         return value === undefined ? null : value;
@@ -41,39 +42,51 @@ export default function MyTeamsScreen() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
 
-  // 1. ΦΟΡΤΩΣΗ ΑΠΟ CACHE (Offline First)
-  // Αυτό τρέχει ΠΑΝΤΑ πρώτο για να δείξει δεδομένα αμέσως
+  // 1. ΕΛΕΓΧΟΣ ΓΙΑ ΕΚΚΡΕΜΟΤΗΤΕΣ (Τρέχει κάθε φορά που βλέπεις την οθόνη)
+  // Αυτό λύνει το πρόβλημα της άμεσης ενημέρωσης
+  useFocusEffect(
+    useCallback(() => {
+      checkPendingUploads();
+    }, [])
+  );
+
+  const checkPendingUploads = async () => {
+      try {
+          const keys = await AsyncStorage.getAllKeys();
+          const queueKeys = keys.filter(k => k.startsWith(OFFLINE_QUEUE_PREFIX));
+          
+          let total = 0;
+          for (const k of queueKeys) {
+              const val = await AsyncStorage.getItem(k);
+              if (val) {
+                  const arr = JSON.parse(val);
+                  total += arr.length;
+              }
+          }
+          setPendingCount(total);
+      } catch (e) { console.log("Check pending error:", e); }
+  };
+
+  // 2. ΦΟΡΤΩΣΗ ΑΠΟ CACHE (Initial Load)
   useEffect(() => {
       const initLoad = async () => {
           try {
-              // Φόρτωση Ομάδων
               const cached = await AsyncStorage.getItem(TEAMS_CACHE_KEY);
-              if (cached) {
-                  setTeams(JSON.parse(cached));
-              }
-              
-              // Έλεγχος για εκκρεμότητες (Sync Badge)
-              const keys = await AsyncStorage.getAllKeys();
-              const queueKeys = keys.filter(k => k.startsWith('offline_tasks_queue_'));
-              setPendingCount(queueKeys.length);
-              
+              if (cached) setTeams(JSON.parse(cached));
           } catch (e) { console.log("Cache load error:", e); }
-          
-          setLoading(false); // Σταματάμε το loading ακόμα και αν δεν βρήκε cache
+          setLoading(false); 
       };
       initLoad();
   }, []);
 
-  // 2. ΣΥΝΔΕΣΗ ME FIREBASE (Realtime Updates)
+  // 3. ΣΥΝΔΕΣΗ ME FIREBASE (Realtime Updates)
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
         if (user) {
-            // Ανάκτηση Ονόματος Χρήστη
             onSnapshot(doc(db, "users", user.uid), (snap) => {
                 if (snap.exists()) setUserName(snap.data().fullname || 'Χρήστης');
-            }, (err) => console.log("User fetch err (offline ok):", err));
+            }, (err) => console.log("User fetch err:", err));
 
-            // Ανάκτηση Ομάδων
             const q = query(collection(db, "teams"), where("memberIds", "array-contains", user.uid));
             const unsubscribeTeams = onSnapshot(q, (snapshot) => {
                 const fetchedTeams: Team[] = [];
@@ -88,20 +101,17 @@ export default function MyTeamsScreen() {
                     });
                 });
                 
-                // Ενημερώνουμε State και Cache
-                // (Μόνο αν πήραμε δεδομένα, για να μην διαγράψουμε την cache αν είμαστε offline)
                 if (fetchedTeams.length > 0 || !snapshot.metadata.fromCache) {
                     setTeams(fetchedTeams);
                     AsyncStorage.setItem(TEAMS_CACHE_KEY, JSON.stringify(fetchedTeams));
                 }
                 setLoading(false);
             }, (error) => {
-                console.log("Teams fetch error (offline mode):", error);
+                console.log("Teams fetch error:", error);
                 setLoading(false);
             });
             return () => unsubscribeTeams();
         } else {
-            // Αν δεν υπάρχει χρήστης, περιμένουμε λίγο μήπως φορτώσει το persistence
             setLoading(false);
         }
     });
@@ -109,7 +119,7 @@ export default function MyTeamsScreen() {
   }, []);
 
 
-  // 3. LOGIC ΣΥΓΧΡΟΝΙΣΜΟΥ (Manual Sync Button)
+  // 4. LOGIC ΣΥΓΧΡΟΝΙΣΜΟΥ (Manual Sync Button)
   const handleManualSync = async () => {
     const net = await Network.getNetworkStateAsync();
     if (!net.isConnected || !net.isInternetReachable) return Alert.alert("Offline", "Δεν έχετε ίντερνετ.");
@@ -118,7 +128,7 @@ export default function MyTeamsScreen() {
 
     try {
         const keys = await AsyncStorage.getAllKeys();
-        const queueKeys = keys.filter(k => k.startsWith('offline_tasks_queue_'));
+        const queueKeys = keys.filter(k => k.startsWith(OFFLINE_QUEUE_PREFIX));
         
         if (queueKeys.length === 0) {
             Alert.alert("Ενημέρωση", "Δεν υπάρχουν εκκρεμότητες προς ανέβασμα.");
@@ -129,21 +139,19 @@ export default function MyTeamsScreen() {
         let totalUploaded = 0;
 
         for (const key of queueKeys) {
-            // Το ID του project είναι στο τέλος του κλειδιού
-            const projectId = key.replace('offline_tasks_queue_', '');
+            const projectId = key.replace(OFFLINE_QUEUE_PREFIX, '');
             const json = await AsyncStorage.getItem(key);
             if (!json) continue;
 
             const localList = JSON.parse(json);
             if (localList.length === 0) continue;
 
-            // A. Λήψη τρέχουσας κατάστασης από Cloud
+            // A. Λήψη Cloud Data
             const projectRef = doc(db, "projects", projectId);
             const projectSnap = await getDoc(projectRef);
 
             if (!projectSnap.exists()) {
-                // Αν το project διαγράφηκε, καθαρίζουμε τα τοπικά
-                await AsyncStorage.removeItem(key);
+                await AsyncStorage.removeItem(key); // Αν διαγράφηκε το project, σβήνουμε τα local
                 continue; 
             }
 
@@ -155,26 +163,27 @@ export default function MyTeamsScreen() {
                 let finalValue = task.value;
                 let processedImages: string[] = [];
 
-                // Base64 Image Conversion (για λίστα εικόνων)
+                // Base64 Image Conversion
                 if (task.images && task.images.length > 0) {
                     for (const imgUri of task.images) {
                         if (imgUri && imgUri.startsWith('file://')) {
                             try {
+                                // Χρήση string 'base64' για αποφυγή TS Error
                                 const base64Data = await FileSystem.readAsStringAsync(imgUri, { encoding: 'base64' });
                                 processedImages.push(`data:image/jpeg;base64,${base64Data}`);
                             } catch (e) { console.log("Image skip", e); }
                         } else {
-                            processedImages.push(imgUri); // Ήδη έτοιμο
+                            processedImages.push(imgUri);
                         }
                     }
                 }
                 
-                // Fallback για παλιά tasks που είχαν μονή εικόνα στο value
+                // Fallback για single image value
                 if (task.type === 'photo' && task.value && task.value.startsWith('file://')) {
-                     try {
+                      try {
                         const base64Data = await FileSystem.readAsStringAsync(task.value, { encoding: 'base64' });
                         finalValue = `data:image/jpeg;base64,${base64Data}`;
-                    } catch (e) { console.log("Single image skip", e); }
+                    } catch (e) {}
                 }
 
                 const { isLocal, ...cleanTask } = task;
@@ -184,7 +193,7 @@ export default function MyTeamsScreen() {
                     images: processedImages.length > 0 ? processedImages : (cleanTask.images || [])
                 };
 
-                // C. Merge (Αντικατάσταση ή Προσθήκη)
+                // C. Merge
                 const existingIndex = currentCloudList.findIndex((t:any) => t.id === taskReady.id);
                 if (existingIndex !== -1) {
                     currentCloudList[existingIndex] = taskReady;
@@ -195,7 +204,7 @@ export default function MyTeamsScreen() {
                 totalUploaded++;
             }
 
-            // D. Upload
+            // D. Upload & Cleanup
             if (changesMade) {
                 const safeList = sanitizeData(currentCloudList);
                 await updateDoc(projectRef, { tasks: safeList });
@@ -204,7 +213,7 @@ export default function MyTeamsScreen() {
         }
 
         Alert.alert("Επιτυχία", `Συγχρονίστηκαν ${totalUploaded} εργασίες!`);
-        setPendingCount(0);
+        checkPendingUploads(); // Ενημέρωση UI μετά το sync
 
     } catch (error: any) {
         console.error("Sync Error:", error);
@@ -235,7 +244,7 @@ export default function MyTeamsScreen() {
           <TouchableOpacity onPress={() => router.push('/profile')} style={styles.profileButton}><Ionicons name="person-circle-outline" size={30} color="#2563eb" /></TouchableOpacity>
         </View>
 
-        {/* SYNC CARD */}
+        {/* SYNC CARD (Εμφανίζεται διαφορετικό αν υπάρχουν εκκρεμότητες) */}
         <TouchableOpacity 
             style={[styles.syncCard, pendingCount > 0 ? {backgroundColor:'#ea580c'} : {backgroundColor:'#2563eb'}]} 
             onPress={handleManualSync} 
@@ -243,9 +252,9 @@ export default function MyTeamsScreen() {
         >
             {isSyncing ? <ActivityIndicator color="white"/> : <Ionicons name={pendingCount > 0 ? "cloud-upload" : "checkmark-circle"} size={24} color="white" />}
             <View style={{marginLeft: 10}}>
-                <Text style={styles.syncText}>{isSyncing ? "Συγχρονισμός..." : (pendingCount > 0 ? "Εκκρεμούν Uploads" : "Όλα Εντάξει")}</Text>
+                <Text style={styles.syncText}>{isSyncing ? "Συγχρονισμός..." : (pendingCount > 0 ? `Εκκρεμούν Uploads (${pendingCount})` : "Όλα Εντάξει")}</Text>
                 <Text style={styles.syncSubText}>
-                    {pendingCount > 0 ? `Έχετε ${pendingCount} projects με αλλαγές.` : "Τα δεδομένα σας είναι ενημερωμένα."}
+                    {pendingCount > 0 ? `Πατήστε για ανέβασμα.` : "Τα δεδομένα σας είναι ενημερωμένα."}
                 </Text>
             </View>
         </TouchableOpacity>
