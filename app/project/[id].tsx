@@ -1,18 +1,17 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import NetInfo from "@react-native-community/netinfo"; // <--- ΤΟ ΚΛΕΙΔΙ ΕΔΩ
-import * as FileSystem from "expo-file-system/legacy"; // Ή 'expo-file-system'
+import * as FileSystem from "expo-file-system/legacy";
+import { Image } from "expo-image";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import * as Network from "expo-network";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
-import React, { useEffect, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
     FlatList,
-    Image,
     Modal,
     SafeAreaView,
     StyleSheet,
@@ -25,11 +24,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // FIREBASE
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, onSnapshot, updateDoc } from "firebase/firestore";
+import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { auth, db } from "../../firebaseConfig";
 
 import InputModal from "../components/InputModal";
+import { useSync } from "../context/SyncContext";
 
+// --- TYPES ---
 type Task = {
   id: string;
   title: string;
@@ -43,21 +44,150 @@ type Task = {
 
 const OFFLINE_QUEUE_KEY = "offline_tasks_queue_";
 
+// --- MEMOIZED LIST ITEM COMPONENT ---
+const TaskItem = memo(
+  ({
+    item,
+    onPress,
+    onLongPress,
+    isSyncing,
+  }: {
+    item: Task;
+    onPress: (t: Task) => void;
+    onLongPress: (t: Task) => void;
+    isSyncing: boolean;
+  }) => {
+    return (
+      <View
+        style={[
+          styles.taskCard,
+          item.isLocal && {
+            borderColor: "#f97316",
+            borderWidth: 1,
+            backgroundColor: "#fff7ed",
+          },
+        ]}
+      >
+        <TouchableOpacity
+          style={{
+            flex: 1,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+          onPress={() => onPress(item)}
+          onLongPress={() => onLongPress(item)}
+          delayLongPress={500}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
+            <View
+              style={[
+                styles.iconBox,
+                item.status === "completed"
+                  ? styles.iconBoxCompleted
+                  : styles.iconBoxPending,
+              ]}
+            >
+              <Ionicons
+                name={
+                  item.type === "photo"
+                    ? "camera"
+                    : item.type === "measurement"
+                      ? "construct"
+                      : "document-text"
+                }
+                size={22}
+                color={item.status === "completed" ? "#059669" : "#2563eb"}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text
+                style={[
+                  styles.taskTitle,
+                  item.status === "completed" && { color: "#64748b" },
+                ]}
+                numberOfLines={2}
+              >
+                {item.title}
+              </Text>
+              {item.description ? (
+                <Text style={styles.taskDesc} numberOfLines={2}>
+                  {item.description}
+                </Text>
+              ) : null}
+
+              {item.isLocal && (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    marginTop: 4,
+                  }}
+                >
+                  <Ionicons name="cloud-offline" size={12} color="#f97316" />
+                  <Text
+                    style={{
+                      fontSize: 10,
+                      color: "#f97316",
+                      marginLeft: 4,
+                      fontWeight: "bold",
+                    }}
+                  >
+                    {isSyncing ? "Ανεβαίνει..." : "Προς Ανέβασμα"}
+                  </Text>
+                </View>
+              )}
+            </View>
+          </View>
+
+          {item.type === "photo" ? (
+            item.images && item.images.length > 0 ? (
+              <View style={{ alignItems: "center" }}>
+                <Image
+                  source={{ uri: item.images[item.images.length - 1] }}
+                  style={styles.taskThumbnail}
+                  contentFit="cover"
+                  transition={200}
+                  cachePolicy="memory-disk"
+                />
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{item.images.length}</Text>
+                </View>
+              </View>
+            ) : (
+              <Ionicons name="camera-outline" size={24} color="#cbd5e1" />
+            )
+          ) : item.status === "completed" ? (
+            <Text style={styles.taskValueText}>{item.value}</Text>
+          ) : (
+            <Ionicons name="chevron-forward" size={18} color="#cbd5e1" />
+          )}
+        </TouchableOpacity>
+      </View>
+    );
+  },
+  (prevProps, nextProps) => {
+    return (
+      prevProps.item === nextProps.item &&
+      prevProps.isSyncing === nextProps.isSyncing
+    );
+  },
+);
+
 export default function ProjectDetailsScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams();
   const projectId = id as string;
   const insets = useSafeAreaInsets();
+  const { isSyncing, syncNow, justSyncedProjectId } = useSync();
 
   const PROJECT_CACHE_KEY = `cached_project_tasks_${projectId}`;
 
   const [cloudTasks, setCloudTasks] = useState<Task[]>([]);
   const [localTasks, setLocalTasks] = useState<Task[]>([]);
-  const [combinedTasks, setCombinedTasks] = useState<Task[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
   const [projectName, setProjectName] = useState("");
 
   // MODALS
@@ -65,17 +195,19 @@ export default function ProjectDetailsScreen() {
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [galleryModalVisible, setGalleryModalVisible] = useState(false);
 
-  // STATE
+  // CURRENT TASK
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   const [currentTaskType, setCurrentTaskType] = useState<string>("measurement");
   const [inputValue, setInputValue] = useState("");
 
+  // NEW TASK
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskDescription, setNewTaskDescription] = useState("");
   const [newTaskType, setNewTaskType] = useState<
     "photo" | "measurement" | "general"
   >("photo");
 
+  // GALLERY
   const [activeTaskForGallery, setActiveTaskForGallery] = useState<Task | null>(
     null,
   );
@@ -93,15 +225,12 @@ export default function ProjectDetailsScreen() {
           if (parsed.tasks) setCloudTasks(parsed.tasks);
           if (parsed.name) setProjectName(parsed.name);
         }
-
         const localQueue = await AsyncStorage.getItem(
           OFFLINE_QUEUE_KEY + projectId,
         );
-        if (localQueue) {
-          setLocalTasks(JSON.parse(localQueue));
-        }
+        if (localQueue) setLocalTasks(JSON.parse(localQueue));
       } catch (e) {
-        console.log("Cache error:", e);
+        console.log("Cache load error:", e);
       }
       setLoading(false);
     };
@@ -119,15 +248,19 @@ export default function ProjectDetailsScreen() {
           (docSnap) => {
             if (docSnap.exists()) {
               const data = docSnap.data();
-              setCloudTasks(data.tasks || []);
-              setProjectName(data.name || "Project");
+              const fetchedTasks = data.tasks || [];
+              const fetchedName = data.name || "Project";
+
+              setCloudTasks(fetchedTasks);
+              setProjectName(fetchedName);
+
               AsyncStorage.setItem(
                 PROJECT_CACHE_KEY,
                 JSON.stringify({
-                  name: data.name,
-                  tasks: data.tasks || [],
+                  name: fetchedName,
+                  tasks: fetchedTasks,
                 }),
-              );
+              ).catch((err) => console.log("Cache save error", err));
             }
           },
           (error) => console.log("Offline snapshot error:", error),
@@ -138,121 +271,123 @@ export default function ProjectDetailsScreen() {
     return () => unsubscribeAuth();
   }, [projectId]);
 
-  // 3. AUTO-SYNC LISTENER (ΤΟΠΙΚΑ ΣΤΟ SCREEN)
+  // 3. SYNC CLEANUP
   useEffect(() => {
-    const unsubscribeNet = NetInfo.addEventListener((state) => {
-      if (
-        state.isConnected &&
-        state.type === "wifi" &&
-        localTasks.length > 0 &&
-        !isSyncing
-      ) {
-        console.log("Auto-Sync: WiFi found locally!");
-        performSync(localTasks);
-      }
-    });
-    return () => unsubscribeNet();
-  }, [localTasks, isSyncing]);
+    if (justSyncedProjectId === projectId) {
+      setLocalTasks([]);
+    }
+  }, [justSyncedProjectId, projectId]);
 
-  // 4. MERGE LISTS
-  useEffect(() => {
+  // 4. MERGE LISTS (OPTIMIZED)
+  const combinedTasks = useMemo(() => {
     const taskMap = new Map<string, Task>();
     cloudTasks.forEach((task) => taskMap.set(task.id, task));
     localTasks.forEach((task) => taskMap.set(task.id, task));
-    setCombinedTasks(Array.from(taskMap.values()));
+    return Array.from(taskMap.values());
   }, [cloudTasks, localTasks]);
 
-  // --- SYNC FUNCTIONS ---
-  const handleProjectSync = async () => {
-    const net = await Network.getNetworkStateAsync();
-    if (!net.isConnected) return Alert.alert("Σφάλμα", "Δεν έχετε ίντερνετ.");
-    performSync(localTasks);
-  };
+  // --- OPTIMIZED HANDLERS (OPTIMISTIC UPDATES) ---
 
-  const performSync = async (tasksToUpload: Task[]) => {
-    if (tasksToUpload.length === 0 || isSyncing) return;
-    setIsSyncing(true);
+  const handleDeleteTaskCompletely = useCallback(
+    (task: Task) => {
+      Alert.alert("Διαγραφή", `Διαγραφή "${task.title}";`, [
+        { text: "Άκυρο", style: "cancel" },
+        {
+          text: "Διαγραφή",
+          style: "destructive",
+          onPress: async () => {
+            // 1. ΑΜΕΣΗ ΕΝΗΜΕΡΩΣΗ UI (Optimistic)
+            setCloudTasks((prev) => prev.filter((t) => t.id !== task.id));
+            setLocalTasks((prev) => prev.filter((t) => t.id !== task.id));
 
-    try {
-      const projectRef = doc(db, "projects", projectId);
-      const projectSnap = await getDoc(projectRef);
-
-      if (!projectSnap.exists()) throw new Error("Project not found");
-
-      let currentCloudList: Task[] = projectSnap.data().tasks || [];
-      let changesMade = false;
-
-      for (const task of tasksToUpload) {
-        let processedImages: string[] = [];
-        if (task.images) {
-          for (const imgUri of task.images) {
-            if (imgUri.startsWith("file://")) {
+            // 2. Background Process
+            const net = await Network.getNetworkStateAsync();
+            if (net.isConnected && net.type === Network.NetworkStateType.WIFI) {
               try {
-                const base64Data = await FileSystem.readAsStringAsync(imgUri, {
-                  encoding: "base64",
+                const updatedCloudList = cloudTasks.filter(
+                  (t) => t.id !== task.id,
+                );
+                await updateDoc(doc(db, "projects", projectId), {
+                  tasks: updatedCloudList,
                 });
-                processedImages.push(`data:image/jpeg;base64,${base64Data}`);
               } catch (e) {
-                console.log("Img err", e);
+                console.log("Delete failed", e);
               }
             } else {
-              processedImages.push(imgUri);
+              Alert.alert(
+                "Offline",
+                "Η οριστική διαγραφή στο Cloud απαιτεί WiFi, αλλά αφαιρέθηκε προσωρινά.",
+              );
             }
-          }
-        }
-
-        const { isLocal, ...cleanTask } = task;
-        const taskReady = { ...cleanTask, images: processedImages };
-
-        const existingIndex = currentCloudList.findIndex(
-          (t) => t.id === taskReady.id,
-        );
-        if (existingIndex !== -1) currentCloudList[existingIndex] = taskReady;
-        else currentCloudList.push(taskReady);
-
-        changesMade = true;
-      }
-
-      if (changesMade) {
-        await updateDoc(projectRef, { tasks: currentCloudList });
-        setLocalTasks([]);
-        await AsyncStorage.removeItem(OFFLINE_QUEUE_KEY + projectId);
-      }
-    } catch (error: any) {
-      console.log("Sync Error:", error.message);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
+          },
+        },
+      ]);
+    },
+    [cloudTasks, projectId],
+  );
 
   const saveTaskLocallyAndTrySync = async (task: Task) => {
-    let newLocalList = [...localTasks];
-    const existingIndex = newLocalList.findIndex((t) => t.id === task.id);
+    // 1. ΑΜΕΣΗ ΕΝΗΜΕΡΩΣΗ UI (Optimistic)
+    // Ενημερώνουμε Local Tasks
+    setLocalTasks((prev) => {
+      const newLocalList = [...prev];
+      const existingIndex = newLocalList.findIndex((t) => t.id === task.id);
+      const taskToSave = { ...task, isLocal: true };
 
-    if (existingIndex !== -1)
-      newLocalList[existingIndex] = { ...task, isLocal: true };
-    else newLocalList.push({ ...task, isLocal: true });
+      if (existingIndex !== -1) {
+        newLocalList[existingIndex] = taskToSave;
+      } else {
+        newLocalList.push(taskToSave);
+      }
+      // Save to storage async (don't wait)
+      AsyncStorage.setItem(
+        OFFLINE_QUEUE_KEY + projectId,
+        JSON.stringify(newLocalList),
+      );
+      return newLocalList;
+    });
 
-    setLocalTasks(newLocalList);
-    AsyncStorage.setItem(
-      OFFLINE_QUEUE_KEY + projectId,
-      JSON.stringify(newLocalList),
+    // Ενημερώνουμε και Cloud Tasks προσωρινά για να μην κάνει "flicker"
+    setCloudTasks((prev) =>
+      prev.map((t) => (t.id === task.id ? { ...task, isLocal: true } : t)),
     );
 
-    if (activeTaskForGallery && activeTaskForGallery.id === task.id)
+    if (activeTaskForGallery && activeTaskForGallery.id === task.id) {
       setActiveTaskForGallery(task);
+    }
 
+    // 2. Background Sync
     const net = await Network.getNetworkStateAsync();
     if (net.isConnected && net.type === Network.NetworkStateType.WIFI) {
-      performSync(newLocalList);
+      syncNow().catch((e) => console.log("Sync trigger err", e));
     }
   };
 
-  // --- HANDLERS ---
+  const handleTaskPress = useCallback((task: Task) => {
+    if (task.type === "photo") {
+      setActiveTaskForGallery(task);
+      setGalleryModalVisible(true);
+    } else {
+      setCurrentTaskId(task.id);
+      setCurrentTaskType(task.type);
+      setInputValue(task.value || "");
+      setInputModalVisible(true);
+    }
+  }, []);
+
+  const handleProjectSync = async () => {
+    const net = await Network.getNetworkStateAsync();
+    if (!net.isConnected || !net.isInternetReachable)
+      return Alert.alert("Σφάλμα", "Δεν έχετε ίντερνετ.");
+    await syncNow();
+  };
+
   const handleAddTask = async () => {
-    if (!newTaskTitle.trim()) return Alert.alert("Προσοχή", "Γράψτε τίτλο.");
+    if (!newTaskTitle.trim())
+      return Alert.alert("Προσοχή", "Γράψτε έναν τίτλο.");
+    const uniqueId = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     const newTask: Task = {
-      id: `${Date.now()}`,
+      id: uniqueId,
       title: newTaskTitle,
       description: newTaskDescription,
       type: newTaskType,
@@ -272,132 +407,135 @@ export default function ProjectDetailsScreen() {
     val: string | null,
     status: "completed" | "pending" = "completed",
   ) => {
-    const task = combinedTasks.find((t) => t.id === taskId);
-    if (!task) return;
-    await saveTaskLocallyAndTrySync({
-      ...task,
+    const taskToUpdate = combinedTasks.find((t) => t.id === taskId);
+    if (!taskToUpdate) return;
+
+    setInputModalVisible(false); // Κλείσιμο modal αμέσως
+    const updatedTask: Task = {
+      ...taskToUpdate,
       value: val,
       status: status,
       isLocal: true,
-    });
+    };
+    await saveTaskLocallyAndTrySync(updatedTask);
   };
 
-  const addImageToTask = async (taskId: string, uri: string) => {
-    const task = combinedTasks.find((t) => t.id === taskId);
-    if (!task) return;
-    await saveTaskLocallyAndTrySync({
-      ...task,
-      images: [...(task.images || []), uri],
+  const addImageToTask = async (taskId: string, newImageUri: string) => {
+    const taskToUpdate = combinedTasks.find((t) => t.id === taskId);
+    if (!taskToUpdate) return;
+    const updatedImages = [...(taskToUpdate.images || []), newImageUri];
+    const updatedTask: Task = {
+      ...taskToUpdate,
+      images: updatedImages,
       status: "completed",
       isLocal: true,
-    });
+    };
+    await saveTaskLocallyAndTrySync(updatedTask);
   };
 
-  const removeImageFromTask = async (uri: string) => {
+  const removeImageFromTask = async (imgUri: string) => {
     if (!activeTaskForGallery) return;
-    const updatedImages = (activeTaskForGallery.images || []).filter(
-      (img) => img !== uri,
-    );
-    if (updatedImages.length === 0) setSelectedImageForView(null);
-    await saveTaskLocallyAndTrySync({
+    const currentImages = activeTaskForGallery.images || [];
+    const updatedImages = currentImages.filter((img) => img !== imgUri);
+    const updatedTask: Task = {
       ...activeTaskForGallery,
       images: updatedImages,
       status: updatedImages.length > 0 ? "completed" : "pending",
       isLocal: true,
-    });
+    };
+    if (updatedImages.length === 0) setSelectedImageForView(null);
+    await saveTaskLocallyAndTrySync(updatedTask);
   };
 
-  const saveInput = () => {
-    if (currentTaskId) {
-      setInputModalVisible(false);
-      updateTaskValue(currentTaskId, inputValue, "completed");
+  const saveInput = async () => {
+    if (inputValue && currentTaskId) {
+      await updateTaskValue(currentTaskId, inputValue, "completed");
     }
   };
-  const handleClearValue = () => {
+
+  const handleClearValue = async () => {
     if (currentTaskId) {
-      setInputModalVisible(false);
-      updateTaskValue(currentTaskId, null, "pending");
+      await updateTaskValue(currentTaskId, null, "pending");
+    }
+  };
+
+  // --- CAMERA & FILES ---
+  const saveImageToDevice = async (tempUri: string) => {
+    try {
+      // @ts-ignore
+      const docDir = FileSystem.documentDirectory;
+      if (!docDir) return tempUri;
+      const fileName = tempUri.split("/").pop();
+      const newPath = docDir + fileName;
+      await FileSystem.moveAsync({ from: tempUri, to: newPath });
+      return newPath;
+    } catch (e) {
+      return tempUri;
     }
   };
 
   const launchCamera = async (taskId: string) => {
-    const { granted } = await ImagePicker.requestCameraPermissionsAsync();
-    if (!granted) return Alert.alert("Προσοχή", "Δώστε άδεια κάμερας.");
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted)
+      return Alert.alert("Προσοχή", "Δώστε άδεια κάμερας.");
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.4,
+    });
 
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.4 });
     if (!result.canceled && result.assets[0].uri) {
       setProcessing(true);
       try {
-        const manip = await ImageManipulator.manipulateAsync(
+        const manipResult = await ImageManipulator.manipulateAsync(
           result.assets[0].uri,
-          [{ resize: { width: 600 } }],
-          { compress: 0.5, format: ImageManipulator.SaveFormat.JPEG },
+          [{ resize: { width: 800 } }],
+          { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG },
         );
-        const savedUri = await FileSystem.moveAsync({
-          from: manip.uri,
-          to: FileSystem.documentDirectory + manip.uri.split("/").pop()!,
-        })
-          .then(
-            () => FileSystem.documentDirectory + manip.uri.split("/").pop()!,
-          )
-          .catch(() => manip.uri);
-        await addImageToTask(taskId, savedUri);
-      } catch (e) {
-        Alert.alert("Σφάλμα", "Η φωτογραφία απέτυχε.");
+        const permanentUri = await saveImageToDevice(manipResult.uri);
+        setProcessing(false);
+        await addImageToTask(taskId, permanentUri);
+      } catch (error: any) {
+        setProcessing(false);
+        Alert.alert("Σφάλμα", "Η φωτογραφία δεν αποθηκεύτηκε.");
       }
-      setProcessing(false);
     }
   };
 
   const handleShare = async (uri: string) => {
     if (!uri) return;
-    if (!(await Sharing.isAvailableAsync()))
-      return Alert.alert("Σφάλμα", "Μη διαθέσιμο.");
-    let fileUri = uri;
-    if (uri.startsWith("data:")) {
-      fileUri = FileSystem.cacheDirectory + "temp_share.jpg";
-      await FileSystem.writeAsStringAsync(fileUri, uri.split(",")[1], {
-        encoding: "base64",
+    const isAvailable = await Sharing.isAvailableAsync();
+    if (!isAvailable) return Alert.alert("Σφάλμα", "Share not available");
+    try {
+      await Sharing.shareAsync(uri, {
+        mimeType: "image/jpeg",
+        dialogTitle: "Κοινοποίηση",
       });
-    }
-    await Sharing.shareAsync(fileUri);
-  };
-
-  const handleDeleteTaskCompletely = (task: Task) => {
-    Alert.alert("Διαγραφή", "Σίγουρα;", [
-      { text: "Όχι" },
-      {
-        text: "Ναι",
-        style: "destructive",
-        onPress: async () => {
-          const net = await Network.getNetworkStateAsync();
-          if (net.isConnected && net.type === Network.NetworkStateType.WIFI) {
-            const newList = cloudTasks.filter((t) => t.id !== task.id);
-            await updateDoc(doc(db, "projects", projectId), { tasks: newList });
-          } else Alert.alert("Offline", "Απαιτείται WiFi.");
-        },
-      },
-    ]);
-  };
-
-  const handleTaskPress = (task: Task) => {
-    if (task.type === "photo") {
-      setActiveTaskForGallery(task);
-      setGalleryModalVisible(true);
-    } else {
-      setCurrentTaskId(task.id);
-      setCurrentTaskType(task.type);
-      setInputValue(task.value || "");
-      setInputModalVisible(true);
+    } catch (error) {
+      Alert.alert("Σφάλμα", "Share Failed");
     }
   };
 
+  // --- RENDER ---
   const totalTasks = combinedTasks.length;
   const completedTasks = combinedTasks.filter(
     (t) => t.status === "completed",
   ).length;
   const progressPercent =
     totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
+
+  const renderItem = useCallback(
+    ({ item }: { item: Task }) => (
+      <TaskItem
+        item={item}
+        onPress={handleTaskPress}
+        onLongPress={handleDeleteTaskCompletely}
+        isSyncing={isSyncing}
+      />
+    ),
+    [handleTaskPress, handleDeleteTaskCompletely, isSyncing],
+  );
+
+  const keyExtractor = useCallback((item: Task) => item.id, []);
 
   if (loading)
     return (
@@ -410,11 +548,14 @@ export default function ProjectDetailsScreen() {
     <SafeAreaView style={styles.container}>
       {processing && (
         <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#2563eb" />
-          <Text style={styles.loadingText}>Επεξεργασία...</Text>
+          <View style={styles.loadingBox}>
+            <ActivityIndicator size="large" color="#2563eb" />
+            <Text style={styles.loadingText}>Επεξεργασία...</Text>
+          </View>
         </View>
       )}
 
+      {/* HEADER */}
       <View style={styles.header}>
         <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
           <TouchableOpacity
@@ -436,11 +577,9 @@ export default function ProjectDetailsScreen() {
           </View>
         </View>
         {isSyncing ? (
-          <ActivityIndicator
-            size="small"
-            color="#ea580c"
-            style={{ padding: 10 }}
-          />
+          <View style={styles.syncingBadge}>
+            <ActivityIndicator size="small" color="#ea580c" />
+          </View>
         ) : (
           localTasks.length > 0 && (
             <TouchableOpacity
@@ -463,133 +602,33 @@ export default function ProjectDetailsScreen() {
         )}
       </View>
 
-      <View style={styles.progressSection}>
-        <View style={styles.progressBarBg}>
-          <View
-            style={[styles.progressBarFill, { width: `${progressPercent}%` }]}
-          />
+      {/* PROGRESS BAR */}
+      {totalTasks > 0 && (
+        <View style={styles.progressSection}>
+          <View style={styles.progressBarBg}>
+            <View
+              style={[styles.progressBarFill, { width: `${progressPercent}%` }]}
+            />
+          </View>
         </View>
-      </View>
+      )}
 
+      {/* TASKS LIST */}
       <FlatList
         data={combinedTasks}
-        keyExtractor={(item) => item.id}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
         contentContainerStyle={[
           styles.content,
           { paddingBottom: 100 + insets.bottom },
         ]}
-        renderItem={({ item }) => (
-          <View
-            style={[
-              styles.taskCard,
-              item.isLocal && {
-                borderColor: "#f97316",
-                borderWidth: 1,
-                backgroundColor: "#fff7ed",
-              },
-            ]}
-          >
-            <TouchableOpacity
-              style={{
-                flex: 1,
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
-              onPress={() => handleTaskPress(item)}
-              onLongPress={() => handleDeleteTaskCompletely(item)}
-              delayLongPress={500}
-            >
-              <View
-                style={{ flexDirection: "row", alignItems: "center", flex: 1 }}
-              >
-                <View
-                  style={[
-                    styles.iconBox,
-                    item.status === "completed"
-                      ? styles.iconBoxCompleted
-                      : styles.iconBoxPending,
-                  ]}
-                >
-                  <Ionicons
-                    name={
-                      item.type === "photo"
-                        ? "camera"
-                        : item.type === "measurement"
-                          ? "construct"
-                          : "document-text"
-                    }
-                    size={22}
-                    color={item.status === "completed" ? "#059669" : "#2563eb"}
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text
-                    style={[
-                      styles.taskTitle,
-                      item.status === "completed" && { color: "#64748b" },
-                    ]}
-                    numberOfLines={2}
-                  >
-                    {item.title}
-                  </Text>
-                  {item.description ? (
-                    <Text style={styles.taskDesc} numberOfLines={2}>
-                      {item.description}
-                    </Text>
-                  ) : null}
-                  {item.isLocal && (
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        marginTop: 4,
-                      }}
-                    >
-                      <Ionicons
-                        name="cloud-offline"
-                        size={12}
-                        color="#f97316"
-                      />
-                      <Text
-                        style={{
-                          fontSize: 10,
-                          color: "#f97316",
-                          marginLeft: 4,
-                          fontWeight: "bold",
-                        }}
-                      >
-                        {isSyncing ? "Ανεβαίνει..." : "Προς Ανέβασμα"}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-              {item.type === "photo" ? (
-                item.images && item.images.length > 0 ? (
-                  <View style={{ alignItems: "center" }}>
-                    <Image
-                      source={{ uri: item.images[item.images.length - 1] }}
-                      style={styles.taskThumbnail}
-                      resizeMode="cover"
-                    />
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{item.images.length}</Text>
-                    </View>
-                  </View>
-                ) : (
-                  <Ionicons name="camera-outline" size={24} color="#cbd5e1" />
-                )
-              ) : item.status === "completed" ? (
-                <Text style={styles.taskValueText}>{item.value}</Text>
-              ) : (
-                <Ionicons name="chevron-forward" size={18} color="#cbd5e1" />
-              )}
-            </TouchableOpacity>
-          </View>
-        )}
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={5}
+        removeClippedSubviews={true}
       />
 
+      {/* FAB BUTTON */}
       <TouchableOpacity
         style={[styles.fab, { bottom: 30 + insets.bottom }]}
         onPress={() => setCreateModalVisible(true)}
@@ -612,44 +651,48 @@ export default function ProjectDetailsScreen() {
               <Ionicons name="close-circle" size={32} color="white" />
             </TouchableOpacity>
           </View>
-          <FlatList
-            data={[...(activeTaskForGallery?.images || []), "ADD_BUTTON"]}
-            keyExtractor={(item, index) => index.toString()}
-            numColumns={3}
-            renderItem={({ item }) => {
-              if (item === "ADD_BUTTON")
+          <View style={{ flex: 1, padding: 10 }}>
+            <FlatList
+              data={[...(activeTaskForGallery?.images || []), "ADD_BUTTON"]}
+              keyExtractor={(item, index) => index.toString()}
+              numColumns={3}
+              renderItem={({ item }) => {
+                if (item === "ADD_BUTTON") {
+                  return (
+                    <TouchableOpacity
+                      style={styles.addPhotoTile}
+                      onPress={() =>
+                        activeTaskForGallery &&
+                        launchCamera(activeTaskForGallery.id)
+                      }
+                    >
+                      <Ionicons name="camera" size={32} color="#666" />
+                      <Text style={{ color: "#666", marginTop: 5 }}>
+                        Προσθήκη
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                }
                 return (
                   <TouchableOpacity
-                    style={styles.addPhotoTile}
-                    onPress={() =>
-                      activeTaskForGallery &&
-                      launchCamera(activeTaskForGallery.id)
-                    }
+                    style={styles.photoTile}
+                    onPress={() => setSelectedImageForView(item)}
                   >
-                    <Ionicons name="camera" size={32} color="#666" />
-                    <Text style={{ color: "#666", marginTop: 5 }}>
-                      Προσθήκη
-                    </Text>
+                    <Image
+                      source={{ uri: item }}
+                      style={{ width: "100%", height: "100%" }}
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
+                    />
                   </TouchableOpacity>
                 );
-              return (
-                <TouchableOpacity
-                  style={styles.photoTile}
-                  onPress={() => setSelectedImageForView(item)}
-                >
-                  <Image
-                    source={{ uri: item }}
-                    style={{ width: "100%", height: "100%" }}
-                    resizeMode="cover"
-                  />
-                </TouchableOpacity>
-              );
-            }}
-          />
+              }}
+            />
+          </View>
         </SafeAreaView>
       </Modal>
 
-      {/* FULL IMAGE */}
+      {/* FULL SCREEN IMAGE VIEW */}
       <Modal
         visible={!!selectedImageForView}
         transparent={true}
@@ -660,7 +703,7 @@ export default function ProjectDetailsScreen() {
             <Image
               source={{ uri: selectedImageForView }}
               style={styles.fullImage}
-              resizeMode="contain"
+              contentFit="contain"
             />
           )}
           <TouchableOpacity
@@ -672,17 +715,18 @@ export default function ProjectDetailsScreen() {
           <View style={styles.toolBar}>
             <TouchableOpacity
               style={styles.toolBtn}
-              onPress={() =>
-                selectedImageForView &&
-                Alert.alert("Διαγραφή", "Να διαγραφεί;", [
-                  { text: "Όχι" },
-                  {
-                    text: "Ναι",
-                    style: "destructive",
-                    onPress: () => removeImageFromTask(selectedImageForView),
-                  },
-                ])
-              }
+              onPress={() => {
+                if (selectedImageForView) {
+                  Alert.alert("Διαγραφή", "Να διαγραφεί;", [
+                    { text: "Όχι" },
+                    {
+                      text: "Ναι",
+                      style: "destructive",
+                      onPress: () => removeImageFromTask(selectedImageForView),
+                    },
+                  ]);
+                }
+              }}
             >
               <Ionicons name="trash-outline" size={24} color="#ef4444" />
               <Text style={[styles.toolText, { color: "#ef4444" }]}>
@@ -702,7 +746,7 @@ export default function ProjectDetailsScreen() {
         </View>
       </Modal>
 
-      {/* CREATE MODAL */}
+      {/* CREATE TASK MODAL */}
       <Modal visible={createModalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -715,55 +759,88 @@ export default function ProjectDetailsScreen() {
             <Text style={styles.label}>Τίτλος</Text>
             <TextInput
               style={styles.input}
-              placeholder="π.χ. Έλεγχος"
+              placeholder="π.χ. Έλεγχος Κουζίνας"
               autoFocus
               value={newTaskTitle}
               onChangeText={setNewTaskTitle}
             />
             <Text style={styles.label}>Περιγραφή</Text>
             <TextInput
-              style={[styles.input, { height: 60 }]}
+              style={[styles.input, { height: 60, textAlignVertical: "top" }]}
               placeholder="Λεπτομέρειες..."
               value={newTaskDescription}
               onChangeText={setNewTaskDescription}
               multiline={true}
+              numberOfLines={2}
             />
-            <Text style={styles.label}>Τύπος</Text>
+            <Text style={styles.label}>Τύπος Εργασίας</Text>
             <View style={styles.optionsContainer}>
-              {["photo", "measurement", "general"].map((t) => (
-                <TouchableOpacity
-                  key={t}
+              {/* PHOTO */}
+              <TouchableOpacity
+                style={[
+                  styles.optionCard,
+                  newTaskType === "photo" && styles.optionCardActive,
+                ]}
+                onPress={() => setNewTaskType("photo")}
+              >
+                <Ionicons
+                  name="camera"
+                  size={28}
+                  color={newTaskType === "photo" ? "white" : "#64748b"}
+                />
+                <Text
                   style={[
-                    styles.optionCard,
-                    newTaskType === t && styles.optionCardActive,
+                    styles.optionText,
+                    newTaskType === "photo" && { color: "white" },
                   ]}
-                  onPress={() => setNewTaskType(t as any)}
                 >
-                  <Ionicons
-                    name={
-                      t === "photo"
-                        ? "camera"
-                        : t === "measurement"
-                          ? "construct"
-                          : "document-text"
-                    }
-                    size={28}
-                    color={newTaskType === t ? "white" : "#64748b"}
-                  />
-                  <Text
-                    style={[
-                      styles.optionText,
-                      newTaskType === t && { color: "white" },
-                    ]}
-                  >
-                    {t === "photo"
-                      ? "Φώτο"
-                      : t === "measurement"
-                        ? "Μέτρηση"
-                        : "Κείμενο"}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                  Φωτογραφία
+                </Text>
+              </TouchableOpacity>
+              {/* MEASUREMENT */}
+              <TouchableOpacity
+                style={[
+                  styles.optionCard,
+                  newTaskType === "measurement" && styles.optionCardActive,
+                ]}
+                onPress={() => setNewTaskType("measurement")}
+              >
+                <Ionicons
+                  name="construct"
+                  size={28}
+                  color={newTaskType === "measurement" ? "white" : "#64748b"}
+                />
+                <Text
+                  style={[
+                    styles.optionText,
+                    newTaskType === "measurement" && { color: "white" },
+                  ]}
+                >
+                  Μέτρηση
+                </Text>
+              </TouchableOpacity>
+              {/* GENERAL */}
+              <TouchableOpacity
+                style={[
+                  styles.optionCard,
+                  newTaskType === "general" && styles.optionCardActive,
+                ]}
+                onPress={() => setNewTaskType("general")}
+              >
+                <Ionicons
+                  name="document-text"
+                  size={28}
+                  color={newTaskType === "general" ? "white" : "#64748b"}
+                />
+                <Text
+                  style={[
+                    styles.optionText,
+                    newTaskType === "general" && { color: "white" },
+                  ]}
+                >
+                  Κείμενο
+                </Text>
+              </TouchableOpacity>
             </View>
             <TouchableOpacity style={styles.mainButton} onPress={handleAddTask}>
               <Text style={styles.mainButtonText}>ΔΗΜΙΟΥΡΓΙΑ</Text>
@@ -777,7 +854,11 @@ export default function ProjectDetailsScreen() {
         onClose={() => setInputModalVisible(false)}
         onSave={saveInput}
         onClear={handleClearValue}
-        title={currentTaskType === "measurement" ? "Καταγραφή" : "Σημείωση"}
+        title={
+          currentTaskType === "measurement"
+            ? "Καταγραφή Μέτρησης"
+            : "Σημείωση Κειμένου"
+        }
         value={inputValue}
         onChangeText={setInputValue}
         keyboardType="default"
@@ -790,24 +871,6 @@ export default function ProjectDetailsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f8fafc", marginTop: 20 },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  loadingOverlay: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: "rgba(255,255,255,0.8)",
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 9999,
-  },
-  loadingBox: {
-    padding: 20,
-    backgroundColor: "white",
-    borderRadius: 10,
-    elevation: 5,
-  },
-  loadingText: { marginTop: 10, color: "#333", fontWeight: "bold" },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -828,6 +891,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#2563eb",
     justifyContent: "center",
     alignItems: "center",
+    shadowColor: "#2563eb",
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
   },
   syncButtonHeader: {
     flexDirection: "row",
@@ -837,6 +903,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#f97316",
     borderRadius: 20,
   },
+  syncingBadge: { padding: 10 },
   progressSection: { backgroundColor: "white", paddingBottom: 0 },
   progressBarBg: { height: 3, backgroundColor: "#e2e8f0", width: "100%" },
   progressBarFill: { height: "100%", backgroundColor: "#10b981" },
@@ -848,6 +915,10 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     flexDirection: "row",
     alignItems: "center",
+    shadowColor: "#64748b",
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
     elevation: 2,
   },
   iconBox: {
@@ -899,6 +970,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     elevation: 8,
+    shadowColor: "#2563eb",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
     zIndex: 999,
   },
   modalOverlay: {
@@ -926,6 +1001,7 @@ const styles = StyleSheet.create({
     color: "#64748b",
     marginBottom: 8,
     textTransform: "uppercase",
+    letterSpacing: 0.5,
   },
   input: {
     backgroundColor: "#f8fafc",
@@ -972,6 +1048,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
     letterSpacing: 1,
   },
+  loadingOverlay: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "rgba(255,255,255,0.8)",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 9999,
+  },
+  loadingBox: {
+    padding: 20,
+    backgroundColor: "white",
+    borderRadius: 10,
+    elevation: 5,
+  },
+  loadingText: { marginTop: 10, color: "#333", fontWeight: "bold" },
   modalBackground: {
     flex: 1,
     backgroundColor: "#000",

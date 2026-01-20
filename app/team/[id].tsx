@@ -212,11 +212,20 @@ export default function TeamProjectsScreen() {
       if (inputMode === "newProject" && activeGroupId) {
         const newProjectId =
           Date.now().toString() + Math.random().toString(36).substr(2, 5);
+
+        // --- UPDATED LOGIC: Founder/Admin vs Supervisor ---
+        let initialSupervisors: string[] = [];
+        // Αν είμαι Supervisor, μπαίνω αυτόματα.
+        // Αν είμαι Founder/Admin, το αφήνω κενό για ανάθεση.
+        if (myRole === "Supervisor") {
+          initialSupervisors = [currentUserId];
+        }
+
         const newProject: Project = {
           id: newProjectId,
           title: tempValue,
           status: "active",
-          supervisors: [currentUserId],
+          supervisors: initialSupervisors,
           members: [],
           createdBy: currentUserId,
           teamId: teamId,
@@ -255,7 +264,7 @@ export default function TeamProjectsScreen() {
     }
   };
 
-  // --- STRICT ROLE LOGIC V3 (THE GOD MODE FIX) ---
+  // --- STRICT ROLE LOGIC (ADMIN GHOST MODE) ---
   const changeUserRole = async (
     targetUser: User,
     action: "promote" | "demote" | "kick",
