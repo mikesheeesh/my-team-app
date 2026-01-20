@@ -1,55 +1,90 @@
-import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as ImagePicker from 'expo-image-picker';
-import * as Network from 'expo-network';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Modal, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as ImagePicker from "expo-image-picker";
+import * as Network from "expo-network";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useEffect, useState } from "react";
+import {
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Image,
+    Modal,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import InputModal from '../components/InputModal';
+import InputModal from "../components/InputModal";
 
 // FIREBASE
-import { onAuthStateChanged } from 'firebase/auth';
-import { arrayRemove, deleteDoc, deleteField, doc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
-import { auth, db } from '../../firebaseConfig';
+import { onAuthStateChanged } from "firebase/auth";
+import {
+    arrayRemove,
+    deleteDoc,
+    deleteField,
+    doc,
+    getDoc,
+    onSnapshot,
+    serverTimestamp,
+    setDoc,
+    updateDoc,
+} from "firebase/firestore";
+import { auth, db } from "../../firebaseConfig";
 
-type Role = 'Founder' | 'Admin' | 'Supervisor' | 'User';
+type Role = "Founder" | "Admin" | "Supervisor" | "User";
 type User = { id: string; email: string; role: Role; name: string };
-type Project = { id: string; title: string; status: 'active' | 'pending'; supervisors: string[]; members: string[]; createdBy?: string; teamId?: string };
+type Project = {
+  id: string;
+  title: string;
+  status: "active" | "pending";
+  supervisors: string[];
+  members: string[];
+  createdBy?: string;
+  teamId?: string;
+};
 type Group = { id: string; title: string; projects: Project[] };
 
 export default function TeamProjectsScreen() {
   const router = useRouter();
-  const { id } = useLocalSearchParams(); 
+  const { id } = useLocalSearchParams();
   const teamId = id as string;
   const insets = useSafeAreaInsets();
 
   const [loading, setLoading] = useState(true);
-  const [myRole, setMyRole] = useState<Role>('User'); 
-  const [currentUserId, setCurrentUserId] = useState<string>(''); 
+  const [myRole, setMyRole] = useState<Role>("User");
+  const [currentUserId, setCurrentUserId] = useState<string>("");
 
-  const [teamName, setTeamName] = useState('');
-  const [teamContact, setTeamContact] = useState('');
+  const [teamName, setTeamName] = useState("");
+  const [teamContact, setTeamContact] = useState("");
   const [teamLogo, setTeamLogo] = useState<string | null>(null);
   const [users, setUsers] = useState<User[]>([]);
-  const [groups, setGroups] = useState<Group[]>([]); 
+  const [groups, setGroups] = useState<Group[]>([]);
 
   // MODALS
-  const [menuVisible, setMenuVisible] = useState(false); // <--- ΤΟ ΚΕΝΤΡΙΚΟ ΜΕΝΟΥ (ΓΡΑΝΑΖΙ)
+  const [menuVisible, setMenuVisible] = useState(false);
   const [usersModalVisible, setUsersModalVisible] = useState(false);
   const [projectSettingsVisible, setProjectSettingsVisible] = useState(false);
-  const [settingsSubMenuVisible, setSettingsSubMenuVisible] = useState(false); // <--- ΥΠΟ-ΜΕΝΟΥ ΓΙΑ ΡΥΘΜΙΣΕΙΣ
+  const [settingsSubMenuVisible, setSettingsSubMenuVisible] = useState(false);
 
-  const [selectedProject, setSelectedProject] = useState<{groupId: string, project: Project} | null>(null);
+  const [selectedProject, setSelectedProject] = useState<{
+    groupId: string;
+    project: Project;
+  } | null>(null);
   const [moveModalVisible, setMoveModalVisible] = useState(false);
-  
+
   // INPUT
   const [inputVisible, setInputVisible] = useState(false);
-  const [inputMode, setInputMode] = useState<'teamName' | 'teamContact' | 'newGroup' | 'newProject'>('teamName');
-  const [tempValue, setTempValue] = useState('');
+  const [inputMode, setInputMode] = useState<
+    "teamName" | "teamContact" | "newGroup" | "newProject"
+  >("teamName");
+  const [tempValue, setTempValue] = useState("");
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
-  
+
   const CACHE_KEY = `cached_team_${teamId}`;
 
   // 1. DATA LOADING
@@ -57,145 +92,285 @@ export default function TeamProjectsScreen() {
     if (!teamId) return;
 
     const loadCache = async () => {
-        try {
-            const cached = await AsyncStorage.getItem(CACHE_KEY);
-            if (cached) {
-                const data = JSON.parse(cached);
-                setTeamName(data.name);
-                setTeamContact(data.contactEmail || '');
-                setTeamLogo(data.logo || null);
-                setGroups(data.groups || []);
-                if (data.myRole) setMyRole(data.myRole);
-                if (data.users) setUsers(data.users);
-                setLoading(false);
-            }
-        } catch (e) {}
+      try {
+        const cached = await AsyncStorage.getItem(CACHE_KEY);
+        if (cached) {
+          const data = JSON.parse(cached);
+          setTeamName(data.name);
+          setTeamContact(data.contactEmail || "");
+          setTeamLogo(data.logo || null);
+          setGroups(data.groups || []);
+          if (data.myRole) setMyRole(data.myRole);
+          if (data.users) setUsers(data.users);
+          setLoading(false);
+        }
+      } catch (e) {}
     };
     loadCache();
 
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-        if (user) {
-            setCurrentUserId(user.uid);
-            
-            const teamRef = doc(db, "teams", teamId);
-            const unsubscribeTeam = onSnapshot(teamRef, { includeMetadataChanges: true }, async (docSnap) => {
-              if (docSnap.exists()) {
-                const data = docSnap.data();
+      if (user) {
+        setCurrentUserId(user.uid);
 
-                setTeamName(data.name);
-                setTeamContact(data.contactEmail || '');
-                setTeamLogo(data.logo || null);
-                setGroups(data.groups || []);
+        const teamRef = doc(db, "teams", teamId);
+        const unsubscribeTeam = onSnapshot(
+          teamRef,
+          { includeMetadataChanges: true },
+          async (docSnap) => {
+            if (docSnap.exists()) {
+              const data = docSnap.data();
 
-                let role = 'User';
-                if (data.roles && data.roles[user.uid]) {
-                  role = data.roles[user.uid] as Role;
-                  setMyRole(role as Role);
-                }
+              setTeamName(data.name);
+              setTeamContact(data.contactEmail || "");
+              setTeamLogo(data.logo || null);
+              setGroups(data.groups || []);
 
-                let loadedUsers: User[] = [];
-                if (data.memberIds && data.memberIds.length > 0) {
-                    for (const uid of data.memberIds) {
-                        let userData = { fullname: 'Μέλος', email: '...' };
-                        try {
-                            const userDoc = await getDoc(doc(db, "users", uid));
-                            if (userDoc.exists()) { userData = userDoc.data() as any; }
-                        } catch (e) {}
-
-                        loadedUsers.push({
-                            id: uid,
-                            name: userData.fullname || 'Χρήστης',
-                            email: uid === user.uid ? 'Εγώ' : (userData.email || '...'),
-                            role: data.roles[uid] || 'User'
-                        });
-                    }
-                    setUsers(loadedUsers);
-                }
-
-                const cacheData = {
-                    name: data.name,
-                    contactEmail: data.contactEmail,
-                    logo: data.logo,
-                    groups: data.groups,
-                    myRole: role,
-                    users: loadedUsers
-                };
-                AsyncStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
-                
-                setLoading(false);
+              let role = "User";
+              if (data.roles && data.roles[user.uid]) {
+                role = data.roles[user.uid] as Role;
+                setMyRole(role as Role);
               }
-            }, (error) => {
-                console.log("Team Snapshot Error:", error);
-                setLoading(false);
-            });
 
-            return () => unsubscribeTeam();
-        } else {
+              let loadedUsers: User[] = [];
+              if (data.memberIds && data.memberIds.length > 0) {
+                for (const uid of data.memberIds) {
+                  let userData = { fullname: "Μέλος", email: "..." };
+                  try {
+                    const userDoc = await getDoc(doc(db, "users", uid));
+                    if (userDoc.exists()) {
+                      userData = userDoc.data() as any;
+                    }
+                  } catch (e) {}
+
+                  loadedUsers.push({
+                    id: uid,
+                    name: userData.fullname || "Χρήστης",
+                    email: uid === user.uid ? "Εγώ" : userData.email || "...",
+                    role: data.roles[uid] || "User",
+                  });
+                }
+                setUsers(loadedUsers);
+              }
+
+              const cacheData = {
+                name: data.name,
+                contactEmail: data.contactEmail,
+                logo: data.logo,
+                groups: data.groups,
+                myRole: role,
+                users: loadedUsers,
+              };
+              AsyncStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
+
+              setLoading(false);
+            }
+          },
+          (error) => {
+            console.log("Team Snapshot Error:", error);
             setLoading(false);
-        }
+          },
+        );
+
+        return () => unsubscribeTeam();
+      } else {
+        setLoading(false);
+      }
     });
 
     return () => unsubscribeAuth();
   }, [teamId]);
 
   const checkOnline = async () => {
-      const net = await Network.getNetworkStateAsync();
-      if (!net.isConnected || !net.isInternetReachable) {
-          Alert.alert("Offline", "Δεν έχετε ίντερνετ.");
-          return false;
-      }
-      return true;
+    const net = await Network.getNetworkStateAsync();
+    if (!net.isConnected || !net.isInternetReachable) {
+      Alert.alert("Offline", "Δεν έχετε ίντερνετ.");
+      return false;
+    }
+    return true;
   };
 
   const updateTeamData = async (field: string, value: any) => {
     const isOnline = await checkOnline();
     if (!isOnline) return;
-    try { await updateDoc(doc(db, "teams", teamId), { [field]: value }); } 
-    catch (err: any) { Alert.alert("Σφάλμα", err.message); }
+    try {
+      await updateDoc(doc(db, "teams", teamId), { [field]: value });
+    } catch (err: any) {
+      Alert.alert("Σφάλμα", err.message);
+    }
   };
 
   const handleSaveInput = async () => {
     const isOnline = await checkOnline();
     if (!isOnline) {
-        setInputVisible(false);
-        return;
+      setInputVisible(false);
+      return;
     }
 
     if (!tempValue.trim()) return;
-    
+
     try {
-        if (inputMode === 'newProject' && activeGroupId) {
-            const newProjectId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
-            const newProject: Project = { 
-                id: newProjectId, 
-                title: tempValue, 
-                status: 'active', 
-                supervisors: [currentUserId], 
-                members: [],
-                createdBy: currentUserId,
-                teamId: teamId 
-            };
-            const updatedGroups = groups.map(g => g.id === activeGroupId ? { ...g, projects: [...g.projects, newProject] } : g);
-            
-            await updateTeamData('groups', updatedGroups);
-            await setDoc(doc(db, "projects", newProjectId), { ...newProject, tasks: [], createdAt: serverTimestamp() });
+      if (inputMode === "newProject" && activeGroupId) {
+        const newProjectId =
+          Date.now().toString() + Math.random().toString(36).substr(2, 5);
+        const newProject: Project = {
+          id: newProjectId,
+          title: tempValue,
+          status: "active",
+          supervisors: [currentUserId],
+          members: [],
+          createdBy: currentUserId,
+          teamId: teamId,
+        };
+        const updatedGroups = groups.map((g) =>
+          g.id === activeGroupId
+            ? { ...g, projects: [...g.projects, newProject] }
+            : g,
+        );
 
-        } else if (inputMode === 'newGroup') {
-            const newGroup: Group = { id: Date.now().toString(), title: tempValue, projects: [] };
-            await updateTeamData('groups', [...groups, newGroup]);
+        await updateTeamData("groups", updatedGroups);
+        await setDoc(doc(db, "projects", newProjectId), {
+          ...newProject,
+          tasks: [],
+          createdAt: serverTimestamp(),
+        });
+      } else if (inputMode === "newGroup") {
+        const newGroup: Group = {
+          id: Date.now().toString(),
+          title: tempValue,
+          projects: [],
+        };
+        await updateTeamData("groups", [...groups, newGroup]);
+      } else if (inputMode === "teamName") {
+        await updateTeamData("name", tempValue);
+      } else if (inputMode === "teamContact") {
+        await updateTeamData("contactEmail", tempValue);
+      }
 
-        } else if (inputMode === 'teamName') {
-            await updateTeamData('name', tempValue);
+      setInputVisible(false);
+      setTempValue("");
+      setMenuVisible(false);
+      setSettingsSubMenuVisible(false);
+    } catch (error: any) {
+      Alert.alert("Σφάλμα", error.message);
+    }
+  };
 
-        } else if (inputMode === 'teamContact') {
-            await updateTeamData('contactEmail', tempValue);
+  // --- STRICT ROLE LOGIC V3 (THE GOD MODE FIX) ---
+  const changeUserRole = async (
+    targetUser: User,
+    action: "promote" | "demote" | "kick",
+  ) => {
+    const isOnline = await checkOnline();
+    if (!isOnline) return;
+
+    if (myRole === "Supervisor" && targetUser.role !== "User")
+      return Alert.alert(
+        "Απαγορεύεται",
+        "Μπορείτε να διαχειριστείτε μόνο απλούς χρήστες.",
+      );
+    if (targetUser.role === "Founder")
+      return Alert.alert("Απαγορεύεται", "Δεν πειράζουμε τον Ιδρυτή.");
+
+    if (action === "kick") {
+      Alert.alert("Διαγραφή Μέλους", `Αφαίρεση "${targetUser.name}";`, [
+        { text: "Άκυρο", style: "cancel" },
+        {
+          text: "Διαγραφή",
+          style: "destructive",
+          onPress: async () => {
+            setUsers((prev) => prev.filter((u) => u.id !== targetUser.id));
+            await updateDoc(doc(db, "teams", teamId), {
+              memberIds: arrayRemove(targetUser.id),
+              [`roles.${targetUser.id}`]: deleteField(),
+            });
+          },
+        },
+      ]);
+      return;
+    }
+
+    let newRole: Role = targetUser.role;
+
+    // Yπολογισμός Νέου Ρόλου
+    if (action === "promote") {
+      if (targetUser.role === "User") newRole = "Supervisor";
+      else if (targetUser.role === "Supervisor") newRole = "Admin";
+    } else if (action === "demote") {
+      if (targetUser.role === "Admin") newRole = "Supervisor";
+      else if (targetUser.role === "Supervisor") newRole = "User";
+    }
+
+    if (newRole === targetUser.role) return;
+
+    // 1. UI Update (Optimistic)
+    setUsers((prevUsers) =>
+      prevUsers.map((u) =>
+        u.id === targetUser.id ? { ...u, role: newRole } : u,
+      ),
+    );
+
+    // 2. PROJECT CLEANUP LOGIC
+    let updatedGroups = groups;
+
+    updatedGroups = groups.map((group) => {
+      const updatedProjects = group.projects.map((project) => {
+        let newSups = [...project.supervisors];
+        let newMems = [...project.members];
+        let changed = false;
+
+        if (newRole === "Admin") {
+          // ADMIN = ΦΕΥΓΕΙ ΑΠΟ ΠΑΝΤΟΥ (Clean Sweep)
+          if (newSups.includes(targetUser.id)) {
+            newSups = newSups.filter((id) => id !== targetUser.id);
+            changed = true;
+          }
+          if (newMems.includes(targetUser.id)) {
+            newMems = newMems.filter((id) => id !== targetUser.id);
+            changed = true;
+          }
+        } else if (newRole === "Supervisor") {
+          // SUP = ΦΕΥΓΕΙ ΑΠΟ MEMBERS
+          if (newMems.includes(targetUser.id)) {
+            newMems = newMems.filter((id) => id !== targetUser.id);
+            changed = true;
+          }
+          // Δεν τον βάζουμε αυτόματα στους Sups (Clean Slate)
+        } else if (newRole === "User") {
+          // USER = ΦΕΥΓΕΙ ΑΠΟ SUPERVISORS
+          if (newSups.includes(targetUser.id)) {
+            newSups = newSups.filter((id) => id !== targetUser.id);
+            changed = true;
+          }
+          // Δεν τον βάζουμε αυτόματα στα Members (Clean Slate)
         }
-        
-        setInputVisible(false);
-        setTempValue('');
-        setMenuVisible(false); // Κλείσιμο μενού
-        setSettingsSubMenuVisible(false);
-    } catch (error: any) { Alert.alert("Σφάλμα", error.message); }
+
+        // Ενημέρωση Βάσης (Projects)
+        if (changed) {
+          updateDoc(doc(db, "projects", project.id), {
+            supervisors: newSups,
+            members: newMems,
+          }).catch((e) => console.log("Project update failed", e));
+        }
+
+        return { ...project, supervisors: newSups, members: newMems };
+      });
+      return { ...group, projects: updatedProjects };
+    });
+
+    // Ενημερώνουμε τα Groups τοπικά για να αλλάξουν τα νούμερα
+    setGroups(updatedGroups);
+
+    // 3. Ενημέρωση Βάσης (Teams - Roles & Groups Snapshot)
+    try {
+      await updateDoc(doc(db, "teams", teamId), {
+        [`roles.${targetUser.id}`]: newRole,
+        groups: updatedGroups, // Σώζουμε και τη νέα δομή στα teams
+      });
+      console.log("Global role updated successfully.");
+    } catch (error) {
+      console.error("Role update failed:", error);
+      Alert.alert("Σφάλμα", "Η αλλαγή ρόλου απέτυχε.");
+    }
   };
 
   const handleDeleteProject = async () => {
@@ -204,108 +379,122 @@ export default function TeamProjectsScreen() {
 
     if (!selectedProject) return;
     const { groupId, project } = selectedProject;
-    
+
     Alert.alert("Διαγραφή Project", "Είστε σίγουροι;", [
-        { text: "Ακύρωση" },
-        { text: "Διαγραφή", style: 'destructive', onPress: async () => {
-            const updatedGroups = groups.map(g => g.id === groupId ? { ...g, projects: g.projects.filter(p => p.id !== project.id) } : g);
-            await updateTeamData('groups', updatedGroups);
-            try { await deleteDoc(doc(db, "projects", project.id)); } catch(e) {}
-            setProjectSettingsVisible(false);
-        }}
+      { text: "Ακύρωση" },
+      {
+        text: "Διαγραφή",
+        style: "destructive",
+        onPress: async () => {
+          const updatedGroups = groups.map((g) =>
+            g.id === groupId
+              ? {
+                  ...g,
+                  projects: g.projects.filter((p) => p.id !== project.id),
+                }
+              : g,
+          );
+          await updateTeamData("groups", updatedGroups);
+          try {
+            await deleteDoc(doc(db, "projects", project.id));
+          } catch (e) {}
+          setProjectSettingsVisible(false);
+        },
+      },
     ]);
   };
 
-  const changeUserRole = async (targetUser: User, action: 'promote' | 'demote' | 'kick') => {
-    const isOnline = await checkOnline();
-    if (!isOnline) return;
-
-    if (myRole === 'Supervisor' && targetUser.role !== 'User') return Alert.alert("Απαγορεύεται", "Μπορείτε να διαχειριστείτε μόνο απλούς χρήστες.");
-    if (targetUser.role === 'Founder') return Alert.alert("Απαγορεύεται", "Δεν πειράζουμε τον Ιδρυτή.");
-
-    if (action === 'kick') {
-        Alert.alert("Διαγραφή Μέλους", `Αφαίρεση "${targetUser.name}";`, [
-                { text: "Άκυρο", style: "cancel" },
-                { text: "Διαγραφή", style: "destructive", onPress: async () => {
-                        setUsers(prev => prev.filter(u => u.id !== targetUser.id));
-                        await updateDoc(doc(db, "teams", teamId), { 
-                            memberIds: arrayRemove(targetUser.id),
-                            [`roles.${targetUser.id}`]: deleteField() 
-                        });
-                }}
-        ]);
-        return;
-    }
-
-    let newRole: Role = targetUser.role;
-    if (action === 'promote') {
-      if (targetUser.role === 'User') newRole = 'Supervisor';
-      else if (targetUser.role === 'Supervisor') newRole = 'Admin';
-    } else if (action === 'demote') {
-      if (targetUser.role === 'Admin') newRole = 'Supervisor';
-      else if (targetUser.role === 'Supervisor') newRole = 'User';
-    }
-
-    setUsers(prevUsers => prevUsers.map(u => u.id === targetUser.id ? { ...u, role: newRole } : u));
-    await updateDoc(doc(db, "teams", teamId), { [`roles.${targetUser.id}`]: newRole });
-  };
-  
-  const toggleProjectRole = async (userId: string, type: 'supervisor' | 'member') => {
+  const toggleProjectRole = async (
+    userId: string,
+    type: "supervisor" | "member",
+  ) => {
     const isOnline = await checkOnline();
     if (!isOnline) return;
     if (!selectedProject) return;
     const { groupId, project } = selectedProject;
     let updatedProject = { ...project };
 
-    if (type === 'supervisor') {
-        updatedProject.supervisors.includes(userId) 
-            ? updatedProject.supervisors = updatedProject.supervisors.filter(id => id !== userId)
-            : updatedProject.supervisors.push(userId);
+    if (type === "supervisor") {
+      updatedProject.supervisors.includes(userId)
+        ? (updatedProject.supervisors = updatedProject.supervisors.filter(
+            (id) => id !== userId,
+          ))
+        : updatedProject.supervisors.push(userId);
     } else {
-        updatedProject.members.includes(userId)
-            ? updatedProject.members = updatedProject.members.filter(id => id !== userId)
-            : updatedProject.members.push(userId);
+      updatedProject.members.includes(userId)
+        ? (updatedProject.members = updatedProject.members.filter(
+            (id) => id !== userId,
+          ))
+        : updatedProject.members.push(userId);
     }
-    const updatedGroups = groups.map(g => g.id === groupId ? { ...g, projects: g.projects.map(p => p.id === project.id ? updatedProject : p) } : g);
-    
-    await updateTeamData('groups', updatedGroups);
-    try { await updateDoc(doc(db, "projects", project.id), { supervisors: updatedProject.supervisors, members: updatedProject.members }); } catch(e) {}
+    const updatedGroups = groups.map((g) =>
+      g.id === groupId
+        ? {
+            ...g,
+            projects: g.projects.map((p) =>
+              p.id === project.id ? updatedProject : p,
+            ),
+          }
+        : g,
+    );
+
+    await updateTeamData("groups", updatedGroups);
+    try {
+      await updateDoc(doc(db, "projects", project.id), {
+        supervisors: updatedProject.supervisors,
+        members: updatedProject.members,
+      });
+    } catch (e) {}
     setSelectedProject({ groupId, project: updatedProject });
   };
 
   const pickLogo = async () => {
     const isOnline = await checkOnline();
     if (!isOnline) return;
-    const result = await ImagePicker.launchImageLibraryAsync({ 
-        mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.2, base64: true 
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.2,
+      base64: true,
     });
     if (!result.canceled && result.assets[0].base64) {
-        const imageUri = `data:image/jpeg;base64,${result.assets[0].base64}`;
-        await updateTeamData('logo', imageUri);
-        setSettingsSubMenuVisible(false);
-        setMenuVisible(false);
+      const imageUri = `data:image/jpeg;base64,${result.assets[0].base64}`;
+      await updateTeamData("logo", imageUri);
+      setSettingsSubMenuVisible(false);
+      setMenuVisible(false);
     }
   };
 
   const handleDeleteLogo = async () => {
     const isOnline = await checkOnline();
     if (!isOnline) return;
-    Alert.alert("Διαγραφή Logo", "Διαγραφή;", [{text:'Όχι'}, {text:'Ναι', onPress: async () => {
-        await updateTeamData('logo', null);
-        setSettingsSubMenuVisible(false);
-        setMenuVisible(false);
-    }}]);
+    Alert.alert("Διαγραφή Logo", "Διαγραφή;", [
+      { text: "Όχι" },
+      {
+        text: "Ναι",
+        onPress: async () => {
+          await updateTeamData("logo", null);
+          setSettingsSubMenuVisible(false);
+          setMenuVisible(false);
+        },
+      },
+    ]);
   };
 
   const handleDeleteTeam = () => {
     Alert.alert("Διαγραφή Ομάδας", "ΠΡΟΣΟΧΗ: Θα διαγραφούν τα πάντα.", [
-        { text: "Ακύρωση" },
-        { text: "ΔΙΑΓΡΑΦΗ", style: 'destructive', onPress: async () => {
-            const isOnline = await checkOnline();
-            if (!isOnline) return;
-            await deleteDoc(doc(db, "teams", teamId));
-            router.replace('/dashboard');
-        }}
+      { text: "Ακύρωση" },
+      {
+        text: "ΔΙΑΓΡΑΦΗ",
+        style: "destructive",
+        onPress: async () => {
+          const isOnline = await checkOnline();
+          if (!isOnline) return;
+          await deleteDoc(doc(db, "teams", teamId));
+          router.replace("/dashboard");
+        },
+      },
     ]);
   };
 
@@ -313,27 +502,38 @@ export default function TeamProjectsScreen() {
     const isOnline = await checkOnline();
     if (!isOnline) return;
     setInputMode(mode);
-    setTempValue('');
+    setTempValue("");
     if (groupId) setActiveGroupId(groupId);
-    setMenuVisible(false); 
+    setMenuVisible(false);
     setInputVisible(true);
   };
 
   const handleInvite = async () => {
-      const isOnline = await checkOnline();
-      if (!isOnline) return;
-      setMenuVisible(false); 
-      router.push({ pathname: '/onboarding/invite', params: { teamId: teamId, teamName: teamName } });
+    const isOnline = await checkOnline();
+    if (!isOnline) return;
+    setMenuVisible(false);
+    router.push({
+      pathname: "/onboarding/invite",
+      params: { teamId: teamId, teamName: teamName },
+    });
   };
 
   const handleDeleteGroup = async (groupId: string, projectCount: number) => {
     const isOnline = await checkOnline();
     if (!isOnline) return;
-    if (projectCount > 0) return Alert.alert("Αδύνατη Διαγραφή", "Το Group δεν είναι άδειο.");
-    Alert.alert("Διαγραφή Group", "Είστε σίγουροι;", [{ text: "Όχι" }, { text: "Ναι", style: 'destructive', onPress: async () => {
-        const updatedGroups = groups.filter(g => g.id !== groupId);
-        await updateTeamData('groups', updatedGroups);
-    }}]);
+    if (projectCount > 0)
+      return Alert.alert("Αδύνατη Διαγραφή", "Το Group δεν είναι άδειο.");
+    Alert.alert("Διαγραφή Group", "Είστε σίγουροι;", [
+      { text: "Όχι" },
+      {
+        text: "Ναι",
+        style: "destructive",
+        onPress: async () => {
+          const updatedGroups = groups.filter((g) => g.id !== groupId);
+          await updateTeamData("groups", updatedGroups);
+        },
+      },
+    ]);
   };
 
   const handleMoveProject = async (targetGroupId: string) => {
@@ -341,41 +541,75 @@ export default function TeamProjectsScreen() {
     if (!isOnline) return;
     if (!selectedProject) return;
     const { groupId: oldGroupId, project } = selectedProject;
-    const updatedGroups = groups.map(g => {
-        if (g.id === oldGroupId) return { ...g, projects: g.projects.filter(p => p.id !== project.id) };
-        if (g.id === targetGroupId) return { ...g, projects: [...g.projects, project] };
-        return g;
+    const updatedGroups = groups.map((g) => {
+      if (g.id === oldGroupId)
+        return {
+          ...g,
+          projects: g.projects.filter((p) => p.id !== project.id),
+        };
+      if (g.id === targetGroupId)
+        return { ...g, projects: [...g.projects, project] };
+      return g;
     });
-    await updateTeamData('groups', updatedGroups);
+    await updateTeamData("groups", updatedGroups);
     setMoveModalVisible(false);
     setProjectSettingsVisible(false);
   };
 
-  const visibleGroups = groups.map(g => {
-      if (myRole !== 'User') return g; 
-      const userProjects = g.projects.filter(p => p.members.includes(currentUserId) || p.supervisors.includes(currentUserId)); 
+  const visibleGroups = groups
+    .map((g) => {
+      if (myRole !== "User") return g;
+      const userProjects = g.projects.filter(
+        (p) =>
+          p.members.includes(currentUserId) ||
+          p.supervisors.includes(currentUserId),
+      );
       return { ...g, projects: userProjects };
-  }).filter(g => myRole !== 'User' || g.projects.length > 0);
+    })
+    .filter((g) => myRole !== "User" || g.projects.length > 0);
 
-
-  if (loading) return <SafeAreaView style={styles.center}><ActivityIndicator size="large" color="#2563eb"/></SafeAreaView>;
+  if (loading)
+    return (
+      <SafeAreaView style={styles.center}>
+        <ActivityIndicator size="large" color="#2563eb" />
+      </SafeAreaView>
+    );
 
   return (
     <SafeAreaView style={styles.container}>
       {/* HEADER */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}><Ionicons name="arrow-back" size={24} color="#333" /></TouchableOpacity>
-        <View style={{flexDirection: 'row', alignItems: 'center', flex: 1}}>
-            {teamLogo ? <Image source={{ uri: teamLogo }} style={styles.teamLogo} /> : <View style={styles.teamLogoPlaceholder}><Text style={{color:'white', fontWeight:'bold'}}>{teamName.charAt(0)}</Text></View>}
-            <View style={{marginLeft: 10}}>
-                <Text style={styles.headerTitle}>{teamName}</Text>
-                <Text style={styles.headerSubtitle}>{myRole} • {teamContact}</Text>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backButton}
+        >
+          <Ionicons name="arrow-back" size={24} color="#333" />
+        </TouchableOpacity>
+        <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
+          {teamLogo ? (
+            <Image source={{ uri: teamLogo }} style={styles.teamLogo} />
+          ) : (
+            <View style={styles.teamLogoPlaceholder}>
+              <Text style={{ color: "white", fontWeight: "bold" }}>
+                {teamName.charAt(0)}
+              </Text>
             </View>
+          )}
+          <View style={{ marginLeft: 10 }}>
+            <Text style={styles.headerTitle}>{teamName}</Text>
+            <Text style={styles.headerSubtitle}>
+              {myRole} • {teamContact}
+            </Text>
+          </View>
         </View>
-        
-        {/* ΤΟ ΓΡΑΝΑΖΙ ΠΟΥ ΑΝΟΙΓΕΙ ΤΟ ΝΕΟ ΩΡΑΙΟ MENU */}
-        {(myRole === 'Founder' || myRole === 'Admin' || myRole === 'Supervisor') && (
-            <TouchableOpacity onPress={() => setMenuVisible(true)}><Ionicons name="settings-outline" size={24} color="#333" /></TouchableOpacity>
+
+        {/* ΤΟ ΓΡΑΝΑΖΙ ΠΟΥ ΑΝΟΙΓΕΙ ΤΟ MENU GRID */}
+        {(myRole === "Founder" ||
+          myRole === "Admin" ||
+          myRole === "Supervisor") && (
+          <TouchableOpacity onPress={() => setMenuVisible(true)}>
+            <Ionicons name="settings-outline" size={24} color="#333" />
+          </TouchableOpacity>
         )}
       </View>
 
@@ -383,267 +617,629 @@ export default function TeamProjectsScreen() {
       <FlatList
         data={visibleGroups}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={[styles.content, { paddingBottom: 100 + insets.bottom }]}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: 100 + insets.bottom },
+        ]}
         ListEmptyComponent={
-            <View style={{alignItems:'center', marginTop: 50}}>
-                <Ionicons name="folder-open-outline" size={64} color="#ccc" />
-                <Text style={{color:'#999', marginTop:10}}>Δεν υπάρχουν έργα.</Text>
-                {(myRole === 'Founder' || myRole === 'Admin') && <Text style={{color:'#2563eb', fontWeight:'bold'}}>Πατήστε το Γρανάζι για Νέο Group!</Text>}
-            </View>
+          <View style={{ alignItems: "center", marginTop: 50 }}>
+            <Ionicons name="folder-open-outline" size={64} color="#ccc" />
+            <Text style={{ color: "#999", marginTop: 10 }}>
+              Δεν υπάρχουν έργα.
+            </Text>
+            {(myRole === "Founder" || myRole === "Admin") && (
+              <Text style={{ color: "#2563eb", fontWeight: "bold" }}>
+                Πατήστε το Γρανάζι για Νέο Group!
+              </Text>
+            )}
+          </View>
         }
         renderItem={({ item: group }) => (
-            <View style={styles.groupContainer}>
-                <View style={styles.groupHeader}>
-                    <View style={{flexDirection:'row', alignItems:'center'}}>
-                        <Ionicons name="folder" size={18} color="#64748b" style={{marginRight: 6}} />
-                        <Text style={styles.groupTitle}>{group.title}</Text>
-                    </View>
-                    {(myRole === 'Founder' || myRole === 'Admin') && (
-                        <TouchableOpacity onPress={() => handleDeleteGroup(group.id, group.projects.length)}><Ionicons name="trash-bin-outline" size={18} color="#999" /></TouchableOpacity>
-                    )}
-                </View>
-
-                {group.projects.map(project => (
-                    <TouchableOpacity 
-                        key={project.id} 
-                        style={styles.projectCard}
-                        onPress={() => router.push(`/project/${project.id}`)}
-                        onLongPress={() => {
-                            if(myRole !== 'User') { setSelectedProject({ groupId: group.id, project }); setProjectSettingsVisible(true); }
-                        }}
-                    >
-                        <View style={{flexDirection:'row', alignItems:'center'}}>
-                            <View style={[styles.projectIconBox, {backgroundColor: project.status === 'active' ? '#dcfce7' : '#fef3c7'}]}>
-                                <Ionicons name="document-text" size={20} color={project.status === 'active' ? '#16a34a' : '#d97706'} />
-                            </View>
-                            <View style={{marginLeft: 10}}>
-                                <Text style={styles.projectTitle}>{project.title}</Text>
-                                <Text style={styles.projectMeta}>Sup: {project.supervisors.length} • Mem: {project.members.length}</Text>
-                            </View>
-                        </View>
-                        {myRole !== 'User' && <Ionicons name="ellipsis-vertical" size={16} color="#cbd5e1" />}
-                    </TouchableOpacity>
-                ))}
-                
-                {/* ADD PROJECT BUTTON - STYLED NICELY */}
-                {(myRole === 'Founder' || myRole === 'Admin' || myRole === 'Supervisor') && (
-                    <TouchableOpacity style={styles.addProjectBtn} onPress={() => openInput('newProject', group.id)}>
-                        <Ionicons name="add" size={20} color="#2563eb" />
-                        <Text style={styles.addProjectText}>Νέο Project</Text>
-                    </TouchableOpacity>
-                )}
+          <View style={styles.groupContainer}>
+            <View style={styles.groupHeader}>
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <Ionicons
+                  name="folder"
+                  size={18}
+                  color="#64748b"
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={styles.groupTitle}>{group.title}</Text>
+              </View>
+              {(myRole === "Founder" || myRole === "Admin") && (
+                <TouchableOpacity
+                  onPress={() =>
+                    handleDeleteGroup(group.id, group.projects.length)
+                  }
+                >
+                  <Ionicons name="trash-bin-outline" size={18} color="#999" />
+                </TouchableOpacity>
+              )}
             </View>
+
+            {group.projects.map((project) => (
+              <TouchableOpacity
+                key={project.id}
+                style={styles.projectCard}
+                onPress={() => router.push(`/project/${project.id}`)}
+                onLongPress={() => {
+                  if (myRole !== "User") {
+                    setSelectedProject({ groupId: group.id, project });
+                    setProjectSettingsVisible(true);
+                  }
+                }}
+              >
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <View
+                    style={[
+                      styles.projectIconBox,
+                      {
+                        backgroundColor:
+                          project.status === "active" ? "#dcfce7" : "#fef3c7",
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="document-text"
+                      size={20}
+                      color={
+                        project.status === "active" ? "#16a34a" : "#d97706"
+                      }
+                    />
+                  </View>
+                  <View style={{ marginLeft: 10 }}>
+                    <Text style={styles.projectTitle}>{project.title}</Text>
+                    <Text style={styles.projectMeta}>
+                      Sup: {project.supervisors.length} • Mem:{" "}
+                      {project.members.length}
+                    </Text>
+                  </View>
+                </View>
+                {myRole !== "User" && (
+                  <Ionicons
+                    name="ellipsis-vertical"
+                    size={16}
+                    color="#cbd5e1"
+                  />
+                )}
+              </TouchableOpacity>
+            ))}
+
+            {/* ADD PROJECT BUTTON - STYLED NICELY */}
+            {(myRole === "Founder" ||
+              myRole === "Admin" ||
+              myRole === "Supervisor") && (
+              <TouchableOpacity
+                style={styles.addProjectBtn}
+                onPress={() => openInput("newProject", group.id)}
+              >
+                <Ionicons name="add" size={20} color="#2563eb" />
+                <Text style={styles.addProjectText}>Νέο Project</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         )}
       />
 
       {/* --- MENU MODAL (TRIGGERED BY GEAR) --- */}
-      <Modal visible={menuVisible} transparent animationType="slide" onRequestClose={() => setMenuVisible(false)}>
+      <Modal
+        visible={menuVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setMenuVisible(false)}
+      >
         <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-                <View style={styles.modalHeaderRow}>
-                    <Text style={styles.modalHeader}>Ενέργειες Ομάδας</Text>
-                    <TouchableOpacity onPress={() => setMenuVisible(false)}>
-                        <Ionicons name="close" size={24} color="#999" />
-                    </TouchableOpacity>
-                </View>
-
-                {/* THE NICE GRID OF CARDS */}
-                <View style={styles.optionsGrid}>
-                    
-                    {/* 1. NEW GROUP */}
-                    <TouchableOpacity style={styles.optionCard} onPress={() => openInput('newGroup')}>
-                        <View style={[styles.optionIcon, {backgroundColor:'#eff6ff'}]}>
-                             <Ionicons name="folder-open" size={28} color="#2563eb" />
-                        </View>
-                        <Text style={styles.optionText}>Νέο Group</Text>
-                    </TouchableOpacity>
-
-                    {/* 2. INVITE */}
-                    <TouchableOpacity style={styles.optionCard} onPress={handleInvite}>
-                        <View style={[styles.optionIcon, {backgroundColor:'#f0fdf4'}]}>
-                             <Ionicons name="person-add" size={28} color="#16a34a" />
-                        </View>
-                        <Text style={styles.optionText}>Πρόσκληση</Text>
-                    </TouchableOpacity>
-
-                    {/* 3. USERS */}
-                    <TouchableOpacity style={styles.optionCard} onPress={() => { setMenuVisible(false); setUsersModalVisible(true); }}>
-                        <View style={[styles.optionIcon, {backgroundColor:'#fef3c7'}]}>
-                             <Ionicons name="people" size={28} color="#d97706" />
-                        </View>
-                        <Text style={styles.optionText}>Μέλη</Text>
-                    </TouchableOpacity>
-
-                    {/* 4. SETTINGS */}
-                    {(myRole === 'Founder' || myRole === 'Admin') && (
-                        <TouchableOpacity style={styles.optionCard} onPress={() => { setMenuVisible(false); setSettingsSubMenuVisible(true); }}>
-                            <View style={[styles.optionIcon, {backgroundColor:'#f1f5f9'}]}>
-                                <Ionicons name="settings" size={28} color="#64748b" />
-                            </View>
-                            <Text style={styles.optionText}>Ρυθμίσεις</Text>
-                        </TouchableOpacity>
-                    )}
-                </View>
-                
-                {myRole === 'Founder' && (
-                    <TouchableOpacity style={styles.deleteTeamBtn} onPress={handleDeleteTeam}>
-                        <Text style={{color:'red', fontWeight:'bold'}}>Διαγραφή Ομάδας</Text>
-                    </TouchableOpacity>
-                )}
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeaderRow}>
+              <Text style={styles.modalHeader}>Ενέργειες Ομάδας</Text>
+              <TouchableOpacity onPress={() => setMenuVisible(false)}>
+                <Ionicons name="close" size={24} color="#999" />
+              </TouchableOpacity>
             </View>
+
+            {/* THE NICE GRID OF CARDS */}
+            <View style={styles.optionsGrid}>
+              {/* 1. NEW GROUP */}
+              <TouchableOpacity
+                style={styles.optionCard}
+                onPress={() => openInput("newGroup")}
+              >
+                <View
+                  style={[styles.optionIcon, { backgroundColor: "#eff6ff" }]}
+                >
+                  <Ionicons name="folder-open" size={28} color="#2563eb" />
+                </View>
+                <Text style={styles.optionText}>Νέο Group</Text>
+              </TouchableOpacity>
+
+              {/* 2. INVITE */}
+              <TouchableOpacity
+                style={styles.optionCard}
+                onPress={handleInvite}
+              >
+                <View
+                  style={[styles.optionIcon, { backgroundColor: "#f0fdf4" }]}
+                >
+                  <Ionicons name="person-add" size={28} color="#16a34a" />
+                </View>
+                <Text style={styles.optionText}>Πρόσκληση</Text>
+              </TouchableOpacity>
+
+              {/* 3. USERS */}
+              <TouchableOpacity
+                style={styles.optionCard}
+                onPress={() => {
+                  setMenuVisible(false);
+                  setUsersModalVisible(true);
+                }}
+              >
+                <View
+                  style={[styles.optionIcon, { backgroundColor: "#fef3c7" }]}
+                >
+                  <Ionicons name="people" size={28} color="#d97706" />
+                </View>
+                <Text style={styles.optionText}>Μέλη</Text>
+              </TouchableOpacity>
+
+              {/* 4. SETTINGS */}
+              {(myRole === "Founder" || myRole === "Admin") && (
+                <TouchableOpacity
+                  style={styles.optionCard}
+                  onPress={() => {
+                    setMenuVisible(false);
+                    setSettingsSubMenuVisible(true);
+                  }}
+                >
+                  <View
+                    style={[styles.optionIcon, { backgroundColor: "#f1f5f9" }]}
+                  >
+                    <Ionicons name="settings" size={28} color="#64748b" />
+                  </View>
+                  <Text style={styles.optionText}>Ρυθμίσεις</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {myRole === "Founder" && (
+              <TouchableOpacity
+                style={styles.deleteTeamBtn}
+                onPress={handleDeleteTeam}
+              >
+                <Text style={{ color: "red", fontWeight: "bold" }}>
+                  Διαγραφή Ομάδας
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
       </Modal>
 
       {/* --- SUB MENU SETTINGS --- */}
       <Modal visible={settingsSubMenuVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
-             <View style={styles.modalContent}>
-                <Text style={styles.modalHeader}>Ρυθμίσεις</Text>
-                
-                <TouchableOpacity style={styles.menuItem} onPress={pickLogo}><Ionicons name="image-outline" size={20} color="#333" /><Text style={styles.menuText}>Αλλαγή Logo</Text></TouchableOpacity>
-                {teamLogo && (
-                    <TouchableOpacity style={styles.menuItem} onPress={handleDeleteLogo}><Ionicons name="trash-outline" size={20} color="red" /><Text style={[styles.menuText, {color:'red'}]}>Διαγραφή Logo</Text></TouchableOpacity>
-                )}
-                <TouchableOpacity style={styles.menuItem} onPress={() => openInput('teamContact')}><Ionicons name="call-outline" size={20} color="#333" /><Text style={styles.menuText}>Αλλαγή Επικοινωνίας</Text></TouchableOpacity>
-                <TouchableOpacity style={styles.menuItem} onPress={() => openInput('teamName')}><Ionicons name="create-outline" size={20} color="#333" /><Text style={styles.menuText}>Αλλαγή Ονόματος</Text></TouchableOpacity>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalHeader}>Ρυθμίσεις</Text>
 
-                <TouchableOpacity style={styles.closeMenuBtn} onPress={() => setSettingsSubMenuVisible(false)}><Text style={{color:'blue'}}>Πίσω</Text></TouchableOpacity>
-             </View>
+            <TouchableOpacity style={styles.menuItem} onPress={pickLogo}>
+              <Ionicons name="image-outline" size={20} color="#333" />
+              <Text style={styles.menuText}>Αλλαγή Logo</Text>
+            </TouchableOpacity>
+            {teamLogo && (
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={handleDeleteLogo}
+              >
+                <Ionicons name="trash-outline" size={20} color="red" />
+                <Text style={[styles.menuText, { color: "red" }]}>
+                  Διαγραφή Logo
+                </Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => openInput("teamContact")}
+            >
+              <Ionicons name="call-outline" size={20} color="#333" />
+              <Text style={styles.menuText}>Αλλαγή Επικοινωνίας</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => openInput("teamName")}
+            >
+              <Ionicons name="create-outline" size={20} color="#333" />
+              <Text style={styles.menuText}>Αλλαγή Ονόματος</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.closeMenuBtn}
+              onPress={() => setSettingsSubMenuVisible(false)}
+            >
+              <Text style={{ color: "blue" }}>Πίσω</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </Modal>
 
       {/* --- SETTINGS MODAL (PROJECT) --- */}
-      <Modal visible={projectSettingsVisible} animationType="slide" onRequestClose={() => setProjectSettingsVisible(false)}>
-        <SafeAreaView style={{flex: 1, backgroundColor: 'white'}}>
-            <View style={styles.header}>
-                <Text style={styles.headerTitle}>Ρυθμίσεις Project</Text>
-                <TouchableOpacity onPress={() => setProjectSettingsVisible(false)}><Ionicons name="close" size={28} color="#333" /></TouchableOpacity>
-            </View>
-            <ScrollView style={{padding: 20}}>
-                <Text style={styles.sectionTitle}>1. Supervisors</Text>
-                {users.filter(u => u.role === 'Supervisor').map(u => (
-                    <TouchableOpacity key={u.id} style={styles.checkItem} onPress={() => toggleProjectRole(u.id, 'supervisor')}>
-                         <Ionicons name={selectedProject?.project.supervisors.includes(u.id) ? "checkbox" : "square-outline"} size={24} color="#2563eb" />
-                        <Text style={{marginLeft: 10}}>{u.name}</Text>
-                    </TouchableOpacity>
-                ))}
-                <View style={{height: 20}} />
-                <Text style={styles.sectionTitle}>2. Μέλη (Users)</Text>
-                {users.filter(u => u.role === 'User').map(u => (
-                    <TouchableOpacity key={u.id} style={styles.checkItem} onPress={() => toggleProjectRole(u.id, 'member')}>
-                         <Ionicons name={selectedProject?.project.members.includes(u.id) ? "checkbox" : "square-outline"} size={24} color="#16a34a" />
-                        <Text style={{marginLeft: 10}}>{u.name}</Text>
-                    </TouchableOpacity>
-                ))}
-                <View style={{height: 30}} />
-                <TouchableOpacity style={styles.actionBtn} onPress={() => setMoveModalVisible(true)}><Ionicons name="folder-outline" size={20} color="#333" /><Text style={{fontWeight:'bold', marginLeft: 10}}>Μεταφορά σε άλλο Group</Text></TouchableOpacity>
-                {myRole !== 'User' && (
-                    <TouchableOpacity style={[styles.actionBtn, {borderColor:'red'}]} onPress={handleDeleteProject}><Ionicons name="trash-outline" size={20} color="red" /><Text style={{fontWeight:'bold', marginLeft: 10, color:'red'}}>Διαγραφή Project</Text></TouchableOpacity>
-                )}
-            </ScrollView>
+      <Modal
+        visible={projectSettingsVisible}
+        animationType="slide"
+        onRequestClose={() => setProjectSettingsVisible(false)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: "white" }}>
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>Ρυθμίσεις Project</Text>
+            <TouchableOpacity onPress={() => setProjectSettingsVisible(false)}>
+              <Ionicons name="close" size={28} color="#333" />
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={{ padding: 20 }}>
+            <Text style={styles.sectionTitle}>1. Supervisors</Text>
+            {users
+              .filter((u) => u.role === "Supervisor")
+              .map((u) => (
+                <TouchableOpacity
+                  key={u.id}
+                  style={styles.checkItem}
+                  onPress={() => toggleProjectRole(u.id, "supervisor")}
+                >
+                  <Ionicons
+                    name={
+                      selectedProject?.project.supervisors.includes(u.id)
+                        ? "checkbox"
+                        : "square-outline"
+                    }
+                    size={24}
+                    color="#2563eb"
+                  />
+                  <Text style={{ marginLeft: 10 }}>{u.name}</Text>
+                </TouchableOpacity>
+              ))}
+            <View style={{ height: 20 }} />
+            <Text style={styles.sectionTitle}>2. Μέλη (Users)</Text>
+            {users
+              .filter((u) => u.role === "User")
+              .map((u) => (
+                <TouchableOpacity
+                  key={u.id}
+                  style={styles.checkItem}
+                  onPress={() => toggleProjectRole(u.id, "member")}
+                >
+                  <Ionicons
+                    name={
+                      selectedProject?.project.members.includes(u.id)
+                        ? "checkbox"
+                        : "square-outline"
+                    }
+                    size={24}
+                    color="#16a34a"
+                  />
+                  <Text style={{ marginLeft: 10 }}>{u.name}</Text>
+                </TouchableOpacity>
+              ))}
+            <View style={{ height: 30 }} />
+            <TouchableOpacity
+              style={styles.actionBtn}
+              onPress={() => setMoveModalVisible(true)}
+            >
+              <Ionicons name="folder-outline" size={20} color="#333" />
+              <Text style={{ fontWeight: "bold", marginLeft: 10 }}>
+                Μεταφορά σε άλλο Group
+              </Text>
+            </TouchableOpacity>
+            {myRole !== "User" && (
+              <TouchableOpacity
+                style={[styles.actionBtn, { borderColor: "red" }]}
+                onPress={handleDeleteProject}
+              >
+                <Ionicons name="trash-outline" size={20} color="red" />
+                <Text
+                  style={{ fontWeight: "bold", marginLeft: 10, color: "red" }}
+                >
+                  Διαγραφή Project
+                </Text>
+              </TouchableOpacity>
+            )}
+          </ScrollView>
         </SafeAreaView>
       </Modal>
 
       {/* MOVE MODAL */}
       <Modal visible={moveModalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-                <Text style={styles.modalHeader}>Επιλέξτε Group</Text>
-                {groups.map(g => (
-                    <TouchableOpacity key={g.id} style={[styles.menuItem, g.id === selectedProject?.groupId && {opacity: 0.5}]} disabled={g.id === selectedProject?.groupId} onPress={() => handleMoveProject(g.id)}>
-                        <Ionicons name="folder-open" size={20} color="#333" /><Text style={styles.menuText}>{g.title}</Text>
-                    </TouchableOpacity>
-                ))}
-                <TouchableOpacity style={styles.closeMenuBtn} onPress={() => setMoveModalVisible(false)}><Text style={{color:'red'}}>Ακύρωση</Text></TouchableOpacity>
-            </View>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalHeader}>Επιλέξτε Group</Text>
+            {groups.map((g) => (
+              <TouchableOpacity
+                key={g.id}
+                style={[
+                  styles.menuItem,
+                  g.id === selectedProject?.groupId && { opacity: 0.5 },
+                ]}
+                disabled={g.id === selectedProject?.groupId}
+                onPress={() => handleMoveProject(g.id)}
+              >
+                <Ionicons name="folder-open" size={20} color="#333" />
+                <Text style={styles.menuText}>{g.title}</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={styles.closeMenuBtn}
+              onPress={() => setMoveModalVisible(false)}
+            >
+              <Text style={{ color: "red" }}>Ακύρωση</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </Modal>
 
       {/* USERS MODAL */}
-      <Modal visible={usersModalVisible} animationType="slide" onRequestClose={() => setUsersModalVisible(false)}>
-         <SafeAreaView style={{flex: 1, backgroundColor: 'white'}}>
-            <View style={styles.header}>
-                <Text style={styles.headerTitle}>Χρήστες ({users.length})</Text>
-                <TouchableOpacity onPress={() => setUsersModalVisible(false)}><Ionicons name="close" size={28} color="#333" /></TouchableOpacity>
-            </View>
-            <FlatList 
-                data={users}
-                keyExtractor={u => u.id}
-                contentContainerStyle={{padding: 20}}
-                renderItem={({ item }) => (
-                    <View style={styles.userCard}>
-                        <View>
-                            <Text style={{fontWeight:'bold'}}>{item.name}</Text>
-                            <Text style={{fontSize:12, color:'#666'}}>{item.role}</Text>
-                        </View>
-                        {item.id !== currentUserId && item.role !== 'Founder' && (
-                            (myRole === 'Admin' || myRole === 'Founder' || (myRole === 'Supervisor' && item.role === 'User')) && (
-                                <View style={{flexDirection: 'row', gap: 10}}>
-                                    {(myRole === 'Founder' || myRole === 'Admin') && item.role !== 'Admin' && (
-                                        <TouchableOpacity onPress={() => changeUserRole(item, 'promote')}><Ionicons name="arrow-up-circle" size={28} color="#22c55e" /></TouchableOpacity>
-                                    )}
-                                    {(myRole === 'Founder' || myRole === 'Admin') && item.role !== 'User' && (
-                                        <TouchableOpacity onPress={() => changeUserRole(item, 'demote')}><Ionicons name="arrow-down-circle" size={28} color="#f59e0b" /></TouchableOpacity>
-                                    )}
-                                    <TouchableOpacity onPress={() => changeUserRole(item, 'kick')}><Ionicons name="trash" size={28} color="#ef4444" /></TouchableOpacity>
-                                </View>
-                            )
+      <Modal
+        visible={usersModalVisible}
+        animationType="slide"
+        onRequestClose={() => setUsersModalVisible(false)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: "white" }}>
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>Χρήστες ({users.length})</Text>
+            <TouchableOpacity onPress={() => setUsersModalVisible(false)}>
+              <Ionicons name="close" size={28} color="#333" />
+            </TouchableOpacity>
+          </View>
+          <FlatList
+            data={users}
+            keyExtractor={(u) => u.id}
+            contentContainerStyle={{ padding: 20 }}
+            renderItem={({ item }) => (
+              <View style={styles.userCard}>
+                <View>
+                  <Text style={{ fontWeight: "bold" }}>{item.name}</Text>
+                  <Text style={{ fontSize: 12, color: "#666" }}>
+                    {item.role}
+                  </Text>
+                </View>
+                {item.id !== currentUserId &&
+                  item.role !== "Founder" &&
+                  (myRole === "Admin" ||
+                    myRole === "Founder" ||
+                    (myRole === "Supervisor" && item.role === "User")) && (
+                    <View style={{ flexDirection: "row", gap: 10 }}>
+                      {(myRole === "Founder" || myRole === "Admin") &&
+                        item.role !== "Admin" && (
+                          <TouchableOpacity
+                            onPress={() => changeUserRole(item, "promote")}
+                          >
+                            <Ionicons
+                              name="arrow-up-circle"
+                              size={28}
+                              color="#22c55e"
+                            />
+                          </TouchableOpacity>
                         )}
+                      {(myRole === "Founder" || myRole === "Admin") &&
+                        item.role !== "User" && (
+                          <TouchableOpacity
+                            onPress={() => changeUserRole(item, "demote")}
+                          >
+                            <Ionicons
+                              name="arrow-down-circle"
+                              size={28}
+                              color="#f59e0b"
+                            />
+                          </TouchableOpacity>
+                        )}
+                      <TouchableOpacity
+                        onPress={() => changeUserRole(item, "kick")}
+                      >
+                        <Ionicons name="trash" size={28} color="#ef4444" />
+                      </TouchableOpacity>
                     </View>
-                )}
-            />
-         </SafeAreaView>
+                  )}
+              </View>
+            )}
+          />
+        </SafeAreaView>
       </Modal>
 
-      <InputModal visible={inputVisible} onClose={() => setInputVisible(false)} onSave={handleSaveInput} title={inputMode === 'newGroup' ? "Νέο Project Group" : inputMode === 'newProject' ? "Νέο Project" : "Επεξεργασία"} value={tempValue} onChangeText={setTempValue} placeholder="Πληκτρολογήστε..." />
+      <InputModal
+        visible={inputVisible}
+        onClose={() => setInputVisible(false)}
+        onSave={handleSaveInput}
+        title={
+          inputMode === "newGroup"
+            ? "Νέο Project Group"
+            : inputMode === "newProject"
+              ? "Νέο Project"
+              : "Επεξεργασία"
+        }
+        value={tempValue}
+        onChangeText={setTempValue}
+        placeholder="Πληκτρολογήστε..."
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc', marginTop: 20 },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { flexDirection: 'row', alignItems: 'center', padding: 20, paddingTop: 30, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+  container: { flex: 1, backgroundColor: "#f8fafc", marginTop: 20 },
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 20,
+    paddingTop: 30,
+    backgroundColor: "white",
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e7eb",
+  },
   backButton: { marginRight: 10 },
   teamLogo: { width: 40, height: 40, borderRadius: 8 },
-  teamLogoPlaceholder: { width: 40, height: 40, borderRadius: 8, backgroundColor: '#2563eb', justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#111827' },
-  headerSubtitle: { color: '#666', fontSize: 10 },
+  teamLogoPlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: "#2563eb",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  headerTitle: { fontSize: 16, fontWeight: "bold", color: "#111827" },
+  headerSubtitle: { color: "#666", fontSize: 10 },
   content: { padding: 20 },
-  
+
   // GROUPS & PROJECTS UI
   groupContainer: { marginBottom: 30 },
-  groupHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, paddingHorizontal: 5 },
-  groupTitle: { fontSize: 14, fontWeight: '800', color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5 },
-  
-  projectCard: { backgroundColor: 'white', padding: 12, borderRadius: 12, marginBottom: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', shadowColor:'#64748b', shadowOpacity:0.05, shadowRadius:3, shadowOffset:{width:0, height:2}, elevation: 1 },
-  projectIconBox: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  projectTitle: { fontSize: 16, fontWeight: '600', color: '#334155' },
-  projectMeta: { fontSize: 11, color: '#94a3b8', marginTop: 2 },
-  
+  groupHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+    paddingHorizontal: 5,
+  },
+  groupTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#475569",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+
+  projectCard: {
+    backgroundColor: "white",
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 8,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    shadowColor: "#64748b",
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
+  },
+  projectIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  projectTitle: { fontSize: 16, fontWeight: "600", color: "#334155" },
+  projectMeta: { fontSize: 11, color: "#94a3b8", marginTop: 2 },
+
   // --- STYLED "ADD PROJECT" BUTTON ---
-  addProjectBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 12, marginTop: 5, borderRadius: 10, backgroundColor: '#f1f5f9', borderWidth:1, borderColor:'#e2e8f0', borderStyle:'dashed' },
-  addProjectText: { color: '#2563eb', fontSize: 14, fontWeight: '600', marginLeft: 8 },
+  addProjectBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 12,
+    marginTop: 5,
+    borderRadius: 10,
+    backgroundColor: "#f1f5f9",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    borderStyle: "dashed",
+  },
+  addProjectText: {
+    color: "#2563eb",
+    fontSize: 14,
+    fontWeight: "600",
+    marginLeft: 8,
+  },
 
   // --- NICE MODAL STYLES (Menu Grid) ---
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.6)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: 'white', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, elevation: 20 },
-  modalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  modalHeader: { fontSize: 20, fontWeight: '800', color: '#0f172a' },
-  
-  optionsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 12 },
-  optionCard: { width: '48%', backgroundColor: 'white', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 16, padding: 20, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
-  optionIcon: { width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
-  optionText: { fontSize: 14, fontWeight: '700', color: '#1e293b' },
-  
-  deleteTeamBtn: { marginTop: 20, alignSelf:'center', padding: 10 },
-  
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.6)",
+    justifyContent: "flex-end",
+  },
+  modalContent: {
+    backgroundColor: "white",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    elevation: 20,
+  },
+  modalHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  modalHeader: { fontSize: 20, fontWeight: "800", color: "#0f172a" },
+
+  optionsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  optionCard: {
+    width: "48%",
+    backgroundColor: "white",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    borderRadius: 16,
+    padding: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  optionIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  optionText: { fontSize: 14, fontWeight: "700", color: "#1e293b" },
+
+  deleteTeamBtn: { marginTop: 20, alignSelf: "center", padding: 10 },
+
   // OTHER MODALS STYLES (List items)
-  menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  menuText: { marginLeft: 15, fontSize: 16, color:'#334155' },
-  closeMenuBtn: { marginTop: 20, alignItems: 'center', padding: 10 },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', marginTop: 10, marginBottom: 5, color: '#111827' },
-  checkItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderColor: '#eee' },
-  actionBtn: { flexDirection: 'row', alignItems: 'center', padding: 15, borderWidth: 1, borderColor: '#ccc', borderRadius: 10, marginBottom: 10, justifyContent: 'center' },
-  userCard: { backgroundColor: '#f9fafb', padding: 15, borderRadius: 10, marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: '#eee' }, 
+  menuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+  },
+  menuText: { marginLeft: 15, fontSize: 16, color: "#334155" },
+  closeMenuBtn: { marginTop: 20, alignItems: "center", padding: 10 },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginTop: 10,
+    marginBottom: 5,
+    color: "#111827",
+  },
+  checkItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderColor: "#eee",
+  },
+  actionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 15,
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 10,
+    marginBottom: 10,
+    justifyContent: "center",
+  },
+  userCard: {
+    backgroundColor: "#f9fafb",
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#eee",
+  },
 });
