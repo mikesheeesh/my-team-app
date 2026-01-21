@@ -41,7 +41,7 @@ type User = { id: string; email: string; role: Role; name: string };
 type Project = {
   id: string;
   title: string;
-  status: "active" | "pending";
+  status: "active" | "pending" | "completed";
   supervisors: string[];
   members: string[];
   createdBy?: string;
@@ -121,7 +121,7 @@ export default function TeamProjectsScreen() {
               const data = docSnap.data();
 
               setTeamName(data.name);
-              setTeamContact(data.contactEmail || ""); // <--- ΕΔΩ ΕΝΗΜΕΡΩΝΕΤΑΙ LIVE ΤΟ EMAIL
+              setTeamContact(data.contactEmail || "");
               setTeamLogo(data.logo || null);
               setGroups(data.groups || []);
 
@@ -249,7 +249,6 @@ export default function TeamProjectsScreen() {
       } else if (inputMode === "teamName") {
         await updateTeamData("name", tempValue);
       } else if (inputMode === "teamContact") {
-        // --- ΝΕΟΣ ΕΛΕΓΧΟΣ EMAIL ---
         if (!tempValue.includes("@")) {
           Alert.alert("Λάθος", "Παρακαλώ εισάγετε ένα έγκυρο email.");
           return;
@@ -657,7 +656,11 @@ export default function TeamProjectsScreen() {
             {group.projects.map((project) => (
               <TouchableOpacity
                 key={project.id}
-                style={styles.projectCard}
+                // ΕΦΑΡΜΟΓΗ ΣΤΥΛ ΓΙΑ ΟΛΟΚΛΗΡΩΜΕΝΑ
+                style={[
+                  styles.projectCard,
+                  project.status === "completed" && styles.projectCardCompleted,
+                ]}
                 onPress={() => router.push(`/project/${project.id}`)}
                 onLongPress={() => {
                   if (myRole !== "User") {
@@ -672,20 +675,42 @@ export default function TeamProjectsScreen() {
                       styles.projectIconBox,
                       {
                         backgroundColor:
-                          project.status === "active" ? "#dcfce7" : "#fef3c7",
+                          project.status === "completed"
+                            ? "#f1f5f9" // ΓΚΡΙ (Completed)
+                            : project.status === "active"
+                              ? "#dbeafe"
+                              : "#fef3c7", // ΜΠΛΕ (Active)
                       },
                     ]}
                   >
                     <Ionicons
-                      name="document-text"
+                      // Αν είναι Completed -> Checkmark, Αλλιώς -> Document
+                      name={
+                        project.status === "completed"
+                          ? "checkmark-done"
+                          : "document-text"
+                      }
                       size={20}
                       color={
-                        project.status === "active" ? "#16a34a" : "#d97706"
+                        project.status === "completed"
+                          ? "#64748b" // Σκούρο Γκρι
+                          : project.status === "active"
+                            ? "#2563eb"
+                            : "#d97706" // Μπλε
                       }
                     />
                   </View>
                   <View style={{ marginLeft: 10 }}>
-                    <Text style={styles.projectTitle}>{project.title}</Text>
+                    <Text
+                      style={[
+                        styles.projectTitle,
+                        // Line-through αν ολοκληρώθηκε
+                        project.status === "completed" &&
+                          styles.projectTitleCompleted,
+                      ]}
+                    >
+                      {project.title}
+                    </Text>
                     <Text style={styles.projectMeta}>
                       Sup: {project.supervisors.length} • Mem:{" "}
                       {project.members.length}
@@ -831,7 +856,6 @@ export default function TeamProjectsScreen() {
               </TouchableOpacity>
             )}
 
-            {/* ΝΕΟ ΚΟΥΜΠΙ ΓΙΑ EMAIL */}
             <TouchableOpacity
               style={styles.menuItem}
               onPress={() => openInput("teamContact")}
@@ -877,6 +901,8 @@ export default function TeamProjectsScreen() {
               paddingBottom: 50 + insets.bottom,
             }}
           >
+            {/* NO MANUAL COMPLETION BUTTON ANYMORE */}
+
             <Text style={styles.sectionTitle}>1. Supervisors</Text>
             {users
               .filter((u) => u.role === "Supervisor")
@@ -1069,7 +1095,6 @@ export default function TeamProjectsScreen() {
             ? "neo.email@gmail.com"
             : "Πληκτρολογήστε..."
         }
-        // Στέλνουμε το σωστό keyboard type
         keyboardType={inputMode === "teamContact" ? "email-address" : "default"}
       />
     </SafeAreaView>
@@ -1133,6 +1158,17 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 1,
   },
+  // --- COMPLETED STYLES ---
+  projectCardCompleted: {
+    backgroundColor: "#f8fafc", // Lighter gray
+    opacity: 0.6,
+  },
+  projectTitleCompleted: {
+    textDecorationLine: "line-through",
+    color: "#94a3b8",
+  },
+  // ------------------------
+
   projectIconBox: {
     width: 36,
     height: 36,
