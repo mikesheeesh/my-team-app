@@ -57,12 +57,13 @@
           "isAccessMediaLocationEnabled": true
         }
       ],
-      "expo-router"
+      "expo-router",
+      "expo-font"
     ],
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "f02b16d8-a834-4199-9fe1-7bdbb881a96a"
+        "projectId": "86b1bd6d-d2d3-45d0-b9b8-61e35c848aea"
       }
     }
   }

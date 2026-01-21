@@ -9,16 +9,16 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
 import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    Modal,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Modal,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -61,6 +61,11 @@ const TaskItem = memo(
       <View
         style={[
           styles.taskCard,
+          // 1. ΔΙΑΚΡΙΣΗ ΟΛΟΚΛΗΡΩΜΕΝΩΝ: Αλλάζουμε το φόντο και το opacity
+          item.status === "completed" && {
+            backgroundColor: "#f8fafc",
+            opacity: 0.8,
+          },
           item.isLocal && {
             borderColor: "#f97316",
             borderWidth: 1,
@@ -69,15 +74,11 @@ const TaskItem = memo(
         ]}
       >
         <TouchableOpacity
-          style={{
-            flex: 1,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
+          style={styles.taskCardInner}
           onPress={() => onPress(item)}
           onLongPress={() => onLongPress(item)}
           delayLongPress={500}
+          activeOpacity={0.7}
         >
           <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
             <View
@@ -96,7 +97,7 @@ const TaskItem = memo(
                       ? "construct"
                       : "document-text"
                 }
-                size={22}
+                size={20}
                 color={item.status === "completed" ? "#059669" : "#2563eb"}
               />
             </View>
@@ -104,7 +105,10 @@ const TaskItem = memo(
               <Text
                 style={[
                   styles.taskTitle,
-                  item.status === "completed" && { color: "#64748b" },
+                  item.status === "completed" && {
+                    color: "#64748b",
+                    textDecorationLine: "line-through",
+                  },
                 ]}
                 numberOfLines={2}
               >
@@ -117,22 +121,9 @@ const TaskItem = memo(
               ) : null}
 
               {item.isLocal && (
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    marginTop: 4,
-                  }}
-                >
+                <View style={styles.localBadgeRow}>
                   <Ionicons name="cloud-offline" size={12} color="#f97316" />
-                  <Text
-                    style={{
-                      fontSize: 10,
-                      color: "#f97316",
-                      marginLeft: 4,
-                      fontWeight: "bold",
-                    }}
-                  >
+                  <Text style={styles.localBadgeText}>
                     {isSyncing ? "Ανεβαίνει..." : "Προς Ανέβασμα"}
                   </Text>
                 </View>
@@ -140,28 +131,36 @@ const TaskItem = memo(
             </View>
           </View>
 
-          {item.type === "photo" ? (
-            item.images && item.images.length > 0 ? (
-              <View style={{ alignItems: "center" }}>
-                <Image
-                  source={{ uri: item.images[item.images.length - 1] }}
-                  style={styles.taskThumbnail}
-                  contentFit="cover"
-                  transition={200}
-                  cachePolicy="memory-disk"
-                />
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>{item.images.length}</Text>
+          <View
+            style={{
+              alignItems: "flex-end",
+              justifyContent: "center",
+              minWidth: 40,
+            }}
+          >
+            {item.type === "photo" ? (
+              item.images && item.images.length > 0 ? (
+                <View style={styles.thumbnailContainer}>
+                  <Image
+                    source={{ uri: item.images[item.images.length - 1] }}
+                    style={styles.taskThumbnail}
+                    contentFit="cover"
+                    transition={200}
+                    cachePolicy="memory-disk"
+                  />
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{item.images.length}</Text>
+                  </View>
                 </View>
-              </View>
+              ) : (
+                <Ionicons name="camera-outline" size={24} color="#cbd5e1" />
+              )
+            ) : item.status === "completed" && item.value ? (
+              <Text style={styles.taskValueText}>{item.value}</Text>
             ) : (
-              <Ionicons name="camera-outline" size={24} color="#cbd5e1" />
-            )
-          ) : item.status === "completed" ? (
-            <Text style={styles.taskValueText}>{item.value}</Text>
-          ) : (
-            <Ionicons name="chevron-forward" size={18} color="#cbd5e1" />
-          )}
+              <Ionicons name="chevron-forward" size={18} color="#cbd5e1" />
+            )}
+          </View>
         </TouchableOpacity>
       </View>
     );
@@ -190,24 +189,20 @@ export default function ProjectDetailsScreen() {
   const [processing, setProcessing] = useState(false);
   const [projectName, setProjectName] = useState("");
 
-  // MODALS
   const [inputModalVisible, setInputModalVisible] = useState(false);
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [galleryModalVisible, setGalleryModalVisible] = useState(false);
 
-  // CURRENT TASK
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   const [currentTaskType, setCurrentTaskType] = useState<string>("measurement");
   const [inputValue, setInputValue] = useState("");
 
-  // NEW TASK
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskDescription, setNewTaskDescription] = useState("");
   const [newTaskType, setNewTaskType] = useState<
     "photo" | "measurement" | "general"
   >("photo");
 
-  // GALLERY
   const [activeTaskForGallery, setActiveTaskForGallery] = useState<Task | null>(
     null,
   );
@@ -215,7 +210,6 @@ export default function ProjectDetailsScreen() {
     string | null
   >(null);
 
-  // 1. INITIAL LOAD
   useEffect(() => {
     const loadInitialData = async () => {
       try {
@@ -229,15 +223,12 @@ export default function ProjectDetailsScreen() {
           OFFLINE_QUEUE_KEY + projectId,
         );
         if (localQueue) setLocalTasks(JSON.parse(localQueue));
-      } catch (e) {
-        console.log("Cache load error:", e);
-      }
+      } catch (e) {}
       setLoading(false);
     };
     loadInitialData();
   }, [projectId]);
 
-  // 2. FIREBASE LISTENER
   useEffect(() => {
     if (!projectId) return;
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
@@ -250,20 +241,15 @@ export default function ProjectDetailsScreen() {
               const data = docSnap.data();
               const fetchedTasks = data.tasks || [];
               const fetchedName = data.name || "Project";
-
               setCloudTasks(fetchedTasks);
               setProjectName(fetchedName);
-
               AsyncStorage.setItem(
                 PROJECT_CACHE_KEY,
-                JSON.stringify({
-                  name: fetchedName,
-                  tasks: fetchedTasks,
-                }),
-              ).catch((err) => console.log("Cache save error", err));
+                JSON.stringify({ name: fetchedName, tasks: fetchedTasks }),
+              ).catch((err) => console.log(err));
             }
           },
-          (error) => console.log("Offline snapshot error:", error),
+          (error) => console.log(error),
         );
         return () => unsubscribeSnapshot();
       }
@@ -271,22 +257,18 @@ export default function ProjectDetailsScreen() {
     return () => unsubscribeAuth();
   }, [projectId]);
 
-  // 3. SYNC CLEANUP
   useEffect(() => {
     if (justSyncedProjectId === projectId) {
       setLocalTasks([]);
     }
   }, [justSyncedProjectId, projectId]);
 
-  // 4. MERGE LISTS (OPTIMIZED)
   const combinedTasks = useMemo(() => {
     const taskMap = new Map<string, Task>();
     cloudTasks.forEach((task) => taskMap.set(task.id, task));
     localTasks.forEach((task) => taskMap.set(task.id, task));
     return Array.from(taskMap.values());
   }, [cloudTasks, localTasks]);
-
-  // --- OPTIMIZED HANDLERS (OPTIMISTIC UPDATES) ---
 
   const handleDeleteTaskCompletely = useCallback(
     (task: Task) => {
@@ -296,11 +278,15 @@ export default function ProjectDetailsScreen() {
           text: "Διαγραφή",
           style: "destructive",
           onPress: async () => {
-            // 1. ΑΜΕΣΗ ΕΝΗΜΕΡΩΣΗ UI (Optimistic)
             setCloudTasks((prev) => prev.filter((t) => t.id !== task.id));
-            setLocalTasks((prev) => prev.filter((t) => t.id !== task.id));
-
-            // 2. Background Process
+            setLocalTasks((prev) => {
+              const newLocal = prev.filter((t) => t.id !== task.id);
+              AsyncStorage.setItem(
+                OFFLINE_QUEUE_KEY + projectId,
+                JSON.stringify(newLocal),
+              );
+              return newLocal;
+            });
             const net = await Network.getNetworkStateAsync();
             if (net.isConnected && net.type === Network.NetworkStateType.WIFI) {
               try {
@@ -311,12 +297,12 @@ export default function ProjectDetailsScreen() {
                   tasks: updatedCloudList,
                 });
               } catch (e) {
-                console.log("Delete failed", e);
+                console.log(e);
               }
             } else {
               Alert.alert(
                 "Offline",
-                "Η οριστική διαγραφή στο Cloud απαιτεί WiFi, αλλά αφαιρέθηκε προσωρινά.",
+                "Η οριστική διαγραφή στο Cloud απαιτεί WiFi.",
               );
             }
           },
@@ -327,39 +313,64 @@ export default function ProjectDetailsScreen() {
   );
 
   const saveTaskLocallyAndTrySync = async (task: Task) => {
-    // 1. ΑΜΕΣΗ ΕΝΗΜΕΡΩΣΗ UI (Optimistic)
-    // Ενημερώνουμε Local Tasks
     setLocalTasks((prev) => {
       const newLocalList = [...prev];
       const existingIndex = newLocalList.findIndex((t) => t.id === task.id);
       const taskToSave = { ...task, isLocal: true };
-
       if (existingIndex !== -1) {
         newLocalList[existingIndex] = taskToSave;
       } else {
         newLocalList.push(taskToSave);
       }
-      // Save to storage async (don't wait)
       AsyncStorage.setItem(
         OFFLINE_QUEUE_KEY + projectId,
         JSON.stringify(newLocalList),
       );
       return newLocalList;
     });
-
-    // Ενημερώνουμε και Cloud Tasks προσωρινά για να μην κάνει "flicker"
     setCloudTasks((prev) =>
       prev.map((t) => (t.id === task.id ? { ...task, isLocal: true } : t)),
     );
-
     if (activeTaskForGallery && activeTaskForGallery.id === task.id) {
       setActiveTaskForGallery(task);
     }
-
-    // 2. Background Sync
     const net = await Network.getNetworkStateAsync();
     if (net.isConnected && net.type === Network.NetworkStateType.WIFI) {
-      syncNow().catch((e) => console.log("Sync trigger err", e));
+      syncNow().catch((e) => console.log(e));
+    }
+  };
+
+  const handleSmartTaskUpdate = async (updatedTask: Task) => {
+    const net = await Network.getNetworkStateAsync();
+    if (net.isConnected && net.isInternetReachable) {
+      const cleanTask = { ...updatedTask };
+      delete cleanTask.isLocal;
+      setCloudTasks((prev) =>
+        prev.map((t) => (t.id === updatedTask.id ? cleanTask : t)),
+      );
+      setLocalTasks((prev) => {
+        const newLocal = prev.filter((t) => t.id !== updatedTask.id);
+        AsyncStorage.setItem(
+          OFFLINE_QUEUE_KEY + projectId,
+          JSON.stringify(newLocal),
+        );
+        return newLocal;
+      });
+      if (activeTaskForGallery && activeTaskForGallery.id === updatedTask.id) {
+        setActiveTaskForGallery(cleanTask);
+      }
+      try {
+        const newTasksList = cloudTasks.map((t) =>
+          t.id === updatedTask.id ? cleanTask : t,
+        );
+        await updateDoc(doc(db, "projects", projectId), {
+          tasks: newTasksList,
+        });
+      } catch (e) {
+        saveTaskLocallyAndTrySync(updatedTask);
+      }
+    } else {
+      saveTaskLocallyAndTrySync(updatedTask);
     }
   };
 
@@ -399,25 +410,24 @@ export default function ProjectDetailsScreen() {
     setCreateModalVisible(false);
     setNewTaskTitle("");
     setNewTaskDescription("");
-    await saveTaskLocallyAndTrySync(newTask);
+    await handleSmartTaskUpdate(newTask);
   };
 
   const updateTaskValue = async (
     taskId: string,
     val: string | null,
-    status: "completed" | "pending" = "completed",
+    status: "completed" | "pending",
   ) => {
     const taskToUpdate = combinedTasks.find((t) => t.id === taskId);
     if (!taskToUpdate) return;
-
-    setInputModalVisible(false); // Κλείσιμο modal αμέσως
+    setInputModalVisible(false);
     const updatedTask: Task = {
       ...taskToUpdate,
       value: val,
       status: status,
       isLocal: true,
     };
-    await saveTaskLocallyAndTrySync(updatedTask);
+    await handleSmartTaskUpdate(updatedTask);
   };
 
   const addImageToTask = async (taskId: string, newImageUri: string) => {
@@ -430,7 +440,7 @@ export default function ProjectDetailsScreen() {
       status: "completed",
       isLocal: true,
     };
-    await saveTaskLocallyAndTrySync(updatedTask);
+    await handleSmartTaskUpdate(updatedTask);
   };
 
   const removeImageFromTask = async (imgUri: string) => {
@@ -444,7 +454,7 @@ export default function ProjectDetailsScreen() {
       isLocal: true,
     };
     if (updatedImages.length === 0) setSelectedImageForView(null);
-    await saveTaskLocallyAndTrySync(updatedTask);
+    await handleSmartTaskUpdate(updatedTask);
   };
 
   const saveInput = async () => {
@@ -459,7 +469,6 @@ export default function ProjectDetailsScreen() {
     }
   };
 
-  // --- CAMERA & FILES ---
   const saveImageToDevice = async (tempUri: string) => {
     try {
       // @ts-ignore
@@ -482,7 +491,6 @@ export default function ProjectDetailsScreen() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.4,
     });
-
     if (!result.canceled && result.assets[0].uri) {
       setProcessing(true);
       try {
@@ -505,17 +513,12 @@ export default function ProjectDetailsScreen() {
     if (!uri) return;
     const isAvailable = await Sharing.isAvailableAsync();
     if (!isAvailable) return Alert.alert("Σφάλμα", "Share not available");
-    try {
-      await Sharing.shareAsync(uri, {
-        mimeType: "image/jpeg",
-        dialogTitle: "Κοινοποίηση",
-      });
-    } catch (error) {
-      Alert.alert("Σφάλμα", "Share Failed");
-    }
+    await Sharing.shareAsync(uri, {
+      mimeType: "image/jpeg",
+      dialogTitle: "Κοινοποίηση",
+    });
   };
 
-  // --- RENDER ---
   const totalTasks = combinedTasks.length;
   const completedTasks = combinedTasks.filter(
     (t) => t.status === "completed",
@@ -539,13 +542,13 @@ export default function ProjectDetailsScreen() {
 
   if (loading)
     return (
-      <SafeAreaView style={styles.center}>
+      <View style={styles.center}>
         <ActivityIndicator size="large" color="#2563eb" />
-      </SafeAreaView>
+      </View>
     );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       {processing && (
         <View style={styles.loadingOverlay}>
           <View style={styles.loadingBox}>
@@ -555,7 +558,6 @@ export default function ProjectDetailsScreen() {
         </View>
       )}
 
-      {/* HEADER */}
       <View style={styles.header}>
         <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
           <TouchableOpacity
@@ -586,23 +588,13 @@ export default function ProjectDetailsScreen() {
               style={styles.syncButtonHeader}
               onPress={handleProjectSync}
             >
-              <Ionicons name="cloud-upload" size={20} color="#fff" />
-              <Text
-                style={{
-                  color: "white",
-                  fontWeight: "bold",
-                  fontSize: 12,
-                  marginLeft: 5,
-                }}
-              >
-                Sync
-              </Text>
+              <Ionicons name="cloud-upload" size={18} color="#fff" />
+              <Text style={styles.syncText}>Sync</Text>
             </TouchableOpacity>
           )
         )}
       </View>
 
-      {/* PROGRESS BAR */}
       {totalTasks > 0 && (
         <View style={styles.progressSection}>
           <View style={styles.progressBarBg}>
@@ -613,11 +605,11 @@ export default function ProjectDetailsScreen() {
         </View>
       )}
 
-      {/* TASKS LIST */}
       <FlatList
         data={combinedTasks}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
+        extraData={combinedTasks}
         contentContainerStyle={[
           styles.content,
           { paddingBottom: 100 + insets.bottom },
@@ -628,7 +620,6 @@ export default function ProjectDetailsScreen() {
         removeClippedSubviews={true}
       />
 
-      {/* FAB BUTTON */}
       <TouchableOpacity
         style={[styles.fab, { bottom: 30 + insets.bottom }]}
         onPress={() => setCreateModalVisible(true)}
@@ -636,22 +627,28 @@ export default function ProjectDetailsScreen() {
         <Ionicons name="add" size={32} color="white" />
       </TouchableOpacity>
 
-      {/* GALLERY MODAL */}
       <Modal
         visible={galleryModalVisible}
         animationType="slide"
         onRequestClose={() => setGalleryModalVisible(false)}
       >
         <SafeAreaView style={{ flex: 1, backgroundColor: "#000" }}>
+          {/* 2. GALLERY HEADER: Αλλαγή Χ σε Βέλος αριστερά */}
           <View style={styles.galleryHeader}>
-            <Text style={{ color: "white", fontSize: 18, fontWeight: "bold" }}>
+            <TouchableOpacity
+              onPress={() => setGalleryModalVisible(false)}
+              style={{ marginRight: 15 }}
+            >
+              <Ionicons name="arrow-back" size={28} color="white" />
+            </TouchableOpacity>
+            <Text style={styles.galleryTitle} numberOfLines={1}>
               {activeTaskForGallery?.title}
             </Text>
-            <TouchableOpacity onPress={() => setGalleryModalVisible(false)}>
-              <Ionicons name="close-circle" size={32} color="white" />
-            </TouchableOpacity>
+            {/* Empty view for spacing balance if needed, or remove */}
+            <View style={{ width: 28 }} />
           </View>
-          <View style={{ flex: 1, padding: 10 }}>
+
+          <View style={{ flex: 1, padding: 1 }}>
             <FlatList
               data={[...(activeTaskForGallery?.images || []), "ADD_BUTTON"]}
               keyExtractor={(item, index) => index.toString()}
@@ -667,9 +664,7 @@ export default function ProjectDetailsScreen() {
                       }
                     >
                       <Ionicons name="camera" size={32} color="#666" />
-                      <Text style={{ color: "#666", marginTop: 5 }}>
-                        Προσθήκη
-                      </Text>
+                      <Text style={styles.addPhotoText}>Προσθήκη</Text>
                     </TouchableOpacity>
                   );
                 }
@@ -692,7 +687,6 @@ export default function ProjectDetailsScreen() {
         </SafeAreaView>
       </Modal>
 
-      {/* FULL SCREEN IMAGE VIEW */}
       <Modal
         visible={!!selectedImageForView}
         transparent={true}
@@ -746,7 +740,6 @@ export default function ProjectDetailsScreen() {
         </View>
       </Modal>
 
-      {/* CREATE TASK MODAL */}
       <Modal visible={createModalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -775,7 +768,6 @@ export default function ProjectDetailsScreen() {
             />
             <Text style={styles.label}>Τύπος Εργασίας</Text>
             <View style={styles.optionsContainer}>
-              {/* PHOTO */}
               <TouchableOpacity
                 style={[
                   styles.optionCard,
@@ -797,7 +789,6 @@ export default function ProjectDetailsScreen() {
                   Φωτογραφία
                 </Text>
               </TouchableOpacity>
-              {/* MEASUREMENT */}
               <TouchableOpacity
                 style={[
                   styles.optionCard,
@@ -819,7 +810,6 @@ export default function ProjectDetailsScreen() {
                   Μέτρηση
                 </Text>
               </TouchableOpacity>
-              {/* GENERAL */}
               <TouchableOpacity
                 style={[
                   styles.optionCard,
@@ -864,13 +854,14 @@ export default function ProjectDetailsScreen() {
         keyboardType="default"
         isMultiline={currentTaskType === "general"}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f8fafc", marginTop: 20 },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
+
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -883,7 +874,15 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 18, fontWeight: "800", color: "#0f172a" },
   headerSubtitle: { color: "#64748b", fontSize: 12, fontWeight: "600" },
-  backButton: { marginRight: 15, padding: 5 },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#f1f5f9",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 10,
+  },
   projectLogoPlaceholder: {
     width: 42,
     height: 42,
@@ -903,27 +902,42 @@ const styles = StyleSheet.create({
     backgroundColor: "#f97316",
     borderRadius: 20,
   },
+  syncText: {
+    color: "white",
+    fontWeight: "bold",
+    fontSize: 12,
+    marginLeft: 5,
+  },
   syncingBadge: { padding: 10 },
+
   progressSection: { backgroundColor: "white", paddingBottom: 0 },
   progressBarBg: { height: 3, backgroundColor: "#e2e8f0", width: "100%" },
   progressBarFill: { height: "100%", backgroundColor: "#10b981" },
+
   content: { padding: 20 },
+
   taskCard: {
     backgroundColor: "white",
-    padding: 16,
     borderRadius: 16,
     marginBottom: 12,
+    shadowColor: "#64748b",
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+    overflow: "hidden",
+    minHeight: 80,
+  },
+  taskCardInner: {
+    padding: 16,
     flexDirection: "row",
     alignItems: "center",
-    shadowColor: "#64748b",
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    justifyContent: "space-between",
+    minHeight: 80,
   },
   iconBox: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
@@ -932,19 +946,21 @@ const styles = StyleSheet.create({
   iconBoxPending: { backgroundColor: "#eff6ff" },
   iconBoxCompleted: { backgroundColor: "#dcfce7" },
   taskTitle: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: "700",
     color: "#1e293b",
     marginBottom: 2,
   },
-  taskDesc: { fontSize: 12, color: "#94a3b8" },
+  taskDesc: { fontSize: 13, color: "#94a3b8" },
   taskValueText: { fontWeight: "700", color: "#059669", fontSize: 15 },
+
+  thumbnailContainer: { alignItems: "center" },
   taskThumbnail: {
     width: 48,
     height: 48,
     borderRadius: 10,
-    borderWidth: 2,
-    borderColor: "#f1f5f9",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
   },
   badge: {
     position: "absolute",
@@ -959,23 +975,37 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "white",
   },
-  badgeText: { color: "white", fontSize: 9, fontWeight: "bold" },
+  badgeText: { color: "white", fontSize: 10, fontWeight: "bold" },
+
+  localBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 4,
+  },
+  localBadgeText: {
+    fontSize: 11,
+    color: "#f97316",
+    marginLeft: 4,
+    fontWeight: "bold",
+  },
+
   fab: {
     position: "absolute",
     right: 20,
     backgroundColor: "#2563eb",
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     justifyContent: "center",
     alignItems: "center",
     elevation: 8,
     shadowColor: "#2563eb",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4,
-    shadowRadius: 6,
+    shadowRadius: 8,
     zIndex: 999,
   },
+
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(15, 23, 42, 0.6)",
@@ -995,6 +1025,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   modalHeader: { fontSize: 20, fontWeight: "800", color: "#0f172a" },
+
   label: {
     fontSize: 13,
     fontWeight: "700",
@@ -1048,6 +1079,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     letterSpacing: 1,
   },
+
   loadingOverlay: {
     position: "absolute",
     top: 0,
@@ -1060,12 +1092,17 @@ const styles = StyleSheet.create({
     zIndex: 9999,
   },
   loadingBox: {
-    padding: 20,
+    padding: 24,
     backgroundColor: "white",
-    borderRadius: 10,
-    elevation: 5,
+    borderRadius: 16,
+    elevation: 10,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
   },
-  loadingText: { marginTop: 10, color: "#333", fontWeight: "bold" },
+  loadingText: { marginTop: 12, color: "#333", fontWeight: "bold" },
+
   modalBackground: {
     flex: 1,
     backgroundColor: "#000",
@@ -1079,7 +1116,7 @@ const styles = StyleSheet.create({
     zIndex: 20,
     backgroundColor: "rgba(0,0,0,0.5)",
     borderRadius: 20,
-    padding: 5,
+    padding: 8,
   },
   toolBar: {
     position: "absolute",
@@ -1090,19 +1127,23 @@ const styles = StyleSheet.create({
   },
   toolBtn: {
     alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(255,255,255,0.15)",
     padding: 15,
     borderRadius: 50,
+    width: 80,
+    height: 80,
+    justifyContent: "center",
   },
-  toolText: { color: "white", fontSize: 10, marginTop: 5, fontWeight: "600" },
+  toolText: { color: "white", fontSize: 11, marginTop: 5, fontWeight: "600" },
   galleryHeader: {
     flexDirection: "row",
-    justifyContent: "space-between",
+    justifyContent: "flex-start", // Changed to align arrow left
     alignItems: "center",
     padding: 20,
-    paddingTop: 50,
+    paddingTop: 10,
     backgroundColor: "#000",
   },
+  galleryTitle: { color: "white", fontSize: 18, fontWeight: "bold" },
   photoTile: {
     flex: 1 / 3,
     aspectRatio: 1,
@@ -1113,10 +1154,11 @@ const styles = StyleSheet.create({
     flex: 1 / 3,
     aspectRatio: 1,
     margin: 1,
-    backgroundColor: "#333",
+    backgroundColor: "#111",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#444",
+    borderColor: "#333",
   },
+  addPhotoText: { color: "#666", marginTop: 5, fontSize: 12 },
 });

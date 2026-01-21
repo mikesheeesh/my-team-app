@@ -4,15 +4,16 @@ import * as Network from "expo-network";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { memo, useCallback, useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // FIREBASE
 import { onAuthStateChanged } from "firebase/auth";
@@ -22,7 +23,6 @@ import { auth, db } from "../../firebaseConfig";
 // CONTEXT
 import { useSync } from "../context/SyncContext";
 
-// --- TYPES ---
 type Role = "Founder" | "Admin" | "Supervisor" | "User";
 
 interface Team {
@@ -36,7 +36,6 @@ interface Team {
 const TEAMS_CACHE_KEY = "cached_my_teams";
 const OFFLINE_QUEUE_PREFIX = "offline_tasks_queue_";
 
-// --- HELPER FUNCTION ---
 const getRoleStyle = (role: Role) => {
   switch (role) {
     case "Founder":
@@ -62,15 +61,14 @@ const getRoleStyle = (role: Role) => {
       };
     default:
       return {
-        bg: "white",
-        border: "#e5e7eb",
-        text: "#6b7280",
+        bg: "#f8fafc",
+        border: "#94a3b8",
+        text: "#475569",
         label: "ΜΕΛΟΣ",
       };
   }
 };
 
-// --- TEAM CARD COMPONENT (MEMOIZED) ---
 const TeamCard = memo(
   ({ team, onPress }: { team: Team; onPress: (t: Team) => void }) => {
     const styleProps = getRoleStyle(team.role);
@@ -85,24 +83,47 @@ const TeamCard = memo(
         activeOpacity={0.7}
       >
         <View style={styles.cardHeader}>
-          <Text style={styles.cardTitle}>{team.name}</Text>
+          <View style={styles.cardTitleContainer}>
+            <Text style={styles.cardTitle} numberOfLines={1}>
+              {team.name}
+            </Text>
+            <Text style={styles.cardType}>{team.type}</Text>
+          </View>
           <View
-            style={[styles.roleBadge, { backgroundColor: styleProps.border }]}
+            style={[
+              styles.roleBadge,
+              {
+                backgroundColor: styleProps.bg,
+                borderColor: styleProps.border,
+              },
+            ]}
           >
-            <Text style={styles.roleText}>{styleProps.label}</Text>
+            <Text style={[styles.roleText, { color: styleProps.text }]}>
+              {styleProps.label}
+            </Text>
           </View>
         </View>
-        <Text style={styles.cardSubtitle}>
-          {team.type} • {team.membersCount} μέλη
-        </Text>
+
+        <View style={styles.cardFooter}>
+          <View style={styles.memberTag}>
+            <Ionicons
+              name="people"
+              size={14}
+              color="#64748b"
+              style={{ marginRight: 4 }}
+            />
+            <Text style={styles.cardSubtitle}>{team.membersCount} μέλη</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color="#cbd5e1" />
+        </View>
       </TouchableOpacity>
     );
   },
 );
 
-// --- MAIN SCREEN ---
 export default function MyTeamsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { isSyncing, syncNow } = useSync();
 
   const [teams, setTeams] = useState<Team[]>([]);
@@ -110,21 +131,18 @@ export default function MyTeamsScreen() {
   const [userName, setUserName] = useState("Χρήστης");
   const [pendingCount, setPendingCount] = useState(0);
 
-  // 1. ΕΛΕΓΧΟΣ ΕΚΚΡΕΜΟΤΗΤΩΝ (OFFLINE TASKS)
   const checkPendingUploads = useCallback(async () => {
     try {
       const keys = await AsyncStorage.getAllKeys();
       const queueKeys = keys.filter((k) => k.startsWith(OFFLINE_QUEUE_PREFIX));
 
       let total = 0;
-      if (queueKeys.length > 0) {
-        const values = await AsyncStorage.multiGet(queueKeys);
-        values.forEach(([, val]) => {
-          if (val) {
-            const arr = JSON.parse(val);
-            if (Array.isArray(arr)) total += arr.length;
-          }
-        });
+      for (const k of queueKeys) {
+        const val = await AsyncStorage.getItem(k);
+        if (val) {
+          const arr = JSON.parse(val);
+          if (Array.isArray(arr)) total += arr.length;
+        }
       }
       setPendingCount(total);
     } catch (e) {
@@ -144,12 +162,16 @@ export default function MyTeamsScreen() {
     }
   }, [isSyncing, checkPendingUploads]);
 
-  // 2. INITIAL CACHE LOAD
   useEffect(() => {
     const initLoad = async () => {
       try {
         const cached = await AsyncStorage.getItem(TEAMS_CACHE_KEY);
-        if (cached) setTeams(JSON.parse(cached));
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setTeams(parsed);
+          }
+        }
       } catch (e) {
         console.log("Cache load error:", e);
       }
@@ -158,18 +180,15 @@ export default function MyTeamsScreen() {
     initLoad();
   }, []);
 
-  // 3. FIREBASE LISTENER
   useEffect(() => {
     let unsubscribeTeams: (() => void) | null = null;
 
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (user) {
-        // Fetch Username
         onSnapshot(doc(db, "users", user.uid), (snap) => {
           if (snap.exists()) setUserName(snap.data().fullname || "Χρήστης");
         });
 
-        // Fetch Teams
         const q = query(
           collection(db, "teams"),
           where("memberIds", "array-contains", user.uid),
@@ -190,13 +209,14 @@ export default function MyTeamsScreen() {
               });
             });
 
-            setTeams(fetchedTeams);
-
-            if (!snapshot.metadata.fromCache) {
+            if (fetchedTeams.length > 0) {
+              setTeams(fetchedTeams);
               AsyncStorage.setItem(
                 TEAMS_CACHE_KEY,
                 JSON.stringify(fetchedTeams),
-              ).catch((e) => console.log("Cache save err", e));
+              );
+            } else if (!snapshot.metadata.fromCache) {
+              setTeams([]);
             }
             setLoading(false);
           },
@@ -207,7 +227,6 @@ export default function MyTeamsScreen() {
         );
       } else {
         setLoading(false);
-        setTeams([]);
       }
     });
 
@@ -219,15 +238,12 @@ export default function MyTeamsScreen() {
     };
   }, []);
 
-  // 4. HANDLERS
   const handleSyncPress = async () => {
     if (pendingCount === 0) {
       return Alert.alert("Ενημέρωση", "Όλα τα δεδομένα είναι συγχρονισμένα!");
     }
     const net = await Network.getNetworkStateAsync();
-    if (!net.isConnected) {
-      return Alert.alert("Offline", "Δεν έχετε ίντερνετ.");
-    }
+    if (!net.isConnected) return Alert.alert("Offline", "Δεν έχετε ίντερνετ.");
     await syncNow();
   };
 
@@ -241,10 +257,8 @@ export default function MyTeamsScreen() {
     [router],
   );
 
-  // 5. RENDER HELPERS
-  // Χρησιμοποιούμε μια απλή συνάρτηση για το Header
   const ListHeader = () => (
-    <View>
+    <View style={styles.headerContainer}>
       <View style={styles.header}>
         <View>
           <Text style={styles.welcomeText}>Λίστα Ομάδων</Text>
@@ -254,7 +268,7 @@ export default function MyTeamsScreen() {
           onPress={() => router.push("/profile")}
           style={styles.profileButton}
         >
-          <Ionicons name="person-circle-outline" size={30} color="#2563eb" />
+          <Ionicons name="person-circle-outline" size={40} color="#2563eb" />
         </TouchableOpacity>
       </View>
 
@@ -267,6 +281,7 @@ export default function MyTeamsScreen() {
         ]}
         onPress={handleSyncPress}
         disabled={isSyncing}
+        activeOpacity={0.9}
       >
         {isSyncing ? (
           <ActivityIndicator color="white" />
@@ -277,7 +292,7 @@ export default function MyTeamsScreen() {
             color="white"
           />
         )}
-        <View style={{ marginLeft: 10 }}>
+        <View style={{ marginLeft: 12 }}>
           <Text style={styles.syncText}>
             {isSyncing
               ? "Συγχρονισμός..."
@@ -287,10 +302,16 @@ export default function MyTeamsScreen() {
           </Text>
           <Text style={styles.syncSubText}>
             {pendingCount > 0
-              ? `Πατήστε για ανέβασμα.`
-              : "Τα δεδομένα σας είναι ενημερωμένα."}
+              ? "Πατήστε για ανέβασμα."
+              : "Τα δεδομένα είναι ενημερωμένα."}
           </Text>
         </View>
+        <Ionicons
+          name="chevron-forward"
+          size={20}
+          color="rgba(255,255,255,0.5)"
+          style={{ marginLeft: "auto" }}
+        />
       </TouchableOpacity>
 
       <Text style={styles.sectionTitle}>Οι Ομάδες μου ({teams.length})</Text>
@@ -299,10 +320,19 @@ export default function MyTeamsScreen() {
 
   const renderEmpty = () => (
     <View style={styles.emptyState}>
-      <Ionicons name="people-outline" size={64} color="#ccc" />
-      <Text style={{ color: "#999", marginTop: 10 }}>Δεν βρέθηκαν ομάδες.</Text>
-      <Text style={{ color: "#999", fontSize: 12 }}>
-        Αν είστε offline, ίσως δεν έχουν κατέβει ακόμα.
+      <Ionicons name="people-outline" size={64} color="#cbd5e1" />
+      <Text style={{ color: "#94a3b8", marginTop: 10, fontSize: 16 }}>
+        Δεν βρέθηκαν ομάδες.
+      </Text>
+      <Text
+        style={{
+          color: "#94a3b8",
+          fontSize: 12,
+          textAlign: "center",
+          marginTop: 5,
+        }}
+      >
+        Αν είστε offline, βεβαιωθείτε ότι έχετε συνδεθεί μία φορά online.
       </Text>
     </View>
   );
@@ -314,16 +344,17 @@ export default function MyTeamsScreen() {
     [handleTeamPress],
   );
 
-  if (loading) {
+  if (loading && teams.length === 0) {
     return (
-      <SafeAreaView style={styles.center}>
+      <View style={styles.center}>
         <ActivityIndicator size="large" color="#2563eb" />
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <StatusBar barStyle="dark-content" backgroundColor="#f8fafc" />
       <FlatList
         data={teams}
         keyExtractor={(item) => item.id}
@@ -332,57 +363,110 @@ export default function MyTeamsScreen() {
         ListEmptyComponent={renderEmpty}
         contentContainerStyle={styles.scrollContent}
         initialNumToRender={6}
+        showsVerticalScrollIndicator={false}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f8fafc", paddingTop: 30 },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  container: { flex: 1, backgroundColor: "#f8fafc" },
+  center: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#f8fafc",
+  },
   scrollContent: { padding: 20, paddingBottom: 50 },
+
+  headerContainer: { marginBottom: 10 },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 30,
+    marginBottom: 24,
   },
-  welcomeText: { color: "#64748b", fontSize: 14 },
-  userName: { fontSize: 22, fontWeight: "bold", color: "#0f172a" },
-  profileButton: { padding: 5 },
+  welcomeText: {
+    color: "#64748b",
+    fontSize: 14,
+    fontWeight: "600",
+    marginBottom: 2,
+  },
+  userName: { fontSize: 24, fontWeight: "800", color: "#0f172a" },
+  profileButton: { padding: 2 },
+
   syncCard: {
-    padding: 15,
-    borderRadius: 12,
+    padding: 16,
+    borderRadius: 16,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 20,
+    marginBottom: 24,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 8,
     elevation: 4,
   },
-  syncText: { color: "white", fontWeight: "bold", fontSize: 16 },
-  syncSubText: { color: "rgba(255,255,255,0.8)", fontSize: 12 },
+  syncText: { color: "white", fontWeight: "700", fontSize: 16 },
+  syncSubText: { color: "rgba(255,255,255,0.9)", fontSize: 12, marginTop: 2 },
+
   sectionTitle: {
     fontSize: 18,
-    fontWeight: "bold",
+    fontWeight: "700",
     color: "#334155",
-    marginBottom: 15,
+    marginBottom: 16,
   },
+
   card: {
     backgroundColor: "white",
     padding: 20,
     borderRadius: 16,
-    marginBottom: 15,
-    elevation: 2,
+    marginBottom: 16,
+    // Soft shadow
+    shadowColor: "#64748b",
+    shadowOpacity: 0.08,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 12,
+    elevation: 3,
   },
   cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 5,
+    alignItems: "flex-start",
+    marginBottom: 12,
   },
-  cardTitle: { fontSize: 18, fontWeight: "bold", color: "#1e293b" },
-  cardSubtitle: { color: "#64748b", fontSize: 12 },
-  roleBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  roleText: { color: "white", fontWeight: "bold", fontSize: 10 },
-  emptyState: { alignItems: "center", marginTop: 50 },
+  cardTitleContainer: { flex: 1, marginRight: 10 },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#1e293b",
+    marginBottom: 2,
+  },
+  cardType: { fontSize: 13, color: "#64748b", fontWeight: "500" },
+
+  roleBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  roleText: { fontWeight: "700", fontSize: 10 },
+
+  cardFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 8,
+  },
+  memberTag: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#f1f5f9",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  cardSubtitle: { color: "#64748b", fontSize: 12, fontWeight: "600" },
+
+  emptyState: { alignItems: "center", marginTop: 60 },
 });

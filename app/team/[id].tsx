@@ -5,17 +5,17 @@ import * as Network from "expo-network";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    Image,
-    Modal,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  Modal,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -24,15 +24,15 @@ import InputModal from "../components/InputModal";
 // FIREBASE
 import { onAuthStateChanged } from "firebase/auth";
 import {
-    arrayRemove,
-    deleteDoc,
-    deleteField,
-    doc,
-    getDoc,
-    onSnapshot,
-    serverTimestamp,
-    setDoc,
-    updateDoc,
+  arrayRemove,
+  deleteDoc,
+  deleteField,
+  doc,
+  getDoc,
+  onSnapshot,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
 } from "firebase/firestore";
 import { auth, db } from "../../firebaseConfig";
 
@@ -121,7 +121,7 @@ export default function TeamProjectsScreen() {
               const data = docSnap.data();
 
               setTeamName(data.name);
-              setTeamContact(data.contactEmail || "");
+              setTeamContact(data.contactEmail || ""); // <--- ΕΔΩ ΕΝΗΜΕΡΩΝΕΤΑΙ LIVE ΤΟ EMAIL
               setTeamLogo(data.logo || null);
               setGroups(data.groups || []);
 
@@ -213,10 +213,7 @@ export default function TeamProjectsScreen() {
         const newProjectId =
           Date.now().toString() + Math.random().toString(36).substr(2, 5);
 
-        // --- UPDATED LOGIC: Founder/Admin vs Supervisor ---
         let initialSupervisors: string[] = [];
-        // Αν είμαι Supervisor, μπαίνω αυτόματα.
-        // Αν είμαι Founder/Admin, το αφήνω κενό για ανάθεση.
         if (myRole === "Supervisor") {
           initialSupervisors = [currentUserId];
         }
@@ -252,6 +249,11 @@ export default function TeamProjectsScreen() {
       } else if (inputMode === "teamName") {
         await updateTeamData("name", tempValue);
       } else if (inputMode === "teamContact") {
+        // --- ΝΕΟΣ ΕΛΕΓΧΟΣ EMAIL ---
+        if (!tempValue.includes("@")) {
+          Alert.alert("Λάθος", "Παρακαλώ εισάγετε ένα έγκυρο email.");
+          return;
+        }
         await updateTeamData("contactEmail", tempValue);
       }
 
@@ -264,7 +266,6 @@ export default function TeamProjectsScreen() {
     }
   };
 
-  // --- STRICT ROLE LOGIC (ADMIN GHOST MODE) ---
   const changeUserRole = async (
     targetUser: User,
     action: "promote" | "demote" | "kick",
@@ -300,7 +301,6 @@ export default function TeamProjectsScreen() {
 
     let newRole: Role = targetUser.role;
 
-    // Yπολογισμός Νέου Ρόλου
     if (action === "promote") {
       if (targetUser.role === "User") newRole = "Supervisor";
       else if (targetUser.role === "Supervisor") newRole = "Admin";
@@ -311,14 +311,12 @@ export default function TeamProjectsScreen() {
 
     if (newRole === targetUser.role) return;
 
-    // 1. UI Update (Optimistic)
     setUsers((prevUsers) =>
       prevUsers.map((u) =>
         u.id === targetUser.id ? { ...u, role: newRole } : u,
       ),
     );
 
-    // 2. PROJECT CLEANUP LOGIC
     let updatedGroups = groups;
 
     updatedGroups = groups.map((group) => {
@@ -328,7 +326,6 @@ export default function TeamProjectsScreen() {
         let changed = false;
 
         if (newRole === "Admin") {
-          // ADMIN = ΦΕΥΓΕΙ ΑΠΟ ΠΑΝΤΟΥ (Clean Sweep)
           if (newSups.includes(targetUser.id)) {
             newSups = newSups.filter((id) => id !== targetUser.id);
             changed = true;
@@ -338,22 +335,17 @@ export default function TeamProjectsScreen() {
             changed = true;
           }
         } else if (newRole === "Supervisor") {
-          // SUP = ΦΕΥΓΕΙ ΑΠΟ MEMBERS
           if (newMems.includes(targetUser.id)) {
             newMems = newMems.filter((id) => id !== targetUser.id);
             changed = true;
           }
-          // Δεν τον βάζουμε αυτόματα στους Sups (Clean Slate)
         } else if (newRole === "User") {
-          // USER = ΦΕΥΓΕΙ ΑΠΟ SUPERVISORS
           if (newSups.includes(targetUser.id)) {
             newSups = newSups.filter((id) => id !== targetUser.id);
             changed = true;
           }
-          // Δεν τον βάζουμε αυτόματα στα Members (Clean Slate)
         }
 
-        // Ενημέρωση Βάσης (Projects)
         if (changed) {
           updateDoc(doc(db, "projects", project.id), {
             supervisors: newSups,
@@ -366,16 +358,13 @@ export default function TeamProjectsScreen() {
       return { ...group, projects: updatedProjects };
     });
 
-    // Ενημερώνουμε τα Groups τοπικά για να αλλάξουν τα νούμερα
     setGroups(updatedGroups);
 
-    // 3. Ενημέρωση Βάσης (Teams - Roles & Groups Snapshot)
     try {
       await updateDoc(doc(db, "teams", teamId), {
         [`roles.${targetUser.id}`]: newRole,
-        groups: updatedGroups, // Σώζουμε και τη νέα δομή στα teams
+        groups: updatedGroups,
       });
-      console.log("Global role updated successfully.");
     } catch (error) {
       console.error("Role update failed:", error);
       Alert.alert("Σφάλμα", "Η αλλαγή ρόλου απέτυχε.");
@@ -612,7 +601,6 @@ export default function TeamProjectsScreen() {
           </View>
         </View>
 
-        {/* ΤΟ ΓΡΑΝΑΖΙ ΠΟΥ ΑΝΟΙΓΕΙ ΤΟ MENU GRID */}
         {(myRole === "Founder" ||
           myRole === "Admin" ||
           myRole === "Supervisor") && (
@@ -714,7 +702,6 @@ export default function TeamProjectsScreen() {
               </TouchableOpacity>
             ))}
 
-            {/* ADD PROJECT BUTTON - STYLED NICELY */}
             {(myRole === "Founder" ||
               myRole === "Admin" ||
               myRole === "Supervisor") && (
@@ -730,7 +717,7 @@ export default function TeamProjectsScreen() {
         )}
       />
 
-      {/* --- MENU MODAL (TRIGGERED BY GEAR) --- */}
+      {/* --- MENU MODAL (GRID) --- */}
       <Modal
         visible={menuVisible}
         transparent
@@ -738,7 +725,9 @@ export default function TeamProjectsScreen() {
         onRequestClose={() => setMenuVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View
+            style={[styles.modalContent, { paddingBottom: insets.bottom + 20 }]}
+          >
             <View style={styles.modalHeaderRow}>
               <Text style={styles.modalHeader}>Ενέργειες Ομάδας</Text>
               <TouchableOpacity onPress={() => setMenuVisible(false)}>
@@ -746,9 +735,7 @@ export default function TeamProjectsScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* THE NICE GRID OF CARDS */}
             <View style={styles.optionsGrid}>
-              {/* 1. NEW GROUP */}
               <TouchableOpacity
                 style={styles.optionCard}
                 onPress={() => openInput("newGroup")}
@@ -761,7 +748,6 @@ export default function TeamProjectsScreen() {
                 <Text style={styles.optionText}>Νέο Group</Text>
               </TouchableOpacity>
 
-              {/* 2. INVITE */}
               <TouchableOpacity
                 style={styles.optionCard}
                 onPress={handleInvite}
@@ -774,7 +760,6 @@ export default function TeamProjectsScreen() {
                 <Text style={styles.optionText}>Πρόσκληση</Text>
               </TouchableOpacity>
 
-              {/* 3. USERS */}
               <TouchableOpacity
                 style={styles.optionCard}
                 onPress={() => {
@@ -790,7 +775,6 @@ export default function TeamProjectsScreen() {
                 <Text style={styles.optionText}>Μέλη</Text>
               </TouchableOpacity>
 
-              {/* 4. SETTINGS */}
               {(myRole === "Founder" || myRole === "Admin") && (
                 <TouchableOpacity
                   style={styles.optionCard}
@@ -826,7 +810,9 @@ export default function TeamProjectsScreen() {
       {/* --- SUB MENU SETTINGS --- */}
       <Modal visible={settingsSubMenuVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View
+            style={[styles.modalContent, { paddingBottom: insets.bottom + 20 }]}
+          >
             <Text style={styles.modalHeader}>Ρυθμίσεις</Text>
 
             <TouchableOpacity style={styles.menuItem} onPress={pickLogo}>
@@ -844,13 +830,16 @@ export default function TeamProjectsScreen() {
                 </Text>
               </TouchableOpacity>
             )}
+
+            {/* ΝΕΟ ΚΟΥΜΠΙ ΓΙΑ EMAIL */}
             <TouchableOpacity
               style={styles.menuItem}
               onPress={() => openInput("teamContact")}
             >
-              <Ionicons name="call-outline" size={20} color="#333" />
-              <Text style={styles.menuText}>Αλλαγή Επικοινωνίας</Text>
+              <Ionicons name="mail-outline" size={20} color="#333" />
+              <Text style={styles.menuText}>Αλλαγή Email Ομάδας</Text>
             </TouchableOpacity>
+
             <TouchableOpacity
               style={styles.menuItem}
               onPress={() => openInput("teamName")}
@@ -882,7 +871,12 @@ export default function TeamProjectsScreen() {
               <Ionicons name="close" size={28} color="#333" />
             </TouchableOpacity>
           </View>
-          <ScrollView style={{ padding: 20 }}>
+          <ScrollView
+            contentContainerStyle={{
+              padding: 20,
+              paddingBottom: 50 + insets.bottom,
+            }}
+          >
             <Text style={styles.sectionTitle}>1. Supervisors</Text>
             {users
               .filter((u) => u.role === "Supervisor")
@@ -956,7 +950,9 @@ export default function TeamProjectsScreen() {
       {/* MOVE MODAL */}
       <Modal visible={moveModalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View
+            style={[styles.modalContent, { paddingBottom: insets.bottom + 20 }]}
+          >
             <Text style={styles.modalHeader}>Επιλέξτε Group</Text>
             {groups.map((g) => (
               <TouchableOpacity
@@ -998,7 +994,10 @@ export default function TeamProjectsScreen() {
           <FlatList
             data={users}
             keyExtractor={(u) => u.id}
-            contentContainerStyle={{ padding: 20 }}
+            contentContainerStyle={{
+              padding: 20,
+              paddingBottom: 50 + insets.bottom,
+            }}
             renderItem={({ item }) => (
               <View style={styles.userCard}>
                 <View>
@@ -1059,11 +1058,19 @@ export default function TeamProjectsScreen() {
             ? "Νέο Project Group"
             : inputMode === "newProject"
               ? "Νέο Project"
-              : "Επεξεργασία"
+              : inputMode === "teamContact"
+                ? "Νέο Email Ομάδας"
+                : "Επεξεργασία"
         }
         value={tempValue}
         onChangeText={setTempValue}
-        placeholder="Πληκτρολογήστε..."
+        placeholder={
+          inputMode === "teamContact"
+            ? "neo.email@gmail.com"
+            : "Πληκτρολογήστε..."
+        }
+        // Στέλνουμε το σωστό keyboard type
+        keyboardType={inputMode === "teamContact" ? "email-address" : "default"}
       />
     </SafeAreaView>
   );
@@ -1136,7 +1143,6 @@ const styles = StyleSheet.create({
   projectTitle: { fontSize: 16, fontWeight: "600", color: "#334155" },
   projectMeta: { fontSize: 11, color: "#94a3b8", marginTop: 2 },
 
-  // --- STYLED "ADD PROJECT" BUTTON ---
   addProjectBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -1206,7 +1212,6 @@ const styles = StyleSheet.create({
 
   deleteTeamBtn: { marginTop: 20, alignSelf: "center", padding: 10 },
 
-  // OTHER MODALS STYLES (List items)
   menuItem: {
     flexDirection: "row",
     alignItems: "center",

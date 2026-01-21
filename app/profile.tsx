@@ -4,19 +4,17 @@ import * as Network from "expo-network";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    SafeAreaView,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context"; // <--- Χρήση του Insets
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-// FIREBASE
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { auth, db } from "../firebaseConfig";
@@ -27,22 +25,19 @@ const PROFILE_CACHE_KEY = "user_profile_data_cache";
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets(); // <--- Για σωστό περιθώριο πάνω
+  const insets = useSafeAreaInsets();
 
   const [loading, setLoading] = useState(true);
   const [userData, setUserData] = useState<any>(null);
   const [isOffline, setIsOffline] = useState(false);
 
-  // Edit States
   const [modalVisible, setModalVisible] = useState(false);
   const [editValue, setEditValue] = useState("");
   const [editField, setEditField] = useState<"fullname" | "phone">("fullname");
 
-  // 1. INITIAL LOAD (CACHE FIRST)
   useEffect(() => {
     const initLoad = async () => {
       try {
-        // Φόρτωση από Cache για άμεση εμφάνιση
         const cached = await AsyncStorage.getItem(PROFILE_CACHE_KEY);
         if (cached) {
           setUserData(JSON.parse(cached));
@@ -60,7 +55,6 @@ export default function ProfileScreen() {
     initLoad();
   }, []);
 
-  // 2. LISTENER ΓΙΑ REALTIME ΑΛΛΑΓΕΣ
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (user) {
@@ -71,11 +65,7 @@ export default function ProfileScreen() {
             if (docSnap.exists()) {
               const data = docSnap.data();
               const fullData = { ...data, email: user.email };
-
-              // Ενημέρωση State
               setUserData(fullData);
-
-              // Ενημέρωση Cache (ΠΑΝΤΑ)
               AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(fullData));
             }
             setLoading(false);
@@ -94,8 +84,6 @@ export default function ProfileScreen() {
     return () => unsubscribeAuth();
   }, []);
 
-  // --- ACTIONS ---
-
   const handleLogout = async () => {
     Alert.alert("Αποσύνδεση", "Είστε σίγουροι;", [
       { text: "Άκυρο", style: "cancel" },
@@ -105,11 +93,7 @@ export default function ProfileScreen() {
         onPress: async () => {
           try {
             await signOut(auth);
-
-            // ⚠️ SECURITY FIX: Καθαρίζουμε ΤΑ ΠΑΝΤΑ (Projects, Teams, Profile, Queues)
-            // Για να μην δει ο επόμενος χρήστης τα δεδομένα του προηγούμενου.
             await AsyncStorage.clear();
-
             router.replace("/");
           } catch (error: any) {
             Alert.alert("Σφάλμα", error.message);
@@ -139,50 +123,49 @@ export default function ProfileScreen() {
     const net = await Network.getNetworkStateAsync();
     if (!net.isConnected) return Alert.alert("Σφάλμα", "Χάθηκε η σύνδεση.");
 
-    // 1. Ενημέρωση UI ΑΜΕΣΩΣ (Optimistic Update)
     const updatedData = { ...userData, [editField]: editValue };
     setUserData(updatedData);
     setModalVisible(false);
 
-    // 2. Ενημέρωση Cache ΑΜΕΣΩΣ
     await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(updatedData));
 
-    // 3. Ενημέρωση Firebase (Στο παρασκήνιο)
     try {
       const userRef = doc(db, "users", auth.currentUser.uid);
       await updateDoc(userRef, { [editField]: editValue });
     } catch (error: any) {
-      Alert.alert(
-        "Σφάλμα",
-        "Η αποθήκευση στο cloud απέτυχε, αλλά κρατήθηκε τοπικά.",
-      );
+      Alert.alert("Σφάλμα", "Η αποθήκευση στο cloud απέτυχε.");
     }
   };
 
   if (loading && !userData)
     return (
-      <SafeAreaView style={styles.center}>
+      <View style={styles.center}>
         <ActivityIndicator size="large" color="#2563eb" />
-      </SafeAreaView>
+      </View>
     );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
 
-      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
+      <View style={styles.header}>
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
         >
-          <Ionicons name="arrow-back" size={24} color="#333" />
+          <Ionicons name="arrow-back" size={24} color="#0f172a" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Το Προφίλ μου</Text>
-        <View style={{ width: 24 }} />
+        <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
-        {/* AVATAR */}
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: insets.bottom + 20 },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.avatarSection}>
           <View
             style={[
@@ -195,46 +178,47 @@ export default function ProfileScreen() {
                 ? userData.fullname.charAt(0).toUpperCase()
                 : "U"}
             </Text>
+            {isOffline && (
+              <View style={styles.offlineBadge}>
+                <Ionicons name="cloud-offline" size={14} color="#fff" />
+              </View>
+            )}
           </View>
           <Text style={styles.nameText}>{userData?.fullname || "Χρήστης"}</Text>
           <Text style={styles.emailText}>{userData?.email}</Text>
-
-          {isOffline && (
-            <View style={styles.offlineBadge}>
-              <Ionicons name="cloud-offline" size={12} color="white" />
-              <Text style={styles.offlineText}>Offline Mode</Text>
-            </View>
-          )}
         </View>
 
-        {/* INFO FORM */}
-        <View style={styles.section}>
-          <Text style={styles.sectionHeader}>Στοιχεία</Text>
-
-          {/* ΟΝΟΜΑ */}
+        <View style={styles.card}>
           <TouchableOpacity
             style={styles.row}
             onPress={() => openEdit("fullname", userData?.fullname)}
             disabled={isOffline}
+            activeOpacity={0.7}
           >
-            <View style={styles.rowIcon}>
-              <Ionicons name="person-outline" size={20} color="#64748b" />
+            <View style={[styles.iconCircle, { backgroundColor: "#eff6ff" }]}>
+              <Ionicons name="person" size={18} color="#2563eb" />
             </View>
             <View style={styles.rowData}>
               <Text style={styles.label}>Ονοματεπώνυμο</Text>
               <Text style={styles.value}>{userData?.fullname || "-"}</Text>
             </View>
-            {!isOffline && <Ionicons name="pencil" size={18} color="#2563eb" />}
+            {!isOffline && (
+              <View style={styles.editBtn}>
+                <Ionicons name="pencil" size={14} color="#2563eb" />
+              </View>
+            )}
           </TouchableOpacity>
 
-          {/* ΤΗΛΕΦΩΝΟ */}
+          <View style={styles.divider} />
+
           <TouchableOpacity
             style={styles.row}
             onPress={() => openEdit("phone", userData?.phone)}
             disabled={isOffline}
+            activeOpacity={0.7}
           >
-            <View style={styles.rowIcon}>
-              <Ionicons name="call-outline" size={20} color="#64748b" />
+            <View style={[styles.iconCircle, { backgroundColor: "#f0fdf4" }]}>
+              <Ionicons name="call" size={18} color="#16a34a" />
             </View>
             <View style={styles.rowData}>
               <Text style={styles.label}>Τηλέφωνο</Text>
@@ -244,30 +228,39 @@ export default function ProfileScreen() {
                   !userData?.phone && { color: "#94a3b8", fontStyle: "italic" },
                 ]}
               >
-                {userData?.phone ? userData.phone : "Πατήστε για προσθήκη"}
+                {userData?.phone ? userData.phone : "Προσθήκη τηλεφώνου"}
               </Text>
             </View>
-            {!isOffline && <Ionicons name="pencil" size={18} color="#2563eb" />}
+            {!isOffline && (
+              <View style={styles.editBtn}>
+                <Ionicons name="pencil" size={14} color="#2563eb" />
+              </View>
+            )}
           </TouchableOpacity>
 
-          {/* EMAIL (Read Only) */}
+          <View style={styles.divider} />
+
           <View style={styles.row}>
-            <View style={styles.rowIcon}>
-              <Ionicons name="mail-outline" size={20} color="#64748b" />
+            <View style={[styles.iconCircle, { backgroundColor: "#f1f5f9" }]}>
+              <Ionicons name="mail" size={18} color="#64748b" />
             </View>
             <View style={styles.rowData}>
               <Text style={styles.label}>Email</Text>
-              <Text style={[styles.value, { color: "#94a3b8" }]}>
+              <Text style={[styles.value, { color: "#64748b" }]}>
                 {userData?.email}
               </Text>
             </View>
-            <Ionicons name="lock-closed-outline" size={18} color="#cbd5e1" />
+            <Ionicons name="lock-closed" size={16} color="#cbd5e1" />
           </View>
         </View>
 
-        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={24} color="#ef4444" />
+        <TouchableOpacity
+          style={styles.logoutBtn}
+          onPress={handleLogout}
+          activeOpacity={0.8}
+        >
           <Text style={styles.logoutText}>Αποσύνδεση</Text>
+          <Ionicons name="log-out-outline" size={20} color="#ef4444" />
         </TouchableOpacity>
       </ScrollView>
 
@@ -283,97 +276,128 @@ export default function ProfileScreen() {
         placeholder={editField === "phone" ? "69..." : "Ονοματεπώνυμο"}
         keyboardType={editField === "phone" ? "phone-pad" : "default"}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f1f5f9" },
+  container: { flex: 1, backgroundColor: "#f8fafc" },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
+
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 15,
     backgroundColor: "white",
     borderBottomWidth: 1,
-    borderBottomColor: "#e2e8f0",
+    borderBottomColor: "#f1f5f9",
   },
-  backButton: { padding: 5 },
-  headerTitle: { fontSize: 18, fontWeight: "bold", color: "#0f172a" },
+  headerTitle: { fontSize: 18, fontWeight: "700", color: "#0f172a" },
+  backButton: {
+    width: 40,
+    height: 40,
+    justifyContent: "center",
+    alignItems: "center",
+    borderRadius: 20,
+    backgroundColor: "#f1f5f9",
+  },
+
   content: { padding: 20 },
-  avatarSection: { alignItems: "center", marginBottom: 25 },
+
+  avatarSection: { alignItems: "center", marginBottom: 30 },
   avatarContainer: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     backgroundColor: "#2563eb",
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 10,
-    elevation: 5,
+    marginBottom: 16,
     shadowColor: "#2563eb",
     shadowOpacity: 0.3,
-    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 16,
+    elevation: 8,
+    borderWidth: 4,
+    borderColor: "#ffffff",
   },
-  avatarText: { fontSize: 36, color: "white", fontWeight: "bold" },
-  nameText: { fontSize: 20, fontWeight: "bold", color: "#1e293b" },
-  emailText: { fontSize: 14, color: "#64748b" },
+  avatarText: { fontSize: 40, color: "white", fontWeight: "bold" },
   offlineBadge: {
-    flexDirection: "row",
-    alignItems: "center",
+    position: "absolute",
+    bottom: 0,
+    right: 0,
     backgroundColor: "#64748b",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginTop: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "white",
   },
-  offlineText: {
-    color: "white",
-    fontSize: 10,
-    fontWeight: "bold",
-    marginLeft: 4,
+  nameText: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#0f172a",
+    marginBottom: 4,
   },
-  section: {
+  emailText: { fontSize: 14, color: "#64748b" },
+
+  card: {
     backgroundColor: "white",
-    borderRadius: 16,
-    paddingVertical: 10,
+    borderRadius: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    shadowColor: "#64748b",
+    shadowOpacity: 0.08,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 12,
     elevation: 2,
-    marginBottom: 20,
+    marginBottom: 30,
   },
-  sectionHeader: {
-    fontSize: 14,
-    fontWeight: "bold",
-    color: "#94a3b8",
-    marginHorizontal: 20,
-    marginTop: 10,
-    marginBottom: 5,
-    textTransform: "uppercase",
+  divider: {
+    height: 1,
+    backgroundColor: "#f1f5f9",
+    marginLeft: 56,
   },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f1f5f9",
+    paddingVertical: 16,
   },
-  rowIcon: { width: 30, alignItems: "center", marginRight: 10 },
+  iconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 16,
+  },
   rowData: { flex: 1 },
-  label: { fontSize: 12, color: "#64748b", marginBottom: 2 },
-  value: { fontSize: 16, color: "#1e293b", fontWeight: "500" },
+  label: { fontSize: 12, color: "#64748b", fontWeight: "600", marginBottom: 2 },
+  value: { fontSize: 16, color: "#0f172a", fontWeight: "500" },
+  editBtn: {
+    padding: 8,
+    backgroundColor: "#eff6ff",
+    borderRadius: 12,
+  },
+
   logoutBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    padding: 15,
-    backgroundColor: "#fee2e2",
-    borderRadius: 12,
-    marginTop: 10,
+    padding: 16,
+    backgroundColor: "#fef2f2",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#fee2e2",
   },
   logoutText: {
     color: "#ef4444",
-    fontWeight: "bold",
+    fontWeight: "700",
     fontSize: 16,
-    marginLeft: 10,
+    marginRight: 8,
   },
 });

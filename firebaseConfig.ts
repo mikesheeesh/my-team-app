@@ -1,8 +1,8 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { initializeApp } from "firebase/app";
 
 // Εισάγουμε τα απαραίτητα
-import { getReactNativePersistence, initializeAuth } from 'firebase/auth';
+import { getReactNativePersistence, initializeAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 // ΤΑ ΔΙΚΑ ΣΟΥ ΚΛΕΙΔΙΑ
@@ -12,7 +12,7 @@ const firebaseConfig = {
   projectId: "teamcameraapp",
   storageBucket: "teamcameraapp.firebasestorage.app",
   messagingSenderId: "1066934665062",
-  appId: "1:1066934665062:web:63a4241fd930aa13f7d2a7"
+  appId: "1:1066934665062:web:63a4241fd930aa13f7d2a7",
 };
 
 // Initialize Firebase
@@ -24,7 +24,7 @@ const app = initializeApp(firebaseConfig);
 
 const auth = initializeAuth(app, {
   // @ts-ignore
-  persistence: getReactNativePersistence(AsyncStorage)
+  persistence: getReactNativePersistence(AsyncStorage),
 });
 
 const db = getFirestore(app);
