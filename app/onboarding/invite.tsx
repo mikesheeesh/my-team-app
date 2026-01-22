@@ -5,23 +5,23 @@ import * as Linking from "expo-linking";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    ScrollView,
-    Share,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
-    addDoc,
-    collection,
-    doc,
-    getDoc,
-    serverTimestamp,
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  serverTimestamp,
 } from "firebase/firestore";
 import { auth, db } from "../../firebaseConfig";
 
@@ -83,7 +83,7 @@ export default function InviteMembersScreen() {
       });
 
       const isExpoGo = Constants.appOwnership === "expo";
-      const scheme = isExpoGo ? "exp" : "teamcamera";
+      const scheme = isExpoGo ? "exp" : "ergonwork";
 
       const deepLink = Linking.createURL("join", {
         scheme: scheme,

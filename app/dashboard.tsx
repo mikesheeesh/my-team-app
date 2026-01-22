@@ -84,7 +84,7 @@ export default function DashboardScreen() {
       {/* HEADER */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.appName}>TeamCamera</Text>
+          <Text style={styles.appName}>Ergon Work Management</Text>
           <Text style={styles.greeting}>Γεια σου, {userName}!</Text>
         </View>
         <TouchableOpacity

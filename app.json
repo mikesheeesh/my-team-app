@@ -1,30 +1,30 @@
 {
   "expo": {
-    "name": "TeamCamera",
-    "slug": "team-camera-v2",
+    "name": "Ergon Work Management",
+    "slug": "ergon-work-management",
     "version": "1.0.0",
     "sdkVersion": "54.0.0",
     "orientation": "portrait",
-    "icon": "./assets/logo.png",
+    "icon": "./assets/logo2.png",
     "userInterfaceStyle": "light",
-    "scheme": "teamcamera",
+    "scheme": "ergonwork",
     "splash": {
-      "image": "./assets/logo.png",
+      "image": "./assets/logo2.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.teamcamera.app",
+      "bundleIdentifier": "com.ergowork.app",
       "infoPlist": {
         "NSCameraUsageDescription": "Πρόσβαση στην κάμερα για φωτογραφίες.",
         "NSPhotoLibraryUsageDescription": "Πρόσβαση στις φωτογραφίες."
       }
     },
     "android": {
-      "package": "com.teamcamera.app",
+      "package": "com.ergowork.app",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/logo.png",
+        "foregroundImage": "./assets/logo2.png",
         "backgroundColor": "#ffffff"
       },
       "permissions": [
@@ -40,7 +40,7 @@
       ]
     },
     "web": {
-      "favicon": "./assets/logo.png"
+      "favicon": "./assets/logo2.png"
     },
     "plugins": [
       [
@@ -63,7 +63,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "86b1bd6d-d2d3-45d0-b9b8-61e35c848aea"
+        "projectId": "1565aada-06d6-48a4-b418-67e0255747fe"
       }
     }
   }
