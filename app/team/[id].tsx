@@ -77,10 +77,10 @@ export default function TeamProjectsScreen() {
   } | null>(null);
   const [moveModalVisible, setMoveModalVisible] = useState(false);
 
-  // INPUT
+  // INPUT - Αφαιρέθηκε το 'teamContact' από τα modes
   const [inputVisible, setInputVisible] = useState(false);
   const [inputMode, setInputMode] = useState<
-    "teamName" | "teamContact" | "newGroup" | "newProject"
+    "teamName" | "newGroup" | "newProject"
   >("teamName");
   const [tempValue, setTempValue] = useState("");
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
@@ -248,13 +248,8 @@ export default function TeamProjectsScreen() {
         await updateTeamData("groups", [...groups, newGroup]);
       } else if (inputMode === "teamName") {
         await updateTeamData("name", tempValue);
-      } else if (inputMode === "teamContact") {
-        if (!tempValue.includes("@")) {
-          Alert.alert("Λάθος", "Παρακαλώ εισάγετε ένα έγκυρο email.");
-          return;
-        }
-        await updateTeamData("contactEmail", tempValue);
       }
+      // Αφαιρέθηκε η λογική για teamContact
 
       setInputVisible(false);
       setTempValue("");
@@ -656,9 +651,9 @@ export default function TeamProjectsScreen() {
             {group.projects.map((project) => (
               <TouchableOpacity
                 key={project.id}
-                // ΕΦΑΡΜΟΓΗ ΣΤΥΛ ΓΙΑ ΟΛΟΚΛΗΡΩΜΕΝΑ
                 style={[
                   styles.projectCard,
+                  // Στυλ για ολοκληρωμένα Project
                   project.status === "completed" && styles.projectCardCompleted,
                 ]}
                 onPress={() => router.push(`/project/${project.id}`)}
@@ -856,13 +851,7 @@ export default function TeamProjectsScreen() {
               </TouchableOpacity>
             )}
 
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => openInput("teamContact")}
-            >
-              <Ionicons name="mail-outline" size={20} color="#333" />
-              <Text style={styles.menuText}>Αλλαγή Email Ομάδας</Text>
-            </TouchableOpacity>
+            {/* AFAIRETHIKE TO EMAIL BUTTON EDO */}
 
             <TouchableOpacity
               style={styles.menuItem}
@@ -901,7 +890,7 @@ export default function TeamProjectsScreen() {
               paddingBottom: 50 + insets.bottom,
             }}
           >
-            {/* NO MANUAL COMPLETION BUTTON ANYMORE */}
+            {/* NO MANUAL COMPLETION BUTTON */}
 
             <Text style={styles.sectionTitle}>1. Supervisors</Text>
             {users
@@ -1084,18 +1073,12 @@ export default function TeamProjectsScreen() {
             ? "Νέο Project Group"
             : inputMode === "newProject"
               ? "Νέο Project"
-              : inputMode === "teamContact"
-                ? "Νέο Email Ομάδας"
-                : "Επεξεργασία"
+              : "Επεξεργασία"
         }
         value={tempValue}
         onChangeText={setTempValue}
-        placeholder={
-          inputMode === "teamContact"
-            ? "neo.email@gmail.com"
-            : "Πληκτρολογήστε..."
-        }
-        keyboardType={inputMode === "teamContact" ? "email-address" : "default"}
+        placeholder="Πληκτρολογήστε..."
+        keyboardType="default"
       />
     </SafeAreaView>
   );
