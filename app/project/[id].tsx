@@ -5,6 +5,7 @@ import { Image } from "expo-image";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import * as Network from "expo-network";
+import * as Print from "expo-print";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
 import React, { useEffect, useMemo, useState } from "react";
@@ -12,7 +13,9 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  Modal,
+  KeyboardAvoidingView,
+  Modal, // <--- Προστέθηκε για το πληκτρολόγιο
+  Platform,
   SafeAreaView,
   StyleSheet,
   Text,
@@ -95,7 +98,7 @@ const TaskItem = ({ item, onPress, onLongPress, isSyncing }: any) => {
             <View style={styles.localBadgeRow}>
               <Ionicons name="cloud-offline" size={12} color="#f97316" />
               <Text style={styles.localText}>
-                {isSyncing ? "Ανεβαίνει..." : "Αναμονή"}
+                {isSyncing ? "Συγχρονισμός..." : "Αναμονή Δικτύου"}
               </Text>
             </View>
           )}
@@ -132,7 +135,7 @@ export default function ProjectDetailsScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams();
   const projectId = id as string;
-  const insets = useSafeAreaInsets();
+  const insets = useSafeAreaInsets(); // <--- ΧΡΗΣΗ ΤΩΝ INSETS
   const { isSyncing, syncNow } = useSync();
 
   const CACHE_KEY = PROJECT_CACHE_KEY_PREFIX + projectId;
@@ -141,9 +144,11 @@ export default function ProjectDetailsScreen() {
   const [cloudTasks, setCloudTasks] = useState<Task[]>([]);
   const [localTasks, setLocalTasks] = useState<Task[]>([]);
   const [projectName, setProjectName] = useState("");
+  const [projectStatus, setProjectStatus] = useState<"active" | "completed">(
+    "active",
+  );
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
-  const [teamId, setTeamId] = useState<string | null>(null);
 
   // UI States
   const [inputModalVisible, setInputModalVisible] = useState(false);
@@ -153,13 +158,11 @@ export default function ProjectDetailsScreen() {
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [currentTaskType, setCurrentTaskType] = useState("measurement");
-
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskDescription, setNewTaskDescription] = useState("");
   const [newTaskType, setNewTaskType] = useState<
     "photo" | "measurement" | "general"
   >("photo");
-
   const [activeTaskForGallery, setActiveTaskForGallery] = useState<Task | null>(
     null,
   );
@@ -167,34 +170,28 @@ export default function ProjectDetailsScreen() {
     string | null
   >(null);
 
-  // --- 1. ΦΟΡΤΩΣΗ ΑΠΟ ΤΗ ΜΝΗΜΗ ΤΟΥ ΚΙΝΗΤΟΥ ---
+  // --- INIT LOAD ---
   useEffect(() => {
-    const loadFromDevice = async () => {
+    const init = async () => {
       try {
-        // Φόρτωση Cloud Cache (για να δείχνει κάτι μέχρι να συνδεθεί)
         const cached = await AsyncStorage.getItem(CACHE_KEY);
         if (cached) {
           const d = JSON.parse(cached);
           setCloudTasks(d.tasks || []);
           setProjectName(d.name || "");
-          setTeamId(d.teamId);
+          setProjectStatus(d.status || "active");
         }
-        // Φόρτωση Local Queue (Αυτό είναι το "Ιερό Δισκοπότηρο" - δεν το πειράζουμε)
         const local = await AsyncStorage.getItem(QUEUE_KEY);
-        if (local) {
-          setLocalTasks(JSON.parse(local));
-        }
+        if (local) setLocalTasks(JSON.parse(local));
       } catch (e) {
-        console.error("Load Error:", e);
       } finally {
         setLoading(false);
       }
     };
-    loadFromDevice();
+    init();
   }, [projectId]);
 
-  // --- 2. ΣΥΝΔΕΣΗ ΜΕ ΒΑΣΗ (ΜΟΝΟ ΛΗΨΗ) ---
-  // Εδώ απαγορεύεται να διαγράψουμε Local Tasks
+  // --- CLOUD LISTENER ---
   useEffect(() => {
     if (!projectId) return;
     const unsub = onAuthStateChanged(auth, (user) => {
@@ -203,19 +200,15 @@ export default function ProjectDetailsScreen() {
           if (snap.exists()) {
             const data = snap.data();
             const fetched = data.tasks || [];
-
-            // Ενημερώνουμε μόνο τα Cloud Tasks
             setCloudTasks(fetched);
             setProjectName(data.title || "Project");
-            if (data.teamId) setTeamId(data.teamId);
-
-            // Αποθήκευση στη μνήμη για την επόμενη φορά
+            setProjectStatus(data.status || "active");
             AsyncStorage.setItem(
               CACHE_KEY,
               JSON.stringify({
                 name: data.title,
                 tasks: fetched,
-                teamId: data.teamId,
+                status: data.status,
               }),
             );
           }
@@ -225,96 +218,144 @@ export default function ProjectDetailsScreen() {
     return () => unsub && unsub();
   }, [projectId]);
 
-  // --- 3. MERGE LOGIC (ΤΟΠΙΚΑ > CLOUD) ---
-  // Αυτή η συνάρτηση διασφαλίζει ότι αν έχεις τοπική αλλαγή, θα βλέπεις ΑΥΤΗΝ και όχι του Cloud
+  // --- MERGE LISTS ---
   const combinedTasks = useMemo(() => {
     const map = new Map<string, Task>();
-
-    // Πρώτα βάζουμε τα Cloud (βάση)
     cloudTasks.forEach((t) => map.set(t.id, t));
-
-    // Μετά "καπακώνουμε" με τα Local (αν υπάρχουν)
     localTasks.forEach((t) => map.set(t.id, t));
-
     return Array.from(map.values()).filter((t) => t && t.id);
   }, [cloudTasks, localTasks]);
 
-  // --- 4. ΣΩΣΙΜΟ ΣΤΟ ΚΙΝΗΤΟ ---
-  // Καλείται κάθε φορά που κάνεις Create ή Edit
-  const saveTaskLocal = async (task: Task) => {
-    const taskWithFlag = { ...task, isLocal: true };
+  // --- AUTO COMPLETE ---
+  useEffect(() => {
+    if (loading || combinedTasks.length === 0) return;
+    const allDone = combinedTasks.every((t) => t.status === "completed");
+    const newStatus = allDone ? "completed" : "active";
 
-    setLocalTasks((prev) => {
-      // Χρησιμοποιούμε Map για να είμαστε σίγουροι ότι δεν έχουμε διπλότυπα
-      const newLocalMap = new Map(prev.map((t) => [t.id, t]));
-      // Ενημερώνουμε το συγκεκριμένο task
-      newLocalMap.set(taskWithFlag.id, taskWithFlag);
+    if (newStatus !== projectStatus) {
+      console.log(`Auto-updating Project Status to: ${newStatus}`);
+      setProjectStatus(newStatus);
+      updateDoc(doc(db, "projects", projectId), { status: newStatus }).catch(
+        (e) => console.log("Status update delayed"),
+      );
 
-      const newLocalList = Array.from(newLocalMap.values());
-
-      // ΓΡΑΦΟΥΜΕ ΣΤΟ "ΣΚΛΗΡΟ ΔΙΣΚΟ" ΑΜΕΣΩΣ
-      AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(newLocalList));
-
-      return newLocalList;
-    });
-
-    // Αν είμαστε στη gallery, ενημέρωσε την κι εκεί για να μη χαθεί η φωτό
-    if (activeTaskForGallery && activeTaskForGallery.id === task.id) {
-      setActiveTaskForGallery(taskWithFlag);
+      AsyncStorage.getItem(CACHE_KEY).then((cached) => {
+        if (cached) {
+          const d = JSON.parse(cached);
+          AsyncStorage.setItem(
+            CACHE_KEY,
+            JSON.stringify({ ...d, status: newStatus }),
+          );
+        }
+      });
     }
+  }, [combinedTasks]);
 
-    // Προσπάθεια για Auto-Sync (WiFi Only)
-    attemptAutoSync();
-  };
-
-  const attemptAutoSync = async () => {
-    const net = await Network.getNetworkStateAsync();
-    // Αν έχουμε WiFi, δοκίμασε να στείλεις
-    if (net.isConnected && net.type === Network.NetworkStateType.WIFI) {
-      try {
-        await syncNow();
-        // Αν πετύχει το sync, τότε και ΜΟΝΟ τότε, θα καθαρίσουν τα localTasks
-        // μέσω της μεθόδου cleanSyncedTasks (παρακάτω)
-      } catch (e) {
-        console.log("Sync failed, keeping local data");
-      }
-    }
-  };
-
-  // --- 5. CLEANUP ONLY AFTER SYNC ---
-  // Ελέγχει πότε τα Cloud έχουν ενημερωθεί με τα δεδομένα μας
+  // --- CLEANUP ---
   useEffect(() => {
     if (localTasks.length === 0) return;
-
     const cloudMap = new Map(cloudTasks.map((t) => [t.id, t]));
 
-    // Κρατάμε στα local ΜΟΝΟ αυτά που διαφέρουν από το cloud ή δεν υπάρχουν στο cloud
-    const remainingLocal = localTasks.filter((localTask) => {
-      const cloudTask = cloudMap.get(localTask.id);
-      if (!cloudTask) return true; // Δεν ανέβηκε ακόμα -> Κράτα το
-
-      // Ανέβηκε, αλλά είναι ίδια τα δεδομένα; (Πολύ απλός έλεγχος)
-      // Αν το cloudTask έχει 'completed' και το local 'completed', θεωρούμε ότι ανέβηκε
-      if (
-        localTask.status === cloudTask.status &&
-        localTask.value === cloudTask.value &&
-        (localTask.images?.length || 0) === (cloudTask.images?.length || 0)
-      ) {
-        return false; // Είναι ίδια -> Σβήσε το local
-      }
-      return true; // Κάτι διαφέρει -> Κράτα το local
+    const remainingLocal = localTasks.filter((localT) => {
+      const cloudT = cloudMap.get(localT.id);
+      if (!cloudT) return true;
+      if (localT.value !== cloudT.value) return true;
+      if (localT.status !== cloudT.status) return true;
+      if ((localT.images?.length || 0) !== (cloudT.images?.length || 0))
+        return true;
+      return false;
     });
 
-    // Αν αλλάξει κάτι, ενημέρωσε το state και το storage
     if (remainingLocal.length !== localTasks.length) {
       setLocalTasks(remainingLocal);
       AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remainingLocal));
     }
-  }, [cloudTasks]); // Τρέχει ΜΟΝΟ όταν αλλάξουν τα δεδομένα από το Cloud
+  }, [cloudTasks, localTasks]);
+
+  // --- AUTO SYNC ---
+  useEffect(() => {
+    const sub = Network.addNetworkStateListener(async (state) => {
+      if (
+        state.isConnected &&
+        state.type === Network.NetworkStateType.WIFI &&
+        localTasks.length > 0
+      ) {
+        await syncNow();
+      }
+    });
+    return () => sub && sub.remove();
+  }, [localTasks]);
 
   // --- ACTIONS ---
+  const saveTaskLocal = async (task: Task) => {
+    const taskWithFlag = { ...task, isLocal: true };
+    setLocalTasks((prev) => {
+      const newLocalMap = new Map(prev.map((t) => [t.id, t]));
+      newLocalMap.set(taskWithFlag.id, taskWithFlag);
+      const newLocalList = Array.from(newLocalMap.values());
+      AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(newLocalList));
+      return newLocalList;
+    });
+    if (activeTaskForGallery && activeTaskForGallery.id === task.id)
+      setActiveTaskForGallery(taskWithFlag);
+
+    const net = await Network.getNetworkStateAsync();
+    if (net.isConnected && net.type === Network.NetworkStateType.WIFI) {
+      syncNow().catch((e) => console.log("Sync skipped/failed"));
+    }
+  };
+
+  const generatePDF = async () => {
+    setProcessing(true);
+    try {
+      let rowsHTML = "";
+      let photosHTML = "";
+      combinedTasks.forEach((task, index) => {
+        const statusColor = task.status === "completed" ? "#dcfce7" : "#f1f5f9";
+        const statusText =
+          task.status === "completed" ? "Ολοκληρώθηκε" : "Εκκρεμεί";
+        const valueDisplay = task.value
+          ? `<strong>${task.value}</strong>`
+          : "-";
+        rowsHTML += `
+          <tr style="background-color: ${statusColor}">
+            <td style="padding: 10px; border-bottom: 1px solid #ddd;">${index + 1}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #ddd;">
+              <strong>${task.title}</strong><br/>
+              <span style="font-size: 12px; color: #666;">${task.description || ""}</span>
+            </td>
+            <td style="padding: 10px; border-bottom: 1px solid #ddd;">${statusText}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #ddd;">${valueDisplay}</td>
+          </tr>`;
+        if (task.images && task.images.length > 0) {
+          photosHTML += `
+            <div style="margin-bottom: 20px; break-inside: avoid;">
+              <h3>${task.title} (Φωτογραφίες)</h3>
+              <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                ${task.images.map((img) => `<img src="${img}" style="width: 150px; height: 150px; object-fit: cover; border-radius: 8px; border: 1px solid #eee;" />`).join("")}
+              </div>
+            </div>`;
+        }
+      });
+      const htmlContent = `
+        <!DOCTYPE html><html><head><meta charset="utf-8">
+        <style>body{font-family:'Helvetica',sans-serif;padding:20px}h1{color:#2563eb;border-bottom:2px solid #2563eb;padding-bottom:10px}table{width:100%;border-collapse:collapse;margin-top:20px}th{text-align:left;padding:10px;background-color:#f8fafc;border-bottom:2px solid #ddd}.footer{margin-top:50px;text-align:center;font-size:12px;color:#999}</style>
+        </head><body><h1>Αναφορά Έργου: ${projectName}</h1><p>Ημερομηνία: ${new Date().toLocaleDateString("el-GR")}</p><h2>Λίστα Εργασιών</h2><table><thead><tr><th>#</th><th>Εργασία</th><th>Κατάσταση</th><th>Μέτρηση</th></tr></thead><tbody>${rowsHTML}</tbody></table><div style="margin-top:40px;">${photosHTML}</div><div class="footer">Ergon Work Management App</div></body></html>`;
+      const { uri } = await Print.printToFileAsync({ html: htmlContent });
+      await Sharing.shareAsync(uri, {
+        UTI: ".pdf",
+        mimeType: "application/pdf",
+      });
+    } catch (error) {
+      Alert.alert("Σφάλμα PDF");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const handleAddTask = async () => {
-    if (!newTaskTitle.trim()) return Alert.alert("Προσοχή", "Βάλτε τίτλο");
+    if (!newTaskTitle.trim())
+      return Alert.alert("Προσοχή", "Τίτλος υποχρεωτικός");
     const newItem: Task = {
       id: Date.now().toString(),
       title: newTaskTitle,
@@ -330,24 +371,21 @@ export default function ProjectDetailsScreen() {
     setNewTaskDescription("");
     await saveTaskLocal(newItem);
   };
-
   const handleSaveInput = async () => {
-    setInputModalVisible(false); // Κλείσιμο αμέσως
+    setInputModalVisible(false);
     if (currentTaskId && inputValue) {
       const t = combinedTasks.find((x) => x.id === currentTaskId);
       if (t)
         await saveTaskLocal({ ...t, value: inputValue, status: "completed" });
     }
   };
-
   const handleClearValue = async () => {
-    setInputModalVisible(false); // Κλείσιμο αμέσως
+    setInputModalVisible(false);
     if (currentTaskId) {
       const t = combinedTasks.find((x) => x.id === currentTaskId);
       if (t) await saveTaskLocal({ ...t, value: null, status: "pending" });
     }
   };
-
   const addImageToTask = async (tid: string, uri: string) => {
     const t = combinedTasks.find((x) => x.id === tid);
     if (t) {
@@ -355,7 +393,6 @@ export default function ProjectDetailsScreen() {
       await saveTaskLocal({ ...t, images: imgs, status: "completed" });
     }
   };
-
   const removeImageFromTask = async (uri: string) => {
     setSelectedImageForView(null);
     if (activeTaskForGallery) {
@@ -368,7 +405,6 @@ export default function ProjectDetailsScreen() {
       });
     }
   };
-
   const handleDeleteCompletely = (task: Task) => {
     Alert.alert("Διαγραφή", "Σίγουρα;", [
       { text: "Όχι" },
@@ -376,44 +412,23 @@ export default function ProjectDetailsScreen() {
         text: "Ναι",
         style: "destructive",
         onPress: async () => {
-          // 1. Delete from Local
-          const remaining = localTasks.filter((t) => t.id !== task.id);
-          setLocalTasks(remaining);
-          AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remaining));
-
-          // 2. Delete from Cloud View (Optimistic)
+          setLocalTasks((prev) => {
+            const remaining = prev.filter((t) => t.id !== task.id);
+            AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remaining));
+            return remaining;
+          });
           setCloudTasks((prev) => prev.filter((t) => t.id !== task.id));
-
-          // 3. Send Delete Command
           const net = await Network.getNetworkStateAsync();
           if (net.isConnected && net.type === Network.NetworkStateType.WIFI) {
             const updated = cloudTasks.filter((t) => t.id !== task.id);
             updateDoc(doc(db, "projects", projectId), { tasks: updated }).catch(
               (e) => {},
             );
-          } else {
-            Alert.alert("Offline", "Διαγράφηκε τοπικά.");
           }
         },
       },
     ]);
   };
-
-  // --- MANUAL SYNC ---
-  const handleSyncPress = async () => {
-    const net = await Network.getNetworkStateAsync();
-    if (!net.isConnected) return Alert.alert("No Internet");
-    if (net.type === Network.NetworkStateType.CELLULAR) {
-      Alert.alert("Δεδομένα", "Συγχρονισμός με δεδομένα;", [
-        { text: "Άκυρο" },
-        { text: "Ναι", onPress: syncNow },
-      ]);
-    } else {
-      syncNow();
-    }
-  };
-
-  // --- BOILERPLATE ---
   const launchCamera = async (taskId: string) => {
     const r = await ImagePicker.launchCameraAsync({ quality: 0.4 });
     if (!r.canceled) {
@@ -435,9 +450,13 @@ export default function ProjectDetailsScreen() {
       }
     }
   };
-
   const handleShare = async (uri: string) => {
     if (await Sharing.isAvailableAsync()) Sharing.shareAsync(uri);
+  };
+  const handleSyncPress = async () => {
+    const net = await Network.getNetworkStateAsync();
+    if (!net.isConnected) return Alert.alert("No Internet");
+    syncNow();
   };
 
   const totalTasks = combinedTasks.length;
@@ -459,6 +478,9 @@ export default function ProjectDetailsScreen() {
       {processing && (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator size="large" color="#2563eb" />
+          <Text style={{ marginTop: 10, fontWeight: "bold", color: "#333" }}>
+            Επεξεργασία...
+          </Text>
         </View>
       )}
 
@@ -470,11 +492,33 @@ export default function ProjectDetailsScreen() {
           >
             <Ionicons name="arrow-back" size={24} color="#333" />
           </TouchableOpacity>
-          <View style={styles.projectLogoPlaceholder}>
-            <Ionicons name="document-text" size={24} color="white" />
+          <View
+            style={[
+              styles.projectLogoPlaceholder,
+              projectStatus === "completed" && { backgroundColor: "#10b981" },
+            ]}
+          >
+            <Ionicons
+              name={
+                projectStatus === "completed"
+                  ? "checkmark-done"
+                  : "document-text"
+              }
+              size={24}
+              color="white"
+            />
           </View>
           <View style={{ marginLeft: 15, flex: 1 }}>
-            <Text style={styles.headerTitle} numberOfLines={1}>
+            <Text
+              style={[
+                styles.headerTitle,
+                projectStatus === "completed" && {
+                  textDecorationLine: "line-through",
+                  color: "#94a3b8",
+                },
+              ]}
+              numberOfLines={1}
+            >
               {projectName}
             </Text>
             <Text style={styles.headerSubtitle}>
@@ -482,29 +526,33 @@ export default function ProjectDetailsScreen() {
             </Text>
           </View>
         </View>
-        {isSyncing ? (
-          <ActivityIndicator
-            size="small"
-            color="#ea580c"
-            style={{ padding: 10 }}
-          />
-        ) : (
-          localTasks.length > 0 && (
+
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          {!isSyncing && localTasks.length > 0 && (
             <TouchableOpacity
               style={styles.syncButtonHeader}
               onPress={handleSyncPress}
             >
               <Ionicons name="cloud-upload" size={18} color="#fff" />
-              <Text style={styles.syncText}>Sync</Text>
             </TouchableOpacity>
-          )
-        )}
+          )}
+          <TouchableOpacity style={styles.iconBtn} onPress={generatePDF}>
+            <Ionicons name="print-outline" size={20} color="#2563eb" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.progressSection}>
         <View style={styles.progressBarBg}>
           <View
-            style={[styles.progressBarFill, { width: `${progressPercent}%` }]}
+            style={[
+              styles.progressBarFill,
+              {
+                width: `${progressPercent}%`,
+                backgroundColor:
+                  projectStatus === "completed" ? "#10b981" : "#2563eb",
+              },
+            ]}
           />
         </View>
       </View>
@@ -531,16 +579,28 @@ export default function ProjectDetailsScreen() {
         removeClippedSubviews={false}
       />
 
+      {/* FIXED FAB POSITION */}
       <TouchableOpacity
-        style={styles.fab}
+        style={[
+          styles.fab,
+          { bottom: 20 + insets.bottom }, // <--- ΑΝΕΒΑΣΜΑ ΓΙΑ SAFE AREA
+          projectStatus === "completed" && { backgroundColor: "#94a3b8" },
+        ]}
+        disabled={projectStatus === "completed"}
         onPress={() => setCreateModalVisible(true)}
       >
         <Ionicons name="add" size={32} color="white" />
       </TouchableOpacity>
 
+      {/* FIXED MODAL PADDING */}
       <Modal visible={createModalVisible} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.modalOverlay}
+        >
+          <View
+            style={[styles.modalContent, { paddingBottom: 20 + insets.bottom }]}
+          >
             <View style={styles.modalHeaderRow}>
               <Text style={styles.modalHeader}>Νέα Ανάθεση</Text>
               <TouchableOpacity onPress={() => setCreateModalVisible(false)}>
@@ -634,7 +694,7 @@ export default function ProjectDetailsScreen() {
               <Text style={styles.mainButtonText}>ΔΗΜΙΟΥΡΓΙΑ</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <InputModal
@@ -766,7 +826,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#f1f5f9",
   },
-  headerTitle: { fontSize: 18, fontWeight: "800", color: "#0f172a" },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#0f172a",
+    maxWidth: 140,
+  },
   headerSubtitle: { color: "#64748b", fontSize: 12, fontWeight: "600" },
   backButton: { marginRight: 15, padding: 5 },
   projectLogoPlaceholder: {
@@ -778,20 +843,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   syncButtonHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    width: 36,
+    height: 36,
     backgroundColor: "#f97316",
-    borderRadius: 20,
+    borderRadius: 18,
+    justifyContent: "center",
+    alignItems: "center",
   },
-  syncText: { color: "white", fontWeight: "bold", fontSize: 12, marginLeft: 5 },
-  syncingBadge: { padding: 10 },
+  iconBtn: {
+    width: 36,
+    height: 36,
+    backgroundColor: "#eff6ff",
+    borderRadius: 18,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#dbeafe",
+  },
   progressSection: { backgroundColor: "white", paddingBottom: 0 },
   progressBarBg: { height: 3, backgroundColor: "#e2e8f0", width: "100%" },
   progressBarFill: { height: "100%", backgroundColor: "#10b981" },
   content: { padding: 20 },
-
   cardContainer: {
     backgroundColor: "white",
     borderRadius: 16,
@@ -878,7 +950,6 @@ const styles = StyleSheet.create({
   fab: {
     position: "absolute",
     right: 20,
-    bottom: 30,
     backgroundColor: "#2563eb",
     width: 60,
     height: 60,
@@ -961,7 +1032,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     letterSpacing: 1,
   },
-
   loadingOverlay: {
     position: "absolute",
     top: 0,
@@ -973,14 +1043,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 9999,
   },
-  loadingBox: {
-    padding: 24,
-    backgroundColor: "white",
-    borderRadius: 16,
-    elevation: 10,
-    alignItems: "center",
-  },
-  loadingText: { marginTop: 12, color: "#333", fontWeight: "bold" },
   modalBackground: {
     flex: 1,
     backgroundColor: "#000",

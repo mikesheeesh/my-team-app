@@ -25,14 +25,17 @@ import InputModal from "../components/InputModal";
 import { onAuthStateChanged } from "firebase/auth";
 import {
   arrayRemove,
+  collection, // <--- ΝΕΟ
   deleteDoc,
   deleteField,
   doc,
   getDoc,
   onSnapshot,
+  query, // <--- ΝΕΟ
   serverTimestamp,
   setDoc,
   updateDoc,
+  where, // <--- ΝΕΟ
 } from "firebase/firestore";
 import { auth, db } from "../../firebaseConfig";
 
@@ -77,7 +80,7 @@ export default function TeamProjectsScreen() {
   } | null>(null);
   const [moveModalVisible, setMoveModalVisible] = useState(false);
 
-  // INPUT - Αφαιρέθηκε το 'teamContact' από τα modes
+  // INPUT
   const [inputVisible, setInputVisible] = useState(false);
   const [inputMode, setInputMode] = useState<
     "teamName" | "newGroup" | "newProject"
@@ -87,7 +90,7 @@ export default function TeamProjectsScreen() {
 
   const CACHE_KEY = `cached_team_${teamId}`;
 
-  // 1. DATA LOADING
+  // 1. DATA LOADING (TEAM & USER)
   useEffect(() => {
     if (!teamId) return;
 
@@ -123,7 +126,15 @@ export default function TeamProjectsScreen() {
               setTeamName(data.name);
               setTeamContact(data.contactEmail || "");
               setTeamLogo(data.logo || null);
-              setGroups(data.groups || []);
+
+              // Αρχική φόρτωση groups (χωρίς live status ακόμα)
+              const initialGroups = data.groups || [];
+              setGroups((prevGroups) => {
+                // Αν έχουμε ήδη groups (από το live listener των projects), προσπάθησε να κρατήσεις τα status
+                // Αλλιώς βάλε τα νέα
+                if (prevGroups.length > 0) return prevGroups;
+                return initialGroups;
+              });
 
               let role = "User";
               if (data.roles && data.roles[user.uid]) {
@@ -152,15 +163,17 @@ export default function TeamProjectsScreen() {
                 setUsers(loadedUsers);
               }
 
-              const cacheData = {
-                name: data.name,
-                contactEmail: data.contactEmail,
-                logo: data.logo,
-                groups: data.groups,
-                myRole: role,
-                users: loadedUsers,
-              };
-              AsyncStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
+              AsyncStorage.setItem(
+                CACHE_KEY,
+                JSON.stringify({
+                  name: data.name,
+                  contactEmail: data.contactEmail,
+                  logo: data.logo,
+                  groups: data.groups,
+                  myRole: role,
+                  users: loadedUsers,
+                }),
+              );
 
               setLoading(false);
             }
@@ -178,6 +191,38 @@ export default function TeamProjectsScreen() {
     });
 
     return () => unsubscribeAuth();
+  }, [teamId]);
+
+  // 2. LIVE STATUS LISTENER (ΤΟ ΜΥΣΤΙΚΟ ΓΙΑ ΤΟ AUTO-COMPLETE)
+  useEffect(() => {
+    if (!teamId) return;
+
+    // Ακούμε όλα τα projects που ανήκουν σε αυτή την ομάδα
+    const q = query(collection(db, "projects"), where("teamId", "==", teamId));
+
+    const unsubscribeProjects = onSnapshot(q, (snapshot) => {
+      // Φτιάχνουμε έναν χάρτη: ProjectID -> Status
+      const statusMap = new Map();
+      snapshot.docs.forEach((doc) => {
+        statusMap.set(doc.id, doc.data().status);
+      });
+
+      // Ενημερώνουμε τα groups με τα νέα status
+      setGroups((currentGroups) => {
+        return currentGroups.map((group) => ({
+          ...group,
+          projects: group.projects.map((proj) => ({
+            ...proj,
+            // Αν υπάρχει νέο status στη βάση, το παίρνουμε. Αλλιώς κρατάμε το παλιό.
+            status: statusMap.has(proj.id)
+              ? statusMap.get(proj.id)
+              : proj.status,
+          })),
+        }));
+      });
+    });
+
+    return () => unsubscribeProjects();
   }, [teamId]);
 
   const checkOnline = async () => {
@@ -249,7 +294,6 @@ export default function TeamProjectsScreen() {
       } else if (inputMode === "teamName") {
         await updateTeamData("name", tempValue);
       }
-      // Αφαιρέθηκε η λογική για teamContact
 
       setInputVisible(false);
       setTempValue("");
@@ -653,7 +697,6 @@ export default function TeamProjectsScreen() {
                 key={project.id}
                 style={[
                   styles.projectCard,
-                  // Στυλ για ολοκληρωμένα Project
                   project.status === "completed" && styles.projectCardCompleted,
                 ]}
                 onPress={() => router.push(`/project/${project.id}`)}
@@ -671,15 +714,12 @@ export default function TeamProjectsScreen() {
                       {
                         backgroundColor:
                           project.status === "completed"
-                            ? "#f1f5f9" // ΓΚΡΙ (Completed)
-                            : project.status === "active"
-                              ? "#dbeafe"
-                              : "#fef3c7", // ΜΠΛΕ (Active)
+                            ? "#f0fdf4" // Ανοιχτό πράσινο
+                            : "#dbeafe", // Μπλε
                       },
                     ]}
                   >
                     <Ionicons
-                      // Αν είναι Completed -> Checkmark, Αλλιώς -> Document
                       name={
                         project.status === "completed"
                           ? "checkmark-done"
@@ -688,10 +728,8 @@ export default function TeamProjectsScreen() {
                       size={20}
                       color={
                         project.status === "completed"
-                          ? "#64748b" // Σκούρο Γκρι
-                          : project.status === "active"
-                            ? "#2563eb"
-                            : "#d97706" // Μπλε
+                          ? "#16a34a" // Πράσινο
+                          : "#2563eb" // Μπλε
                       }
                     />
                   </View>
@@ -699,7 +737,6 @@ export default function TeamProjectsScreen() {
                     <Text
                       style={[
                         styles.projectTitle,
-                        // Line-through αν ολοκληρώθηκε
                         project.status === "completed" &&
                           styles.projectTitleCompleted,
                       ]}
@@ -851,8 +888,6 @@ export default function TeamProjectsScreen() {
               </TouchableOpacity>
             )}
 
-            {/* AFAIRETHIKE TO EMAIL BUTTON EDO */}
-
             <TouchableOpacity
               style={styles.menuItem}
               onPress={() => openInput("teamName")}
@@ -890,8 +925,6 @@ export default function TeamProjectsScreen() {
               paddingBottom: 50 + insets.bottom,
             }}
           >
-            {/* NO MANUAL COMPLETION BUTTON */}
-
             <Text style={styles.sectionTitle}>1. Supervisors</Text>
             {users
               .filter((u) => u.role === "Supervisor")
@@ -1143,8 +1176,10 @@ const styles = StyleSheet.create({
   },
   // --- COMPLETED STYLES ---
   projectCardCompleted: {
-    backgroundColor: "#f8fafc", // Lighter gray
-    opacity: 0.6,
+    backgroundColor: "#f0fdf4", // Ανοιχτό πράσινο background
+    borderColor: "#86efac", // Πράσινο border
+    borderWidth: 1,
+    opacity: 0.8,
   },
   projectTitleCompleted: {
     textDecorationLine: "line-through",
