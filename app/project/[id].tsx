@@ -1,6 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as FileSystem from "expo-file-system/legacy";
 import { Image } from "expo-image";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
@@ -14,9 +13,10 @@ import {
   Alert,
   FlatList,
   KeyboardAvoidingView,
-  Modal, // <--- Προστέθηκε για το πληκτρολόγιο
+  Modal,
   Platform,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -135,7 +135,7 @@ export default function ProjectDetailsScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams();
   const projectId = id as string;
-  const insets = useSafeAreaInsets(); // <--- ΧΡΗΣΗ ΤΩΝ INSETS
+  const insets = useSafeAreaInsets();
   const { isSyncing, syncNow } = useSync();
 
   const CACHE_KEY = PROJECT_CACHE_KEY_PREFIX + projectId;
@@ -226,7 +226,7 @@ export default function ProjectDetailsScreen() {
     return Array.from(map.values()).filter((t) => t && t.id);
   }, [cloudTasks, localTasks]);
 
-  // --- AUTO COMPLETE ---
+  // --- AUTO COMPLETE LOGIC ---
   useEffect(() => {
     if (loading || combinedTasks.length === 0) return;
     const allDone = combinedTasks.every((t) => t.status === "completed");
@@ -235,8 +235,9 @@ export default function ProjectDetailsScreen() {
     if (newStatus !== projectStatus) {
       console.log(`Auto-updating Project Status to: ${newStatus}`);
       setProjectStatus(newStatus);
+
       updateDoc(doc(db, "projects", projectId), { status: newStatus }).catch(
-        (e) => console.log("Status update delayed"),
+        (e) => console.log("Status update delayed (offline)"),
       );
 
       AsyncStorage.getItem(CACHE_KEY).then((cached) => {
@@ -251,7 +252,7 @@ export default function ProjectDetailsScreen() {
     }
   }, [combinedTasks]);
 
-  // --- CLEANUP ---
+  // --- STRICT CLEANUP ---
   useEffect(() => {
     if (localTasks.length === 0) return;
     const cloudMap = new Map(cloudTasks.map((t) => [t.id, t]));
@@ -272,7 +273,7 @@ export default function ProjectDetailsScreen() {
     }
   }, [cloudTasks, localTasks]);
 
-  // --- AUTO SYNC ---
+  // --- AUTO SYNC (WIFI) ---
   useEffect(() => {
     const sub = Network.addNetworkStateListener(async (state) => {
       if (
@@ -429,27 +430,39 @@ export default function ProjectDetailsScreen() {
       },
     ]);
   };
+
+  // --- COMPRESSED CAMERA ---
   const launchCamera = async (taskId: string) => {
-    const r = await ImagePicker.launchCameraAsync({ quality: 0.4 });
-    if (!r.canceled) {
+    const r = await ImagePicker.launchCameraAsync({
+      quality: 0.5,
+      base64: true,
+    });
+    if (!r.canceled && r.assets[0].uri) {
       setProcessing(true);
       try {
         const m = await ImageManipulator.manipulateAsync(
           r.assets[0].uri,
           [{ resize: { width: 800 } }],
-          { compress: 0.6 },
+          {
+            compress: 0.4,
+            format: ImageManipulator.SaveFormat.JPEG,
+            base64: true,
+          },
         );
-        const name = m.uri.split("/").pop();
-        // @ts-ignore
-        const newUri = FileSystem.documentDirectory + name;
-        await FileSystem.moveAsync({ from: m.uri, to: newUri });
-        await addImageToTask(taskId, newUri);
+
+        if (m.base64) {
+          const base64Img = `data:image/jpeg;base64,${m.base64}`;
+          await addImageToTask(taskId, base64Img);
+        }
       } catch (e) {
+        console.log("Camera Error", e);
+        Alert.alert("Σφάλμα", "Η φωτογραφία ήταν πολύ μεγάλη.");
       } finally {
         setProcessing(false);
       }
     }
   };
+
   const handleShare = async (uri: string) => {
     if (await Sharing.isAvailableAsync()) Sharing.shareAsync(uri);
   };
@@ -579,11 +592,11 @@ export default function ProjectDetailsScreen() {
         removeClippedSubviews={false}
       />
 
-      {/* FIXED FAB POSITION */}
+      {/* FAB - Safe Area Adjusted */}
       <TouchableOpacity
         style={[
           styles.fab,
-          { bottom: 20 + insets.bottom }, // <--- ΑΝΕΒΑΣΜΑ ΓΙΑ SAFE AREA
+          { bottom: 20 + insets.bottom },
           projectStatus === "completed" && { backgroundColor: "#94a3b8" },
         ]}
         disabled={projectStatus === "completed"}
@@ -592,7 +605,7 @@ export default function ProjectDetailsScreen() {
         <Ionicons name="add" size={32} color="white" />
       </TouchableOpacity>
 
-      {/* FIXED MODAL PADDING */}
+      {/* MODAL - Fixed for Keyboard visibility */}
       <Modal visible={createModalVisible} transparent animationType="slide">
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -607,92 +620,102 @@ export default function ProjectDetailsScreen() {
                 <Ionicons name="close" size={24} color="#999" />
               </TouchableOpacity>
             </View>
-            <Text style={styles.label}>Τίτλος</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="π.χ. Έλεγχος Κουζίνας"
-              autoFocus
-              value={newTaskTitle}
-              onChangeText={setNewTaskTitle}
-            />
-            <Text style={styles.label}>Περιγραφή</Text>
-            <TextInput
-              style={[styles.input, { height: 60, textAlignVertical: "top" }]}
-              placeholder="Λεπτομέρειες..."
-              value={newTaskDescription}
-              onChangeText={setNewTaskDescription}
-              multiline
-              numberOfLines={2}
-            />
-            <Text style={styles.label}>Τύπος Εργασίας</Text>
-            <View style={styles.optionsContainer}>
-              <TouchableOpacity
-                style={[
-                  styles.optionCard,
-                  newTaskType === "photo" && styles.optionCardActive,
-                ]}
-                onPress={() => setNewTaskType("photo")}
-              >
-                <Ionicons
-                  name="camera"
-                  size={28}
-                  color={newTaskType === "photo" ? "white" : "#64748b"}
-                />
-                <Text
+
+            {/* SCROLLVIEW ADDED HERE */}
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              <Text style={styles.label}>Τίτλος</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="π.χ. Έλεγχος Κουζίνας"
+                autoFocus
+                value={newTaskTitle}
+                onChangeText={setNewTaskTitle}
+              />
+              <Text style={styles.label}>Περιγραφή</Text>
+              <TextInput
+                style={[styles.input, { height: 60, textAlignVertical: "top" }]}
+                placeholder="Λεπτομέρειες..."
+                value={newTaskDescription}
+                onChangeText={setNewTaskDescription}
+                multiline
+                numberOfLines={2}
+              />
+              <Text style={styles.label}>Τύπος Εργασίας</Text>
+              <View style={styles.optionsContainer}>
+                <TouchableOpacity
                   style={[
-                    styles.optionText,
-                    newTaskType === "photo" && { color: "white" },
+                    styles.optionCard,
+                    newTaskType === "photo" && styles.optionCardActive,
                   ]}
+                  onPress={() => setNewTaskType("photo")}
                 >
-                  Φωτογραφία
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.optionCard,
-                  newTaskType === "measurement" && styles.optionCardActive,
-                ]}
-                onPress={() => setNewTaskType("measurement")}
-              >
-                <Ionicons
-                  name="construct"
-                  size={28}
-                  color={newTaskType === "measurement" ? "white" : "#64748b"}
-                />
-                <Text
+                  <Ionicons
+                    name="camera"
+                    size={28}
+                    color={newTaskType === "photo" ? "white" : "#64748b"}
+                  />
+                  <Text
+                    style={[
+                      styles.optionText,
+                      newTaskType === "photo" && { color: "white" },
+                    ]}
+                  >
+                    Φωτογραφία
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
                   style={[
-                    styles.optionText,
-                    newTaskType === "measurement" && { color: "white" },
+                    styles.optionCard,
+                    newTaskType === "measurement" && styles.optionCardActive,
                   ]}
+                  onPress={() => setNewTaskType("measurement")}
                 >
-                  Μέτρηση
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.optionCard,
-                  newTaskType === "general" && styles.optionCardActive,
-                ]}
-                onPress={() => setNewTaskType("general")}
-              >
-                <Ionicons
-                  name="document-text"
-                  size={28}
-                  color={newTaskType === "general" ? "white" : "#64748b"}
-                />
-                <Text
+                  <Ionicons
+                    name="construct"
+                    size={28}
+                    color={newTaskType === "measurement" ? "white" : "#64748b"}
+                  />
+                  <Text
+                    style={[
+                      styles.optionText,
+                      newTaskType === "measurement" && { color: "white" },
+                    ]}
+                  >
+                    Μέτρηση
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
                   style={[
-                    styles.optionText,
-                    newTaskType === "general" && { color: "white" },
+                    styles.optionCard,
+                    newTaskType === "general" && styles.optionCardActive,
                   ]}
+                  onPress={() => setNewTaskType("general")}
                 >
-                  Κείμενο
-                </Text>
+                  <Ionicons
+                    name="document-text"
+                    size={28}
+                    color={newTaskType === "general" ? "white" : "#64748b"}
+                  />
+                  <Text
+                    style={[
+                      styles.optionText,
+                      newTaskType === "general" && { color: "white" },
+                    ]}
+                  >
+                    Κείμενο
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity
+                style={styles.mainButton}
+                onPress={handleAddTask}
+              >
+                <Text style={styles.mainButtonText}>ΔΗΜΙΟΥΡΓΙΑ</Text>
               </TouchableOpacity>
-            </View>
-            <TouchableOpacity style={styles.mainButton} onPress={handleAddTask}>
-              <Text style={styles.mainButtonText}>ΔΗΜΙΟΥΡΓΙΑ</Text>
-            </TouchableOpacity>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -971,7 +994,8 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     padding: 24,
     elevation: 20,
-  },
+    maxHeight: "80%",
+  }, // <--- Added MaxHeight so scrollview works better
   modalHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",
