@@ -3,29 +3,32 @@ import NetInfo from "@react-native-community/netinfo";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // FIREBASE
 import { onAuthStateChanged } from "firebase/auth";
 import {
-    arrayUnion,
-    collection,
-    deleteDoc,
-    doc,
-    getDocs,
-    query,
-    updateDoc,
-    where,
+  arrayUnion,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  updateDoc,
+  where,
 } from "firebase/firestore";
 import { auth, db } from "../firebaseConfig";
 
@@ -38,7 +41,7 @@ export default function JoinTeamScreen() {
   const [loading, setLoading] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
-  // 1. ΕΛΕΓΧΟΣ ΣΥΝΔΕΣΗΣ
+  // 1. ΕΛΕΓΧΟΣ ΑΝ ΕΙΝΑΙ ΣΥΝΔΕΔΕΜΕΝΟΣ
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!user) {
@@ -52,7 +55,7 @@ export default function JoinTeamScreen() {
     return () => unsubscribe();
   }, []);
 
-  // 2. ΑΥΤΟΜΑΤΗ ΣΥΜΠΛΗΡΩΣΗ
+  // 2. ΑΥΤΟΜΑΤΗ ΣΥΜΠΛΗΡΩΣΗ ΑΠΟ LINK
   useEffect(() => {
     if (inviteCode) {
       setCode(String(inviteCode).toUpperCase());
@@ -62,6 +65,7 @@ export default function JoinTeamScreen() {
   }, [inviteCode, paramCode]);
 
   const handleJoin = async () => {
+    Keyboard.dismiss();
     const netState = await NetInfo.fetch();
     if (!netState.isConnected) {
       return Alert.alert(
@@ -78,10 +82,13 @@ export default function JoinTeamScreen() {
 
     setLoading(true);
     try {
+      // 1. ΨΑΧΝΟΥΜΕ ΤΟΝ ΚΩΔΙΚΟ (QUERY)
+      // Επειδή στο invite.tsx χρησιμοποιείς addDoc, ο κωδικός είναι πεδίο 'code'
       const q = query(
         collection(db, "invites"),
         where("code", "==", code.trim().toUpperCase()),
       );
+
       const snapshot = await getDocs(q);
 
       if (snapshot.empty) {
@@ -90,36 +97,59 @@ export default function JoinTeamScreen() {
         return;
       }
 
+      // Πήραμε το invite
       const inviteDoc = snapshot.docs[0];
       const inviteData = inviteDoc.data();
 
-      // Έλεγχος Λήξης (2 λεπτά)
+      // 2. ΕΛΕΓΧΟΣ ΛΗΞΗΣ ΧΡΟΝΟΥ (2 ΛΕΠΤΑ)
+      // Αν θες να το βγάλεις, σβήσε αυτό το if block
       const now = new Date();
       const createdAt = inviteData.createdAt?.toDate();
-
       if (createdAt) {
         const diffInSeconds = (now.getTime() - createdAt.getTime()) / 1000;
         if (diffInSeconds > 120) {
-          await deleteDoc(inviteDoc.ref);
-          Alert.alert("Έληξε", "Ο κωδικός έληξε. Ζητήστε νέο.");
+          // 120 δευτερόλεπτα = 2 λεπτά
+          await deleteDoc(inviteDoc.ref); // Σβήνουμε το ληγμένο
+          Alert.alert("Έληξε", "Ο κωδικός έχει λήξει.");
           setLoading(false);
           return;
         }
       }
 
-      // ΕΓΓΡΑΦΗ
-      const teamRef = doc(db, "teams", inviteData.teamId);
+      const teamId = inviteData.teamId;
+
+      // 3. ΕΛΕΓΧΟΣ ΑΝ ΕΙΝΑΙ ΗΔΗ ΜΕΛΟΣ
+      const teamRef = doc(db, "teams", teamId);
+      const teamSnap = await getDoc(teamRef);
+
+      if (teamSnap.exists() && teamSnap.data().memberIds?.includes(userId)) {
+        Alert.alert("Είστε ήδη μέλος", "Ανήκετε ήδη σε αυτή την ομάδα.");
+        // Σβήνουμε το invite για να μην μείνει "σκουπίδι"
+        await deleteDoc(inviteDoc.ref);
+        router.replace("/dashboard");
+        return;
+      }
+
+      // 4. ΕΓΓΡΑΦΗ ΜΕ ΤΟΝ ΣΩΣΤΟ ΡΟΛΟ
+      // Εδώ διαβάζουμε το role που έφτιαξες στο invite.tsx
+      const assignedRole = inviteData.role || "User";
+
       await updateDoc(teamRef, {
         memberIds: arrayUnion(userId),
-        [`roles.${userId}`]: inviteData.role,
+        [`roles.${userId}`]: assignedRole, // <--- ΕΔΩ ΜΠΑΙΝΕΙ Ο ΡΟΛΟΣ
       });
 
+      // 5. ΔΙΑΓΡΑΦΗ ΤΟΥ ΚΩΔΙΚΟΥ (ΜΙΑΣ ΧΡΗΣΗΣ)
       await deleteDoc(inviteDoc.ref);
 
-      Alert.alert("Επιτυχία", "Καλωσήρθατε στην ομάδα!");
+      Alert.alert(
+        "Επιτυχία",
+        `Καλωσήρθατε στην ομάδα "${inviteData.teamName}" ως ${assignedRole}!`,
+      );
       router.replace("/dashboard");
     } catch (error: any) {
-      Alert.alert("Σφάλμα", error.message);
+      console.log("Join Error:", error);
+      Alert.alert("Σφάλμα", "Κάτι πήγε στραβά. Δοκιμάστε ξανά.");
       setLoading(false);
     }
   };
@@ -133,66 +163,70 @@ export default function JoinTeamScreen() {
   }
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={{ flex: 1 }}
-      >
-        <View style={styles.header}>
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={styles.closeBtn}
-          >
-            <Ionicons name="close" size={24} color="#333" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Είσοδος με Κωδικό</Text>
-          <View style={{ width: 40 }} />
-        </View>
-
-        <View style={styles.content}>
-          <View style={styles.iconBox}>
-            <Ionicons name="enter" size={48} color="#2563eb" />
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={{ flex: 1 }}
+        >
+          <View style={styles.header}>
+            <TouchableOpacity
+              onPress={() => router.back()}
+              style={styles.closeBtn}
+            >
+              <Ionicons name="close" size={24} color="#333" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Είσοδος με Κωδικό</Text>
+            <View style={{ width: 40 }} />
           </View>
 
-          <Text style={styles.label}>Εισάγετε τον 6ψήφιο κωδικό:</Text>
+          <View style={styles.content}>
+            <View style={styles.iconBox}>
+              <Ionicons name="enter" size={48} color="#2563eb" />
+            </View>
 
-          <TextInput
-            style={styles.input}
-            value={code}
-            onChangeText={(t) => setCode(t.toUpperCase())}
-            placeholder="XXXXXX"
-            placeholderTextColor="#cbd5e1"
-            maxLength={6}
-            autoCapitalize="characters"
-            autoCorrect={false}
-            autoFocus={!inviteCode}
-          />
+            <Text style={styles.label}>Εισάγετε τον 6ψήφιο κωδικό:</Text>
 
-          <View style={styles.helperContainer}>
-            <Ionicons
-              name="time-outline"
-              size={16}
-              color="#ef4444"
-              style={{ marginRight: 4 }}
+            <TextInput
+              style={styles.input}
+              value={code}
+              onChangeText={(t) => setCode(t.toUpperCase())}
+              placeholder="XXXXXX"
+              placeholderTextColor="#cbd5e1"
+              maxLength={6}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              autoFocus={!inviteCode}
             />
-            <Text style={styles.helperText}>Ο κωδικός λήγει σε 2 λεπτά</Text>
-          </View>
 
-          <TouchableOpacity
-            style={styles.btn}
-            onPress={handleJoin}
-            disabled={loading}
-            activeOpacity={0.8}
-          >
-            {loading ? (
-              <ActivityIndicator color="white" />
-            ) : (
-              <Text style={styles.btnText}>Είσοδος στην Ομάδα</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
-    </View>
+            <View style={styles.helperContainer}>
+              <Ionicons
+                name="shield-checkmark-outline"
+                size={16}
+                color="#64748b"
+                style={{ marginRight: 4 }}
+              />
+              <Text style={styles.helperText}>
+                Ο κωδικός ισχύει για μία χρήση
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.btn}
+              onPress={handleJoin}
+              disabled={loading}
+              activeOpacity={0.8}
+            >
+              {loading ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <Text style={styles.btnText}>Είσοδος στην Ομάδα</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </View>
+    </TouchableWithoutFeedback>
   );
 }
 
@@ -280,13 +314,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 40,
-    backgroundColor: "#fef2f2",
+    backgroundColor: "#f8fafc",
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 20,
   },
   helperText: {
-    color: "#ef4444",
+    color: "#64748b",
     fontSize: 13,
     fontWeight: "600",
   },

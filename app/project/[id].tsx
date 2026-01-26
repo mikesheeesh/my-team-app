@@ -634,7 +634,6 @@ export default function ProjectDetailsScreen() {
         removeClippedSubviews={false}
       />
 
-      {/* FAB - Safe Area Adjusted */}
       <TouchableOpacity
         style={[
           styles.fab,
@@ -647,14 +646,17 @@ export default function ProjectDetailsScreen() {
         <Ionicons name="add" size={32} color="white" />
       </TouchableOpacity>
 
-      {/* MODAL - Fixed for Keyboard visibility */}
+      {/* MODAL - ENABLED KEYBOARD AVOIDING FOR ANDROID WITH HEIGHT */}
       <Modal visible={createModalVisible} transparent animationType="slide">
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={styles.modalOverlay}
         >
           <View
-            style={[styles.modalContent, { paddingBottom: 20 + insets.bottom }]}
+            style={[
+              styles.modalContent,
+              { paddingBottom: Math.max(insets.bottom, 10) },
+            ]}
           >
             <View style={styles.modalHeaderRow}>
               <Text style={styles.modalHeader}>Νέα Ανάθεση</Text>
@@ -1026,14 +1028,17 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(15, 23, 42, 0.6)",
     justifyContent: "flex-end",
   },
+
   modalContent: {
     backgroundColor: "white",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    padding: 24,
+    paddingHorizontal: 24, // Μόνο πλάι
+    paddingTop: 24, // Μόνο πάνω
     elevation: 20,
     maxHeight: "80%",
   },
+
   modalHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",

@@ -21,21 +21,23 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import InputModal from "../components/InputModal";
 
-// FIREBASE
+// FIREBASE - Προστέθηκε το arrayUnion εδώ
 import { onAuthStateChanged } from "firebase/auth";
 import {
   arrayRemove,
+  arrayUnion, // <--- ΔΙΟΡΘΩΣΗ ΕΔΩ
   collection,
   deleteDoc,
   deleteField,
   doc,
   getDoc,
+  getDocs,
   onSnapshot,
   query,
   serverTimestamp,
   setDoc,
   updateDoc,
-  where,
+  where
 } from "firebase/firestore";
 import { auth, db } from "../../firebaseConfig";
 
@@ -68,18 +70,16 @@ export default function TeamProjectsScreen() {
   const [users, setUsers] = useState<User[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
 
-  // --- NAVIGATION LOCK (ΓΡΗΓΟΡΟ - 500ms) ---
+  // --- NAVIGATION LOCK (500ms) ---
   const [isNavigating, setIsNavigating] = useState(false);
 
   const safeNavigate = (path: any) => {
     if (isNavigating) return;
     setIsNavigating(true);
     router.push(path);
-    // Ξεμπλοκάρουμε γρήγορα (500ms) - Αρκετό για να κόψει το διπλό ταπ,
-    // αλλά γρήγορο για να μην νιώθει ο χρήστης ότι κόλλησε.
     setTimeout(() => setIsNavigating(false), 500);
   };
-  // ----------------------------------------------------
+  // -------------------------------
 
   // MODALS
   const [menuVisible, setMenuVisible] = useState(false);
@@ -103,7 +103,7 @@ export default function TeamProjectsScreen() {
 
   const CACHE_KEY = `cached_team_${teamId}`;
 
-  // 1. DATA LOADING
+  // 1. DATA LOADING (TEAM STRUCTURE)
   useEffect(() => {
     if (!teamId) return;
 
@@ -141,9 +141,16 @@ export default function TeamProjectsScreen() {
               setTeamLogo(data.logo || null);
 
               const initialGroups = data.groups || [];
+
+              // Αρχικοποίηση groups αν δεν υπάρχουν
               setGroups((prevGroups) => {
-                if (prevGroups.length > 0) return prevGroups;
-                return initialGroups;
+                if (prevGroups.length === 0) return initialGroups;
+                // Αν υπάρχουν ήδη, κρατάμε τη δομή αλλά θα ενημερωθούν από τον άλλο listener
+                // Απλά ενημερώνουμε τίτλους groups αν άλλαξαν
+                return initialGroups.map((g: Group) => {
+                  const existing = prevGroups.find((pg) => pg.id === g.id);
+                  return existing ? { ...g, projects: existing.projects } : g;
+                });
               });
 
               let role = "User";
@@ -203,26 +210,35 @@ export default function TeamProjectsScreen() {
     return () => unsubscribeAuth();
   }, [teamId]);
 
-  // 2. LIVE STATUS LISTENER
+  // 2. LIVE PROJECT LISTENER (REAL-TIME UPDATES FOR COUNTS & STATUS)
   useEffect(() => {
     if (!teamId) return;
     const q = query(collection(db, "projects"), where("teamId", "==", teamId));
 
     const unsubscribeProjects = onSnapshot(q, (snapshot) => {
-      const statusMap = new Map();
+      // Φτιάχνουμε έναν χάρτη με τα φρέσκα δεδομένα από τη συλλογή 'projects'
+      const freshProjectsMap = new Map();
       snapshot.docs.forEach((doc) => {
-        statusMap.set(doc.id, doc.data().status);
+        freshProjectsMap.set(doc.id, { ...doc.data(), id: doc.id });
       });
 
+      // Ενημερώνουμε τα groups ώστε να περιέχουν τα ΠΡΑΓΜΑΤΙΚΑ δεδομένα (counts, status)
       setGroups((currentGroups) => {
         return currentGroups.map((group) => ({
           ...group,
-          projects: group.projects.map((proj) => ({
-            ...proj,
-            status: statusMap.has(proj.id)
-              ? statusMap.get(proj.id)
-              : proj.status,
-          })),
+          projects: group.projects.map((proj) => {
+            const freshData = freshProjectsMap.get(proj.id);
+            if (freshData) {
+              // Αντικαθιστούμε τα παλιά δεδομένα με τα φρέσκα (members, supervisors, status)
+              return {
+                ...proj,
+                status: freshData.status,
+                supervisors: freshData.supervisors || [],
+                members: freshData.members || [],
+              };
+            }
+            return proj;
+          }),
         }));
       });
     });
@@ -277,13 +293,16 @@ export default function TeamProjectsScreen() {
           createdBy: currentUserId,
           teamId: teamId,
         };
+
+        // 1. Ενημέρωση της δομής του Group στο Team Doc
         const updatedGroups = groups.map((g) =>
           g.id === activeGroupId
             ? { ...g, projects: [...g.projects, newProject] }
             : g,
         );
-
         await updateTeamData("groups", updatedGroups);
+
+        // 2. Δημιουργία του εγγράφου στη συλλογή Projects
         await setDoc(doc(db, "projects", newProjectId), {
           ...newProject,
           tasks: [],
@@ -331,11 +350,41 @@ export default function TeamProjectsScreen() {
           text: "Διαγραφή",
           style: "destructive",
           onPress: async () => {
-            setUsers((prev) => prev.filter((u) => u.id !== targetUser.id));
-            await updateDoc(doc(db, "teams", teamId), {
-              memberIds: arrayRemove(targetUser.id),
-              [`roles.${targetUser.id}`]: deleteField(),
-            });
+            setLoading(true); // Δείχνουμε ότι κάτι συμβαίνει
+            try {
+              // 1. ΔΙΑΓΡΑΦΗ ΑΠΟ ΤΗΝ ΟΜΑΔΑ
+              setUsers((prev) => prev.filter((u) => u.id !== targetUser.id));
+              await updateDoc(doc(db, "teams", teamId), {
+                memberIds: arrayRemove(targetUser.id),
+                [`roles.${targetUser.id}`]: deleteField(),
+              });
+
+              // 2. ΔΙΑΓΡΑΦΗ ΑΠΟ ΟΛΑ ΤΑ PROJECTS (Supervisors & Members)
+              // Βρίσκουμε όλα τα projects αυτής της ομάδας
+              const q = query(
+                collection(db, "projects"),
+                where("teamId", "==", teamId),
+              );
+              const querySnapshot = await getDocs(q);
+
+              // Φτιάχνουμε ένα batch (ή promises) για να τα ενημερώσουμε όλα
+              const updatePromises = querySnapshot.docs.map((doc) => {
+                return updateDoc(doc.ref, {
+                  supervisors: arrayRemove(targetUser.id),
+                  members: arrayRemove(targetUser.id),
+                });
+              });
+
+              await Promise.all(updatePromises);
+            } catch (e) {
+              console.log("Error removing user from projects:", e);
+              Alert.alert(
+                "Σφάλμα",
+                "Ο χρήστης διαγράφηκε από την ομάδα, αλλά ίσως έμεινε σε κάποια projects.",
+              );
+            } finally {
+              setLoading(false);
+            }
           },
         },
       ]);
@@ -360,53 +409,10 @@ export default function TeamProjectsScreen() {
       ),
     );
 
-    let updatedGroups = groups;
-
-    updatedGroups = groups.map((group) => {
-      const updatedProjects = group.projects.map((project) => {
-        let newSups = [...project.supervisors];
-        let newMems = [...project.members];
-        let changed = false;
-
-        if (newRole === "Admin") {
-          if (newSups.includes(targetUser.id)) {
-            newSups = newSups.filter((id) => id !== targetUser.id);
-            changed = true;
-          }
-          if (newMems.includes(targetUser.id)) {
-            newMems = newMems.filter((id) => id !== targetUser.id);
-            changed = true;
-          }
-        } else if (newRole === "Supervisor") {
-          if (newMems.includes(targetUser.id)) {
-            newMems = newMems.filter((id) => id !== targetUser.id);
-            changed = true;
-          }
-        } else if (newRole === "User") {
-          if (newSups.includes(targetUser.id)) {
-            newSups = newSups.filter((id) => id !== targetUser.id);
-            changed = true;
-          }
-        }
-
-        if (changed) {
-          updateDoc(doc(db, "projects", project.id), {
-            supervisors: newSups,
-            members: newMems,
-          }).catch((e) => console.log("Project update failed", e));
-        }
-
-        return { ...project, supervisors: newSups, members: newMems };
-      });
-      return { ...group, projects: updatedProjects };
-    });
-
-    setGroups(updatedGroups);
-
+    // Απλή ενημέρωση του ρόλου στο Team Doc
     try {
       await updateDoc(doc(db, "teams", teamId), {
         [`roles.${targetUser.id}`]: newRole,
-        groups: updatedGroups,
       });
     } catch (error) {
       console.error("Role update failed:", error);
@@ -427,6 +433,7 @@ export default function TeamProjectsScreen() {
         text: "Διαγραφή",
         style: "destructive",
         onPress: async () => {
+          // 1. Αφαίρεση από τη δομή του Group
           const updatedGroups = groups.map((g) =>
             g.id === groupId
               ? {
@@ -436,6 +443,8 @@ export default function TeamProjectsScreen() {
               : g,
           );
           await updateTeamData("groups", updatedGroups);
+
+          // 2. Διαγραφή του εγγράφου από τη συλλογή Projects
           try {
             await deleteDoc(doc(db, "projects", project.id));
           } catch (e) {}
@@ -453,40 +462,44 @@ export default function TeamProjectsScreen() {
     if (!isOnline) return;
     if (!selectedProject) return;
     const { groupId, project } = selectedProject;
-    let updatedProject = { ...project };
 
-    if (type === "supervisor") {
-      updatedProject.supervisors.includes(userId)
-        ? (updatedProject.supervisors = updatedProject.supervisors.filter(
-            (id) => id !== userId,
-          ))
-        : updatedProject.supervisors.push(userId);
-    } else {
-      updatedProject.members.includes(userId)
-        ? (updatedProject.members = updatedProject.members.filter(
-            (id) => id !== userId,
-          ))
-        : updatedProject.members.push(userId);
-    }
-    const updatedGroups = groups.map((g) =>
-      g.id === groupId
-        ? {
-            ...g,
-            projects: g.projects.map((p) =>
-              p.id === project.id ? updatedProject : p,
-            ),
-          }
-        : g,
-    );
+    // Ανανεωμένη λογική με arrayRemove/arrayUnion για ασφάλεια
+    // Αντί να στέλνουμε όλο το array, στέλνουμε την εντολή προσθήκης/αφαίρεσης
+    const projectRef = doc(db, "projects", project.id);
+    const field = type === "supervisor" ? "supervisors" : "members";
+    const currentList =
+      type === "supervisor" ? project.supervisors : project.members;
 
-    await updateTeamData("groups", updatedGroups);
+    const isIncluded = currentList.includes(userId);
+
     try {
-      await updateDoc(doc(db, "projects", project.id), {
-        supervisors: updatedProject.supervisors,
-        members: updatedProject.members,
-      });
-    } catch (e) {}
-    setSelectedProject({ groupId, project: updatedProject });
+      if (isIncluded) {
+        // Αφαίρεση
+        await updateDoc(projectRef, {
+          [field]: arrayRemove(userId),
+        });
+      } else {
+        // Προσθήκη
+        await updateDoc(projectRef, {
+          [field]: arrayUnion(userId),
+        });
+      }
+
+      // UI Optimistic Update (για να φαίνεται αμέσως στον χρήστη που το πάτησε)
+      const updatedProject = { ...project };
+      if (type === "supervisor") {
+        updatedProject.supervisors = isIncluded
+          ? updatedProject.supervisors.filter((id) => id !== userId)
+          : [...updatedProject.supervisors, userId];
+      } else {
+        updatedProject.members = isIncluded
+          ? updatedProject.members.filter((id) => id !== userId)
+          : [...updatedProject.members, userId];
+      }
+      setSelectedProject({ groupId, project: updatedProject });
+    } catch (e) {
+      Alert.alert("Σφάλμα", "Η ενημέρωση απέτυχε");
+    }
   };
 
   const pickLogo = async () => {
@@ -747,9 +760,11 @@ export default function TeamProjectsScreen() {
                     >
                       {project.title}
                     </Text>
+                    {/* ΕΔΩ ΘΑ ΒΛΕΠΕΙΣ ΤΟΥΣ ΣΩΣΤΟΥΣ ΑΡΙΘΜΟΥΣ ΑΜΕΣΩΣ */}
                     <Text style={styles.projectMeta}>
-                      Sup: {project.supervisors.length} • Mem:{" "}
-                      {project.members.length}
+                      Sup:{" "}
+                      {project.supervisors ? project.supervisors.length : 0} •
+                      Mem: {project.members ? project.members.length : 0}
                     </Text>
                   </View>
                 </View>
