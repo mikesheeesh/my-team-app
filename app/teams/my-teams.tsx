@@ -131,6 +131,10 @@ export default function MyTeamsScreen() {
   const [userName, setUserName] = useState("Χρήστης");
   const [pendingCount, setPendingCount] = useState(0);
 
+  // --- NAVIGATION LOCK (500ms) ---
+  const [isNavigating, setIsNavigating] = useState(false);
+  // -------------------------------
+
   const checkPendingUploads = useCallback(async () => {
     try {
       const keys = await AsyncStorage.getAllKeys();
@@ -247,15 +251,21 @@ export default function MyTeamsScreen() {
     await syncNow();
   };
 
-  const handleTeamPress = useCallback(
-    (team: Team) => {
-      router.push({
-        pathname: `/team/${team.id}`,
-        params: { role: team.role, teamName: team.name },
-      });
-    },
-    [router],
-  );
+  // --- SAFE NAVIGATION HANDLER ---
+  const handleTeamPress = (team: Team) => {
+    if (isNavigating) return; // Αν τρέχει ήδη πλοήγηση, σταματάμε
+
+    setIsNavigating(true);
+
+    router.push({
+      pathname: `/team/${team.id}`,
+      params: { role: team.role, teamName: team.name },
+    });
+
+    // Ξεμπλοκάρουμε μετά από 0.5 δευτερόλεπτο
+    setTimeout(() => setIsNavigating(false), 500);
+  };
+  // -------------------------------
 
   const ListHeader = () => (
     <View style={styles.headerContainer}>
@@ -341,7 +351,7 @@ export default function MyTeamsScreen() {
     ({ item }: { item: Team }) => (
       <TeamCard team={item} onPress={handleTeamPress} />
     ),
-    [handleTeamPress],
+    [isNavigating], // Προστέθηκε το isNavigating στα dependencies
   );
 
   if (loading && teams.length === 0) {

@@ -25,17 +25,17 @@ import InputModal from "../components/InputModal";
 import { onAuthStateChanged } from "firebase/auth";
 import {
   arrayRemove,
-  collection, // <--- ΝΕΟ
+  collection,
   deleteDoc,
   deleteField,
   doc,
   getDoc,
   onSnapshot,
-  query, // <--- ΝΕΟ
+  query,
   serverTimestamp,
   setDoc,
   updateDoc,
-  where, // <--- ΝΕΟ
+  where,
 } from "firebase/firestore";
 import { auth, db } from "../../firebaseConfig";
 
@@ -68,6 +68,19 @@ export default function TeamProjectsScreen() {
   const [users, setUsers] = useState<User[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
 
+  // --- NAVIGATION LOCK (ΓΡΗΓΟΡΟ - 500ms) ---
+  const [isNavigating, setIsNavigating] = useState(false);
+
+  const safeNavigate = (path: any) => {
+    if (isNavigating) return;
+    setIsNavigating(true);
+    router.push(path);
+    // Ξεμπλοκάρουμε γρήγορα (500ms) - Αρκετό για να κόψει το διπλό ταπ,
+    // αλλά γρήγορο για να μην νιώθει ο χρήστης ότι κόλλησε.
+    setTimeout(() => setIsNavigating(false), 500);
+  };
+  // ----------------------------------------------------
+
   // MODALS
   const [menuVisible, setMenuVisible] = useState(false);
   const [usersModalVisible, setUsersModalVisible] = useState(false);
@@ -90,7 +103,7 @@ export default function TeamProjectsScreen() {
 
   const CACHE_KEY = `cached_team_${teamId}`;
 
-  // 1. DATA LOADING (TEAM & USER)
+  // 1. DATA LOADING
   useEffect(() => {
     if (!teamId) return;
 
@@ -127,11 +140,8 @@ export default function TeamProjectsScreen() {
               setTeamContact(data.contactEmail || "");
               setTeamLogo(data.logo || null);
 
-              // Αρχική φόρτωση groups (χωρίς live status ακόμα)
               const initialGroups = data.groups || [];
               setGroups((prevGroups) => {
-                // Αν έχουμε ήδη groups (από το live listener των projects), προσπάθησε να κρατήσεις τα status
-                // Αλλιώς βάλε τα νέα
                 if (prevGroups.length > 0) return prevGroups;
                 return initialGroups;
               });
@@ -193,27 +203,22 @@ export default function TeamProjectsScreen() {
     return () => unsubscribeAuth();
   }, [teamId]);
 
-  // 2. LIVE STATUS LISTENER (ΤΟ ΜΥΣΤΙΚΟ ΓΙΑ ΤΟ AUTO-COMPLETE)
+  // 2. LIVE STATUS LISTENER
   useEffect(() => {
     if (!teamId) return;
-
-    // Ακούμε όλα τα projects που ανήκουν σε αυτή την ομάδα
     const q = query(collection(db, "projects"), where("teamId", "==", teamId));
 
     const unsubscribeProjects = onSnapshot(q, (snapshot) => {
-      // Φτιάχνουμε έναν χάρτη: ProjectID -> Status
       const statusMap = new Map();
       snapshot.docs.forEach((doc) => {
         statusMap.set(doc.id, doc.data().status);
       });
 
-      // Ενημερώνουμε τα groups με τα νέα status
       setGroups((currentGroups) => {
         return currentGroups.map((group) => ({
           ...group,
           projects: group.projects.map((proj) => ({
             ...proj,
-            // Αν υπάρχει νέο status στη βάση, το παίρνουμε. Αλλιώς κρατάμε το παλιό.
             status: statusMap.has(proj.id)
               ? statusMap.get(proj.id)
               : proj.status,
@@ -699,7 +704,8 @@ export default function TeamProjectsScreen() {
                   styles.projectCard,
                   project.status === "completed" && styles.projectCardCompleted,
                 ]}
-                onPress={() => router.push(`/project/${project.id}`)}
+                // ΑΛΛΑΓΗ ΕΔΩ: Χρήση του safeNavigate
+                onPress={() => safeNavigate(`/project/${project.id}`)}
                 onLongPress={() => {
                   if (myRole !== "User") {
                     setSelectedProject({ groupId: group.id, project });
@@ -714,8 +720,8 @@ export default function TeamProjectsScreen() {
                       {
                         backgroundColor:
                           project.status === "completed"
-                            ? "#f0fdf4" // Ανοιχτό πράσινο
-                            : "#dbeafe", // Μπλε
+                            ? "#f0fdf4"
+                            : "#dbeafe",
                       },
                     ]}
                   >
@@ -727,9 +733,7 @@ export default function TeamProjectsScreen() {
                       }
                       size={20}
                       color={
-                        project.status === "completed"
-                          ? "#16a34a" // Πράσινο
-                          : "#2563eb" // Μπλε
+                        project.status === "completed" ? "#16a34a" : "#2563eb"
                       }
                     />
                   </View>

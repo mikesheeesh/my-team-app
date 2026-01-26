@@ -23,7 +23,18 @@ export default function DashboardScreen() {
   const [userName, setUserName] = useState("Φόρτωση...");
   const [loading, setLoading] = useState(true);
 
-  // 1. ΔΙΑΧΕΙΡΙΣΗ ΚΟΥΜΠΙΟΥ "ΠΙΣΩ" (Λογική Άθικτη)
+  // --- NAVIGATION LOCK (500ms) ---
+  const [isNavigating, setIsNavigating] = useState(false);
+
+  const safeNavigate = (path: any) => {
+    if (isNavigating) return;
+    setIsNavigating(true);
+    router.push(path);
+    setTimeout(() => setIsNavigating(false), 500);
+  };
+  // -------------------------------
+
+  // 1. ΔΙΑΧΕΙΡΙΣΗ ΚΟΥΜΠΙΟΥ "ΠΙΣΩ"
   useFocusEffect(
     useCallback(() => {
       const onBackPress = () => {
@@ -38,7 +49,7 @@ export default function DashboardScreen() {
     }, []),
   );
 
-  // 2. AUTH & DATA LISTENER (Λογική Άθικτη)
+  // 2. AUTH & DATA LISTENER
   useFocusEffect(
     useCallback(() => {
       const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
@@ -89,7 +100,8 @@ export default function DashboardScreen() {
         </View>
         <TouchableOpacity
           style={styles.profileButton}
-          onPress={() => router.push("/profile")}
+          // ΑΛΛΑΓΗ ΕΔΩ: safeNavigate
+          onPress={() => safeNavigate("/profile")}
         >
           <Ionicons name="person-circle-outline" size={48} color="#2563eb" />
         </TouchableOpacity>
@@ -101,7 +113,8 @@ export default function DashboardScreen() {
         {/* 1. ΟΙ ΟΜΑΔΕΣ ΜΟΥ (Λευκή Κάρτα) */}
         <TouchableOpacity
           style={[styles.card, styles.cardWhite]}
-          onPress={() => router.push("/teams/my-teams")}
+          // ΑΛΛΑΓΗ ΕΔΩ: safeNavigate
+          onPress={() => safeNavigate("/teams/my-teams")}
           activeOpacity={0.8}
         >
           <View style={[styles.iconCircle, { backgroundColor: "#e0f2fe" }]}>
@@ -121,7 +134,8 @@ export default function DashboardScreen() {
         {/* 2. ΔΗΜΙΟΥΡΓΙΑ ΟΜΑΔΑΣ (Μπλε Κάρτα - Primary) */}
         <TouchableOpacity
           style={[styles.card, styles.cardBlue]}
-          onPress={() => router.push("/onboarding/create-team")}
+          // ΑΛΛΑΓΗ ΕΔΩ: safeNavigate
+          onPress={() => safeNavigate("/onboarding/create-team")}
           activeOpacity={0.8}
         >
           <View
@@ -154,7 +168,8 @@ export default function DashboardScreen() {
           <Text style={styles.linkHint}>Έλαβες πρόσκληση;</Text>
           <TouchableOpacity
             style={styles.linkButton}
-            onPress={() => router.push("/join")}
+            // ΑΛΛΑΓΗ ΕΔΩ: safeNavigate
+            onPress={() => safeNavigate("/join")}
           >
             <Ionicons name="key-outline" size={20} color="#2563eb" />
             <Text style={styles.linkText}>Εισαγωγή Κωδικού</Text>

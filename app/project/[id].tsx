@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as FileSystem from "expo-file-system/legacy";
 import { Image } from "expo-image";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
@@ -233,13 +234,10 @@ export default function ProjectDetailsScreen() {
     const newStatus = allDone ? "completed" : "active";
 
     if (newStatus !== projectStatus) {
-      console.log(`Auto-updating Project Status to: ${newStatus}`);
       setProjectStatus(newStatus);
-
       updateDoc(doc(db, "projects", projectId), { status: newStatus }).catch(
         (e) => console.log("Status update delayed (offline)"),
       );
-
       AsyncStorage.getItem(CACHE_KEY).then((cached) => {
         if (cached) {
           const d = JSON.parse(cached);
@@ -394,6 +392,7 @@ export default function ProjectDetailsScreen() {
       await saveTaskLocal({ ...t, images: imgs, status: "completed" });
     }
   };
+
   const removeImageFromTask = async (uri: string) => {
     setSelectedImageForView(null);
     if (activeTaskForGallery) {
@@ -406,6 +405,24 @@ export default function ProjectDetailsScreen() {
       });
     }
   };
+
+  // --- CONFIRM IMAGE DELETE ---
+  const confirmDeleteImage = () => {
+    if (!selectedImageForView) return;
+    Alert.alert(
+      "Διαγραφή Φωτογραφίας",
+      "Είστε σίγουροι ότι θέλετε να διαγράψετε αυτή τη φωτογραφία;",
+      [
+        { text: "Άκυρο", style: "cancel" },
+        {
+          text: "Διαγραφή",
+          style: "destructive",
+          onPress: () => removeImageFromTask(selectedImageForView),
+        },
+      ],
+    );
+  };
+
   const handleDeleteCompletely = (task: Task) => {
     Alert.alert("Διαγραφή", "Σίγουρα;", [
       { text: "Όχι" },
@@ -463,9 +480,34 @@ export default function ProjectDetailsScreen() {
     }
   };
 
+  // --- SHARE FIX (BASE64 SUPPORT) ---
   const handleShare = async (uri: string) => {
-    if (await Sharing.isAvailableAsync()) Sharing.shareAsync(uri);
+    if (!(await Sharing.isAvailableAsync())) {
+      Alert.alert("Σφάλμα", "Η κοινοποίηση δεν είναι διαθέσιμη");
+      return;
+    }
+
+    try {
+      // Αν είναι Base64 (από Firebase), το σώζουμε προσωρινά
+      if (uri.startsWith("data:image")) {
+        const base64Data = uri.split("base64,")[1];
+        const filename = FileSystem.cacheDirectory + "temp_share_image.jpg";
+
+        await FileSystem.writeAsStringAsync(filename, base64Data, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        await Sharing.shareAsync(filename);
+      } else {
+        // Αν είναι τοπικό αρχείο
+        await Sharing.shareAsync(uri);
+      }
+    } catch (error) {
+      console.log("Share Error:", error);
+      Alert.alert("Σφάλμα", "Δεν ήταν δυνατή η κοινοποίηση.");
+    }
   };
+
   const handleSyncPress = async () => {
     const net = await Network.getNetworkStateAsync();
     if (!net.isConnected) return Alert.alert("No Internet");
@@ -621,7 +663,6 @@ export default function ProjectDetailsScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* SCROLLVIEW ADDED HERE */}
             <ScrollView
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
@@ -810,10 +851,7 @@ export default function ProjectDetailsScreen() {
           <View style={styles.toolBar}>
             <TouchableOpacity
               style={styles.toolBtn}
-              onPress={() =>
-                selectedImageForView &&
-                removeImageFromTask(selectedImageForView)
-              }
+              onPress={() => confirmDeleteImage()}
             >
               <Ionicons name="trash-outline" size={24} color="#ef4444" />
               <Text style={[styles.toolText, { color: "#ef4444" }]}>
@@ -995,7 +1033,7 @@ const styles = StyleSheet.create({
     padding: 24,
     elevation: 20,
     maxHeight: "80%",
-  }, // <--- Added MaxHeight so scrollview works better
+  },
   modalHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",
