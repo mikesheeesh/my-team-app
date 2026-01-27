@@ -646,10 +646,11 @@ export default function ProjectDetailsScreen() {
         <Ionicons name="add" size={32} color="white" />
       </TouchableOpacity>
 
-      {/* MODAL - ENABLED KEYBOARD AVOIDING FOR ANDROID WITH HEIGHT */}
+      {/* MODAL - ΔΙΟΡΘΩΣΗ ΓΙΑ ANDROID (ΑΠΕΝΕΡΓΟΠΟΙΗΣΗ KEYBOARD AVOIDING) */}
       <Modal visible={createModalVisible} transparent animationType="slide">
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          enabled={Platform.OS === "ios"}
           style={styles.modalOverlay}
         >
           <View

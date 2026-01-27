@@ -1,0 +1,891 @@
+# ERGON WORK MANAGEMENT - SERVICE FLOWS
+
+## ΠΕΡΙΕΧΟΜΕΝΑ
+1. [Authentication Flow](#1-authentication-flow)
+2. [Team Creation Flow](#2-team-creation-flow)
+3. [Invite System Flow](#3-invite-system-flow)
+4. [Join Team Flow](#4-join-team-flow)
+5. [Project Management Flow](#5-project-management-flow)
+6. [Task Management Flow](#6-task-management-flow)
+7. [Photo Task Flow](#7-photo-task-flow)
+8. [Offline Sync Flow](#8-offline-sync-flow)
+9. [PDF Generation Flow](#9-pdf-generation-flow)
+10. [User Role Management Flow](#10-user-role-management-flow)
+
+---
+
+## 1. AUTHENTICATION FLOW
+
+### 1.1 Αρχείο: `app/index.tsx` (Landing Screen)
+
+```
+ΒΗΜΑ 1: App Launch
+├── SplashScreen.preventAutoHideAsync()
+└── Εμφάνιση splash screen
+
+ΒΗΜΑ 2: Deep Link Check
+├── Linking.useURL() → url
+├── ΑΝ url περιέχει inviteCode:
+│   └── router.push(`/join?inviteCode=${code}`)
+└── ΑΛΛΙΩΣ συνέχεια
+
+ΒΗΜΑ 3: Auth State Check
+├── onAuthStateChanged(auth, callback)
+├── ΑΝ user υπάρχει:
+│   └── router.replace("/dashboard")
+├── ΑΛΛΙΩΣ:
+│   └── setAppIsReady(true) → Εμφάνιση Landing
+└── SplashScreen.hideAsync()
+
+ΒΗΜΑ 4: User Action
+└── Πάτημα "Σύνδεση/Εγγραφή" → router.push("/login")
+```
+
+### 1.2 Αρχείο: `app/login.tsx` (Login/Register Screen)
+
+```
+FLOW A: ΕΓΓΡΑΦΗ (isRegistering = true)
+─────────────────────────────────────
+ΒΗΜΑ 1: Input Validation
+├── Έλεγχος email (not empty)
+├── Έλεγχος password (not empty)
+└── Έλεγχος fullname (not empty)
+
+ΒΗΜΑ 2: Firebase Auth
+├── createUserWithEmailAndPassword(auth, email, password)
+└── Επιστροφή userCredential
+
+ΒΗΜΑ 3: Update Profile
+└── updateProfile(user, { displayName: fullname })
+
+ΒΗΜΑ 4: Firestore User Document
+├── Δημιουργία userData object:
+│   ├── fullname
+│   ├── email (lowercase)
+│   ├── createdAt
+│   ├── phone: ""
+│   └── avatar: null
+└── setDoc(doc(db, "users", user.uid), userData)
+
+ΒΗΜΑ 5: Cache
+└── AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(userData))
+
+ΒΗΜΑ 6: Navigation
+└── router.replace("/dashboard")
+
+
+FLOW B: ΣΥΝΔΕΣΗ (isRegistering = false)
+───────────────────────────────────────
+ΒΗΜΑ 1: Input Validation
+├── Έλεγχος email (not empty)
+└── Έλεγχος password (not empty)
+
+ΒΗΜΑ 2: Firebase Auth
+├── signInWithEmailAndPassword(auth, email, password)
+└── Επιστροφή userCredential
+
+ΒΗΜΑ 3: Fetch & Cache User Data
+├── getDoc(doc(db, "users", user.uid))
+├── ΑΝ exists:
+│   └── AsyncStorage.setItem(PROFILE_CACHE_KEY, data)
+└── ΑΛΛΙΩΣ: console.log("Offline login")
+
+ΒΗΜΑ 4: Navigation
+└── router.replace("/dashboard")
+
+
+ERROR HANDLING
+──────────────
+├── invalid-email → "Το email δεν είναι έγκυρο"
+├── user-not-found → "Δεν βρέθηκε χρήστης"
+├── wrong-password → "Λάθος κωδικός"
+├── email-already-in-use → "Το email χρησιμοποιείται ήδη"
+├── weak-password → "Κωδικός < 6 χαρακτήρες"
+└── network-request-failed → "Πρόβλημα σύνδεσης"
+```
+
+---
+
+## 2. TEAM CREATION FLOW
+
+### Αρχείο: `app/onboarding/create-team.tsx`
+
+```
+ΒΗΜΑ 1: Network Check
+├── NetInfo.fetch()
+├── ΑΝ !isConnected:
+│   └── Alert "Χρειάζεται internet"
+└── ΑΛΛΙΩΣ συνέχεια
+
+ΒΗΜΑ 2: Input Validation
+├── teamName.trim().length === 0 → Alert
+├── teamType.trim().length === 0 → Alert
+├── teamEmail.trim().length === 0 → Alert
+└── !teamEmail.includes("@") → Alert
+
+ΒΗΜΑ 3: Auth Check
+├── auth.currentUser
+└── ΑΝ !user → Alert "Δεν βρέθηκε χρήστης"
+
+ΒΗΜΑ 4: Create Team Document
+├── addDoc(collection(db, "teams"), {
+│   ├── name: teamName
+│   ├── type: teamType
+│   ├── contactEmail: teamEmail
+│   ├── createdAt: serverTimestamp()
+│   ├── memberIds: [user.uid]
+│   ├── roles: { [user.uid]: "Founder" }
+│   └── groups: []
+│ })
+└── Firestore auto-generates teamId
+
+ΒΗΜΑ 5: Navigation
+└── router.replace("/dashboard")
+```
+
+**Firestore Result:**
+```javascript
+teams/abc123
+├── name: "Omega Constructions"
+├── type: "Κατασκευαστική"
+├── contactEmail: "omega@gmail.com"
+├── createdAt: Timestamp
+├── memberIds: ["user123"]
+├── roles: { "user123": "Founder" }
+└── groups: []
+```
+
+---
+
+## 3. INVITE SYSTEM FLOW
+
+### Αρχείο: `app/onboarding/invite.tsx`
+
+```
+ΒΗΜΑ 1: Fetch Current User Role
+├── getDoc(doc(db, "teams", teamId))
+├── Extract myRole = data.roles[user.uid]
+└── Determine availableRoles:
+    ├── Founder/Admin → ["Admin", "Supervisor", "User"]
+    └── Supervisor → ["User"]
+
+ΒΗΜΑ 2: Role Selection
+└── User επιλέγει ρόλο για τον προσκεκλημένο
+
+ΒΗΜΑ 3: Network Check
+├── NetInfo.fetch()
+└── ΑΝ !isConnected → Alert "Offline"
+
+ΒΗΜΑ 4: Generate Invite Code
+├── chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+├── shortCode = 6 random characters
+└── (Αποκλεισμός 0, O, I, 1, L για clarity)
+
+ΒΗΜΑ 5: Create Invite Document
+└── addDoc(collection(db, "invites"), {
+    ├── code: shortCode
+    ├── teamId: teamId
+    ├── teamName: teamName
+    ├── role: selectedRole
+    ├── createdBy: user.uid
+    ├── createdAt: serverTimestamp()
+    └── status: "active"
+  })
+
+ΒΗΜΑ 6: Generate Deep Link
+├── scheme = isExpoGo ? "exp" : "ergonwork"
+└── deepLink = Linking.createURL("join", {
+    ├── scheme: scheme
+    └── queryParams: { inviteCode: shortCode }
+  })
+
+ΒΗΜΑ 7: Share Message
+├── Message includes:
+│   ├── App download link
+│   ├── Deep link
+│   └── 6-digit code
+└── Share.share({ message, title })
+```
+
+**Generated Deep Link Example:**
+```
+ergonwork://join?inviteCode=ABC123
+```
+
+**Share Message Example:**
+```
+👋 Πρόσκληση για την ομάδα "Omega Constructions"
+
+1️⃣ Κατέβασε το App:
+https://expo.dev/artifacts/...
+
+2️⃣ Πάτα για είσοδο:
+ergonwork://join?inviteCode=ABC123
+
+🔑 Κωδικός: ABC123
+(Λήγει σε 2 λεπτά)
+```
+
+---
+
+## 4. JOIN TEAM FLOW
+
+### Αρχείο: `app/join.tsx`
+
+```
+ΒΗΜΑ 1: Auth Check
+├── onAuthStateChanged(auth, callback)
+├── ΑΝ !user:
+│   ├── Alert "Πρέπει να συνδεθείτε"
+│   └── router.replace("/")
+└── ΑΛΛΙΩΣ setCheckingAuth(false)
+
+ΒΗΜΑ 2: Auto-fill from Deep Link
+├── ΑΝ inviteCode ή paramCode:
+│   └── setCode(inviteCode.toUpperCase())
+└── ΑΛΛΙΩΣ manual input
+
+ΒΗΜΑ 3: Network Check
+├── NetInfo.fetch()
+└── ΑΝ !isConnected → Alert "Offline"
+
+ΒΗΜΑ 4: Validate Code
+└── ΑΝ code.length < 6 → Alert "Έγκυρος κωδικός"
+
+ΒΗΜΑ 5: Query Invite
+├── q = query(collection(db, "invites"),
+│     where("code", "==", code.toUpperCase()))
+├── getDocs(q)
+├── ΑΝ snapshot.empty:
+│   └── Alert "Ο κωδικός δεν υπάρχει ή έχει λήξει"
+└── ΑΛΛΙΩΣ inviteDoc = snapshot.docs[0]
+
+ΒΗΜΑ 6: Expiration Check
+├── createdAt = inviteData.createdAt.toDate()
+├── diffInSeconds = (now - createdAt) / 1000
+├── ΑΝ diffInSeconds > 120: (2 λεπτά)
+│   ├── deleteDoc(inviteDoc.ref)
+│   └── Alert "Ο κωδικός έχει λήξει"
+└── ΑΛΛΙΩΣ συνέχεια
+
+ΒΗΜΑ 7: Already Member Check
+├── getDoc(doc(db, "teams", teamId))
+├── ΑΝ memberIds.includes(userId):
+│   ├── Alert "Είστε ήδη μέλος"
+│   ├── deleteDoc(inviteDoc.ref)
+│   └── router.replace("/dashboard")
+└── ΑΛΛΙΩΣ συνέχεια
+
+ΒΗΜΑ 8: Add User to Team
+└── updateDoc(teamRef, {
+    ├── memberIds: arrayUnion(userId)
+    └── roles.${userId}: inviteData.role
+  })
+
+ΒΗΜΑ 9: Cleanup Invite
+└── deleteDoc(inviteDoc.ref)
+
+ΒΗΜΑ 10: Success
+├── Alert "Καλωσήρθατε στην ομάδα X ως Y"
+└── router.replace("/dashboard")
+```
+
+**State Diagram:**
+```
+[Start] → [Auth Check] → [Code Entry] → [Query Invite]
+                                              │
+                    ┌─────────────────────────┼─────────────────────────┐
+                    ▼                         ▼                         ▼
+             [Not Found]              [Expired (>2min)]          [Valid]
+                    │                         │                         │
+                    ▼                         ▼                         │
+               [Alert]                  [Delete Invite]                 │
+                                         [Alert]                        │
+                                                                        ▼
+                                                               [Already Member?]
+                                                                   │      │
+                                                                  Yes    No
+                                                                   │      │
+                                                                   ▼      ▼
+                                                              [Alert]  [Add to Team]
+                                                                   │      │
+                                                                   ▼      ▼
+                                                               [Dashboard]
+```
+
+---
+
+## 5. PROJECT MANAGEMENT FLOW
+
+### Αρχείο: `app/team/[id].tsx`
+
+### 5.1 Data Loading Flow
+```
+ΒΗΜΑ 1: Load Cache
+├── AsyncStorage.getItem(CACHE_KEY)
+├── ΑΝ cached:
+│   ├── setTeamName(data.name)
+│   ├── setTeamContact(data.contactEmail)
+│   ├── setTeamLogo(data.logo)
+│   ├── setGroups(data.groups)
+│   ├── setMyRole(data.myRole)
+│   └── setUsers(data.users)
+└── setLoading(false)
+
+ΒΗΜΑ 2: Setup Firestore Listener
+├── onSnapshot(doc(db, "teams", teamId), callback)
+├── On each snapshot:
+│   ├── Extract team data
+│   ├── Fetch user details for each memberIds
+│   ├── Update state
+│   └── Update cache
+└── Return unsubscribe function
+
+ΒΗΜΑ 3: Live Project Listener
+├── query(collection(db, "projects"), where("teamId", "==", teamId))
+├── onSnapshot(query, callback)
+├── On each snapshot:
+│   ├── Build freshProjectsMap
+│   └── Update groups with fresh project data (members, supervisors, status)
+└── Return unsubscribe function
+```
+
+### 5.2 Create Group Flow
+```
+ΒΗΜΑ 1: Online Check
+└── checkOnline() → Alert αν offline
+
+ΒΗΜΑ 2: Input
+├── openInput("newGroup")
+└── User εισάγει group title
+
+ΒΗΜΑ 3: Create Group Object
+└── newGroup = {
+    ├── id: Date.now().toString()
+    ├── title: tempValue
+    └── projects: []
+  }
+
+ΒΗΜΑ 4: Update Firestore
+└── updateDoc(teamRef, {
+    groups: [...groups, newGroup]
+  })
+```
+
+### 5.3 Create Project Flow
+```
+ΒΗΜΑ 1: Online Check
+└── checkOnline() → Alert αν offline
+
+ΒΗΜΑ 2: Input
+├── openInput("newProject", groupId)
+└── User εισάγει project title
+
+ΒΗΜΑ 3: Generate Project ID
+└── newProjectId = Date.now() + random(5)
+
+ΒΗΜΑ 4: Determine Initial Supervisors
+├── ΑΝ myRole === "Supervisor":
+│   └── initialSupervisors = [currentUserId]
+└── ΑΛΛΙΩΣ initialSupervisors = []
+
+ΒΗΜΑ 5: Create Project Object
+└── newProject = {
+    ├── id: newProjectId
+    ├── title: tempValue
+    ├── status: "active"
+    ├── supervisors: initialSupervisors
+    ├── members: []
+    ├── createdBy: currentUserId
+    └── teamId: teamId
+  }
+
+ΒΗΜΑ 6: Update Team Groups
+└── updateDoc(teamRef, { groups: updatedGroups })
+
+ΒΗΜΑ 7: Create Project Document
+└── setDoc(doc(db, "projects", newProjectId), {
+    ...newProject,
+    ├── tasks: []
+    └── createdAt: serverTimestamp()
+  })
+```
+
+### 5.4 Delete Project Flow
+```
+ΒΗΜΑ 1: Confirmation
+└── Alert "Είστε σίγουροι;"
+
+ΒΗΜΑ 2: Remove from Group Structure
+└── updatedGroups = groups.map(g =>
+    g.id === groupId
+      ? {...g, projects: g.projects.filter(p => p.id !== project.id)}
+      : g
+  )
+
+ΒΗΜΑ 3: Update Team
+└── updateDoc(teamRef, { groups: updatedGroups })
+
+ΒΗΜΑ 4: Delete Project Document
+└── deleteDoc(doc(db, "projects", project.id))
+```
+
+### 5.5 Move Project Flow
+```
+ΒΗΜΑ 1: Select Target Group
+└── User επιλέγει από modal
+
+ΒΗΜΑ 2: Update Groups
+└── updatedGroups = groups.map(g => {
+    ├── ΑΝ g.id === oldGroupId:
+    │   └── Remove project
+    ├── ΑΝ g.id === targetGroupId:
+    │   └── Add project
+    └── ΑΛΛΙΩΣ return g
+  })
+
+ΒΗΜΑ 3: Update Firestore
+└── updateDoc(teamRef, { groups: updatedGroups })
+```
+
+---
+
+## 6. TASK MANAGEMENT FLOW
+
+### Αρχείο: `app/project/[id].tsx`
+
+### 6.1 Data Loading Flow
+```
+ΒΗΜΑ 1: Load Cache
+├── AsyncStorage.getItem(CACHE_KEY)
+├── Extract tasks, name, status
+└── AsyncStorage.getItem(QUEUE_KEY) → localTasks
+
+ΒΗΜΑ 2: Firestore Listener
+├── onSnapshot(doc(db, "projects", projectId), callback)
+├── On each snapshot:
+│   ├── setCloudTasks(data.tasks)
+│   ├── setProjectName(data.title)
+│   ├── setProjectStatus(data.status)
+│   └── Update cache
+└── Return unsubscribe
+
+ΒΗΜΑ 3: Merge Lists
+└── combinedTasks = useMemo(() => {
+    ├── map = new Map()
+    ├── cloudTasks.forEach(t => map.set(t.id, t))
+    ├── localTasks.forEach(t => map.set(t.id, t))
+    └── return Array.from(map.values())
+  })
+```
+
+### 6.2 Create Task Flow
+```
+ΒΗΜΑ 1: Open Modal
+└── setCreateModalVisible(true)
+
+ΒΗΜΑ 2: Input
+├── Title (required)
+├── Description (optional)
+└── Type selection: "photo" | "measurement" | "general"
+
+ΒΗΜΑ 3: Create Task Object
+└── newItem = {
+    ├── id: Date.now().toString()
+    ├── title: newTaskTitle
+    ├── description: newTaskDescription
+    ├── type: newTaskType
+    ├── status: "pending"
+    ├── value: null
+    ├── images: []
+    └── isLocal: true
+  }
+
+ΒΗΜΑ 4: Save Locally
+└── saveTaskLocal(newItem)
+    ├── Add to localTasks
+    ├── AsyncStorage.setItem(QUEUE_KEY, localTasks)
+    └── Trigger sync if WiFi
+```
+
+### 6.3 Complete Measurement/General Task Flow
+```
+ΒΗΜΑ 1: Open Input Modal
+├── setCurrentTaskId(task.id)
+├── setCurrentTaskType(task.type)
+├── setInputValue(task.value || "")
+└── setInputModalVisible(true)
+
+ΒΗΜΑ 2: User Input
+└── User εισάγει value
+
+ΒΗΜΑ 3: Save
+└── saveTaskLocal({
+    ...task,
+    ├── value: inputValue
+    └── status: "completed"
+  })
+```
+
+### 6.4 Auto-Complete Project Flow
+```
+ΒΗΜΑ 1: Watch combinedTasks
+└── useEffect(() => {...}, [combinedTasks])
+
+ΒΗΜΑ 2: Check All Done
+├── allDone = combinedTasks.every(t => t.status === "completed")
+└── newStatus = allDone ? "completed" : "active"
+
+ΒΗΜΑ 3: Update if Changed
+├── ΑΝ newStatus !== projectStatus:
+│   ├── setProjectStatus(newStatus)
+│   ├── updateDoc(projectRef, { status: newStatus })
+│   └── Update cache
+└── ΑΛΛΙΩΣ no action
+```
+
+---
+
+## 7. PHOTO TASK FLOW
+
+### 7.1 Launch Camera Flow
+```
+ΒΗΜΑ 1: Request Permission
+└── ImagePicker.launchCameraAsync({
+    ├── quality: 0.5
+    └── base64: true
+  })
+
+ΒΗΜΑ 2: Check Result
+├── ΑΝ canceled → return
+└── ΑΛΛΙΩΣ uri = result.assets[0].uri
+
+ΒΗΜΑ 3: Compress Image
+└── ImageManipulator.manipulateAsync(uri,
+    [{ resize: { width: 800 } }],
+    {
+      ├── compress: 0.4
+      ├── format: JPEG
+      └── base64: true
+    }
+  )
+
+ΒΗΜΑ 4: Convert to Base64 URI
+└── base64Img = `data:image/jpeg;base64,${m.base64}`
+
+ΒΗΜΑ 5: Add to Task
+└── saveTaskLocal({
+    ...task,
+    ├── images: [...task.images, base64Img]
+    └── status: "completed"
+  })
+```
+
+### 7.2 Gallery View Flow
+```
+ΒΗΜΑ 1: Open Gallery
+├── setActiveTaskForGallery(task)
+└── setGalleryModalVisible(true)
+
+ΒΗΜΑ 2: Display Grid
+└── FlatList με numColumns={3}
+    ├── Existing images (clickable)
+    └── "ADD" tile for camera
+
+ΒΗΜΑ 3: Image Click
+└── setSelectedImageForView(image)
+
+ΒΗΜΑ 4: Full View Actions
+├── Share → Sharing.shareAsync(uri)
+└── Delete → removeImageFromTask(uri)
+```
+
+### 7.3 Delete Image Flow
+```
+ΒΗΜΑ 1: Confirmation
+└── Alert "Διαγραφή φωτογραφίας;"
+
+ΒΗΜΑ 2: Remove from Array
+└── imgs = task.images.filter(i => i !== uri)
+
+ΒΗΜΑ 3: Update Status
+├── ΑΝ imgs.length > 0 → status = "completed"
+└── ΑΛΛΙΩΣ status = "pending"
+
+ΒΗΜΑ 4: Save
+└── saveTaskLocal({
+    ...task,
+    ├── images: imgs
+    └── status: status
+  })
+```
+
+---
+
+## 8. OFFLINE SYNC FLOW
+
+### Αρχείο: `app/context/SyncContext.tsx`
+
+### 8.1 Network Listener Flow
+```
+ΒΗΜΑ 1: Setup Listener
+└── NetInfo.addEventListener(state => {...})
+
+ΒΗΜΑ 2: On State Change
+├── ΑΝ state.isConnected && state.type === "wifi":
+│   └── setTimeout(() => performGlobalSync(), 1000)
+└── ΑΛΛΙΩΣ no action
+
+ΒΗΜΑ 3: Cleanup
+└── unsubscribe on unmount
+```
+
+### 8.2 Global Sync Process
+```
+ΒΗΜΑ 1: Lock Check
+├── ΑΝ isSyncingRef.current → return
+└── ΑΛΛΙΩΣ setSyncState(true)
+
+ΒΗΜΑ 2: Find Queue Keys
+├── keys = await AsyncStorage.getAllKeys()
+└── queueKeys = keys.filter(k => k.startsWith(OFFLINE_QUEUE_PREFIX))
+
+ΒΗΜΑ 3: Process Each Project
+FOR each queueKey:
+├── projectId = key.replace(prefix, "")
+├── localList = JSON.parse(await AsyncStorage.getItem(key))
+│
+├── ΑΝ localList.length === 0:
+│   ├── AsyncStorage.removeItem(key)
+│   └── continue
+│
+├── Fetch current cloud state
+│   └── projectSnap = await getDoc(projectRef)
+│
+├── ΑΝ !projectSnap.exists():
+│   ├── AsyncStorage.removeItem(key)
+│   └── continue
+│
+└── Merge local into cloud
+    FOR each task in localList:
+    │
+    ├── Process Images (file:// → base64)
+    │   FOR each imgUri:
+    │   ├── ΑΝ imgUri.startsWith("file://"):
+    │   │   └── base64Data = await FileSystem.readAsStringAsync(imgUri, {encoding: "base64"})
+    │   └── ΑΛΛΙΩΣ keep original
+    │
+    ├── Process Value (file:// → base64)
+    │
+    ├── Clean task (remove isLocal flag)
+    │
+    └── Merge into currentCloudList
+        ├── ΑΝ exists → replace
+        └── ΑΛΛΙΩΣ push
+
+ΒΗΜΑ 4: Upload to Firestore
+├── safeList = JSON.parse(JSON.stringify(list, null handler))
+└── await updateDoc(projectRef, { tasks: safeList })
+
+ΒΗΜΑ 5: UI Update
+├── setJustSyncedProjectId(projectId)
+└── setTimeout(() => setJustSyncedProjectId(null), 2000)
+
+ΒΗΜΑ 6: Cleanup
+├── await AsyncStorage.removeItem(key)
+└── setSyncState(false)
+```
+
+### 8.3 Local Task Cleanup Flow
+```
+ΒΗΜΑ 1: Watch cloudTasks & localTasks
+└── useEffect(() => {...}, [cloudTasks, localTasks])
+
+ΒΗΜΑ 2: Build Cloud Map
+└── cloudMap = new Map(cloudTasks.map(t => [t.id, t]))
+
+ΒΗΜΑ 3: Filter Remaining Local
+└── remainingLocal = localTasks.filter(localT => {
+    ├── cloudT = cloudMap.get(localT.id)
+    ├── ΑΝ !cloudT → keep (not synced yet)
+    ├── ΑΝ localT.value !== cloudT.value → keep
+    ├── ΑΝ localT.status !== cloudT.status → keep
+    ├── ΑΝ localT.images.length !== cloudT.images.length → keep
+    └── ΑΛΛΙΩΣ remove (fully synced)
+  })
+
+ΒΗΜΑ 4: Update if Changed
+├── ΑΝ remainingLocal.length !== localTasks.length:
+│   ├── setLocalTasks(remainingLocal)
+│   └── AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remainingLocal))
+└── ΑΛΛΙΩΣ no action
+```
+
+---
+
+## 9. PDF GENERATION FLOW
+
+### Αρχείο: `app/project/[id].tsx` → `generatePDF()`
+
+```
+ΒΗΜΑ 1: Set Processing State
+└── setProcessing(true)
+
+ΒΗΜΑ 2: Build Tasks Table HTML
+└── FOR each task in combinedTasks:
+    ├── statusColor = completed ? "#dcfce7" : "#f1f5f9"
+    ├── statusText = completed ? "Ολοκληρώθηκε" : "Εκκρεμεί"
+    ├── valueDisplay = task.value || "-"
+    └── rowsHTML += `<tr>...</tr>`
+
+ΒΗΜΑ 3: Build Photos Section HTML
+└── FOR each task with images:
+    └── photosHTML += `
+        <div>
+          <h3>{task.title}</h3>
+          <div style="flex">
+            {images.map(img => <img src={img} />)}
+          </div>
+        </div>`
+
+ΒΗΜΑ 4: Compose Full HTML
+└── htmlContent = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <style>...</style>
+      </head>
+      <body>
+        <h1>Αναφορά Έργου: {projectName}</h1>
+        <p>Ημερομηνία: {date}</p>
+        <table>
+          <thead>...</thead>
+          <tbody>{rowsHTML}</tbody>
+        </table>
+        <div>{photosHTML}</div>
+        <div class="footer">Ergon Work Management App</div>
+      </body>
+    </html>`
+
+ΒΗΜΑ 5: Generate PDF
+└── { uri } = await Print.printToFileAsync({ html: htmlContent })
+
+ΒΗΜΑ 6: Share
+└── await Sharing.shareAsync(uri, {
+    ├── UTI: ".pdf"
+    └── mimeType: "application/pdf"
+  })
+
+ΒΗΜΑ 7: Cleanup
+└── setProcessing(false)
+```
+
+---
+
+## 10. USER ROLE MANAGEMENT FLOW
+
+### Αρχείο: `app/team/[id].tsx` → `changeUserRole()`
+
+### 10.1 Promote Flow
+```
+ΒΗΜΑ 1: Permission Check
+├── ΑΝ myRole === "Supervisor" && targetUser.role !== "User":
+│   └── Alert "Απαγορεύεται"
+└── ΑΝ targetUser.role === "Founder":
+    └── Alert "Δεν πειράζουμε τον Ιδρυτή"
+
+ΒΗΜΑ 2: Determine New Role
+├── User → Supervisor
+└── Supervisor → Admin
+
+ΒΗΜΑ 3: Optimistic UI Update
+└── setUsers(prev => prev.map(u =>
+    u.id === targetUser.id ? {...u, role: newRole} : u
+  ))
+
+ΒΗΜΑ 4: Firestore Update
+└── updateDoc(teamRef, {
+    [`roles.${targetUser.id}`]: newRole
+  })
+```
+
+### 10.2 Demote Flow
+```
+ΒΗΜΑ 1: Permission Check
+└── (Same as Promote)
+
+ΒΗΜΑ 2: Determine New Role
+├── Admin → Supervisor
+└── Supervisor → User
+
+ΒΗΜΑ 3-4: (Same as Promote)
+```
+
+### 10.3 Kick Flow
+```
+ΒΗΜΑ 1: Permission Check
+├── ΑΝ myRole === "Supervisor" && targetUser.role !== "User":
+│   └── Alert "Απαγορεύεται"
+└── ΑΝ targetUser.role === "Founder":
+    └── Alert "Δεν πειράζουμε τον Ιδρυτή"
+
+ΒΗΜΑ 2: Confirmation
+└── Alert "Αφαίρεση {name}?"
+
+ΒΗΜΑ 3: Optimistic UI Update
+└── setUsers(prev => prev.filter(u => u.id !== targetUser.id))
+
+ΒΗΜΑ 4: Remove from Team
+└── updateDoc(teamRef, {
+    ├── memberIds: arrayRemove(targetUser.id)
+    └── [`roles.${targetUser.id}`]: deleteField()
+  })
+
+ΒΗΜΑ 5: Remove from All Projects
+├── query(collection(db, "projects"), where("teamId", "==", teamId))
+├── getDocs(query)
+└── FOR each project:
+    └── updateDoc(projectRef, {
+        ├── supervisors: arrayRemove(targetUser.id)
+        └── members: arrayRemove(targetUser.id)
+      })
+```
+
+---
+
+## APPENDIX: STATE MANAGEMENT SUMMARY
+
+### Global State (Context)
+```
+SyncContext
+├── isSyncing: boolean
+├── syncNow: () => Promise<void>
+└── justSyncedProjectId: string | null
+```
+
+### Local Storage Keys
+```
+AsyncStorage
+├── user_profile_data_cache      → User profile
+├── cached_my_teams              → Teams list
+├── cached_team_{teamId}         → Individual team data
+├── cached_project_tasks_{id}    → Project tasks
+└── offline_tasks_queue_{id}     → Pending sync tasks
+```
+
+### Firebase Collections
+```
+Firestore
+├── users/{userId}
+├── teams/{teamId}
+├── projects/{projectId}
+└── invites/{inviteId}
+```
+
+---
+
+**Repository**: `/home/administrator/projects/my-team-app`
+
+**Version**: 1.0.0
+
+**Last Updated**: Ιανουάριος 2026

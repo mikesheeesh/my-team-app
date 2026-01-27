@@ -23,6 +23,7 @@
     },
     "android": {
       "package": "com.ergowork.app",
+      "softwareKeyboardLayoutMode": "pan",
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo2.png",
         "backgroundColor": "#ffffff"
