@@ -1,12 +1,13 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import NetInfo from "@react-native-community/netinfo";
+import NetInfo, { NetInfoStateType } from "@react-native-community/netinfo"; // <--- ΔΙΟΡΘΩΣΗ 1
 import React, {
-    createContext,
-    useContext,
-    useEffect,
-    useRef,
-    useState,
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
 } from "react";
+import { Alert } from "react-native";
 // Fix για Expo SDK 52+
 import * as FileSystem from "expo-file-system/legacy";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
@@ -42,10 +43,15 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
     isSyncingRef.current = status;
   };
 
-  // 1. LISTENER (Μικρό Debounce 1s για να μη σπαμάρει στο άνοιγμα)
+  // 1. LISTENER (Αυτόματος συγχρονισμός ΜΟΝΟ σε WiFi)
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
-      if (state.isConnected && state.type === "wifi" && !isSyncingRef.current) {
+      // ΔΙΟΡΘΩΣΗ 2: Χρήση NetInfoStateType.wifi (μικρά γράμματα)
+      if (
+        state.isConnected &&
+        state.type === NetInfoStateType.wifi &&
+        !isSyncingRef.current
+      ) {
         if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
 
         syncTimeoutRef.current = setTimeout(() => {
@@ -60,7 +66,7 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, []);
 
-  // 2. ZERO LATENCY SYNC PROCESS
+  // 2. Η ΚΥΡΙΑ ΛΟΓΙΚΗ ΤΟΥ SYNC (Εσωτερική συνάρτηση)
   const performGlobalSync = async () => {
     if (isSyncingRef.current) return;
     setSyncState(true);
@@ -185,9 +191,42 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  // 3. ΧΕΙΡΟΚΙΝΗΤΟΣ ΣΥΓΧΡΟΝΙΣΜΟΣ (ΜΕ ΕΛΕΓΧΟ DATA)
+  const handleManualSync = async () => {
+    const netState = await NetInfo.fetch();
+
+    if (!netState.isConnected) {
+      Alert.alert("Offline", "Δεν υπάρχει σύνδεση στο διαδίκτυο.");
+      return;
+    }
+
+    // ΔΙΟΡΘΩΣΗ 3: Χρήση NetInfoStateType.wifi
+    if (netState.type === NetInfoStateType.wifi) {
+      await performGlobalSync();
+    }
+    // ΔΙΟΡΘΩΣΗ 4: Χρήση NetInfoStateType.cellular
+    else if (netState.type === NetInfoStateType.cellular) {
+      Alert.alert(
+        "Χρήση Δεδομένων",
+        "Είστε συνδεδεμένοι με δεδομένα κινητής. Θέλετε να προχωρήσετε σε συγχρονισμό;",
+        [
+          { text: "Άκυρο", style: "cancel" },
+          {
+            text: "Ναι, Συνέχεια",
+            onPress: () => performGlobalSync(),
+          },
+        ],
+      );
+    }
+    // Άλλο δίκτυο
+    else {
+      await performGlobalSync();
+    }
+  };
+
   return (
     <SyncContext.Provider
-      value={{ isSyncing, syncNow: performGlobalSync, justSyncedProjectId }}
+      value={{ isSyncing, syncNow: handleManualSync, justSyncedProjectId }}
     >
       {children}
     </SyncContext.Provider>
