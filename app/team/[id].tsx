@@ -37,7 +37,7 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
-  where
+  where,
 } from "firebase/firestore";
 import { auth, db } from "../../firebaseConfig";
 

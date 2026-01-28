@@ -6,5 +6,5 @@
       "@/*": ["./*"]
     }
   },
-  "include": ["**/*.ts", "**/*.tsx", "app/context"]
+  "include": ["**/*.ts", "**/*.tsx", "app/context", "firebaseConfig.ts"]
 }

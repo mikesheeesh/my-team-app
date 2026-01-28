@@ -1,11 +1,17 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { initializeApp } from "firebase/app";
-
-// Εισάγουμε τα απαραίτητα
-import { getReactNativePersistence, initializeAuth } from "firebase/auth";
+// Προσθέσαμε το 'Auth' στα imports για το TypeScript
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import {
+  Auth,
+  browserLocalPersistence,
+  getAuth,
+  getReactNativePersistence,
+  initializeAuth,
+} from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { Platform } from "react-native";
 
-// ΤΑ ΔΙΚΑ ΣΟΥ ΚΛΕΙΔΙΑ
+// Βάλε τα δικά σου στοιχεία εδώ
 const firebaseConfig = {
   apiKey: "AIzaSyCASV17VUlZ8zjmkf8yJIb9LqiLDqB6BH4",
   authDomain: "teamcameraapp.firebaseapp.com",
@@ -15,17 +21,21 @@ const firebaseConfig = {
   appId: "1:1066934665062:web:63a4241fd930aa13f7d2a7",
 };
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// --- SETUP ΓΙΑ ΝΑ ΚΡΑΤΑΕΙ ΤΟΝ ΧΡΗΣΤΗ (PERSISTENCE) ---
-// Χρησιμοποιούμε // @ts-ignore για να παρακάμψουμε το λάθος του TypeScript
-// καθώς η συνάρτηση υπάρχει κανονικά στη βιβλιοθήκη για το React Native.
+// ΔΙΟΡΘΩΣΗ: Δηλώνουμε τον τύπο της μεταβλητής για να μην χτυπάει το TypeScript
+let auth: Auth;
 
-const auth = initializeAuth(app, {
-  // @ts-ignore
-  persistence: getReactNativePersistence(AsyncStorage),
-});
+if (Platform.OS === "web") {
+  // Web Logic
+  auth = getAuth(app);
+  auth.setPersistence(browserLocalPersistence);
+} else {
+  // Mobile Logic (Android/iOS)
+  auth = initializeAuth(app, {
+    persistence: getReactNativePersistence(AsyncStorage),
+  });
+}
 
 const db = getFirestore(app);
 

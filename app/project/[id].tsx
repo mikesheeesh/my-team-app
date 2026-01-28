@@ -5,6 +5,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import { Image } from "expo-image";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
 import * as Network from "expo-network";
 import * as Print from "expo-print";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -16,6 +17,7 @@ import {
   Alert,
   FlatList,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   SafeAreaView,
@@ -24,7 +26,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -33,10 +35,13 @@ import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { auth, db } from "../../firebaseConfig";
 
+import ImageEditorModal from "../components/ImageEditorModal";
 import InputModal from "../components/InputModal";
 import { useSync } from "../context/SyncContext";
 
 // --- TYPES ---
+type GeoPoint = { lat: number; lng: number };
+
 type Task = {
   id: string;
   title: string;
@@ -45,6 +50,7 @@ type Task = {
   status: "pending" | "completed";
   value: string | null;
   images?: string[];
+  imageLocations?: GeoPoint[];
   isLocal?: boolean;
 };
 
@@ -65,7 +71,7 @@ const TaskItem = ({ item, onPress, onLongPress, isSyncing }: any) => {
       <TouchableOpacity
         style={[styles.cardInner, item.isLocal && styles.cardLocalBorder]}
         onPress={() => onPress(item)}
-        onLongPress={() => onLongPress(item)}
+        onLongPress={() => onLongPress(item)} // Ενεργό μόνο σε mobile
         delayLongPress={500}
         activeOpacity={0.7}
       >
@@ -85,7 +91,10 @@ const TaskItem = ({ item, onPress, onLongPress, isSyncing }: any) => {
           <Text
             style={[
               styles.titleText,
-              item.status === "completed" && { color: "#64748b" },
+              item.status === "completed" && {
+                color: "#64748b",
+                textDecorationLine: "line-through",
+              },
             ]}
             numberOfLines={1}
           >
@@ -178,6 +187,17 @@ export default function ProjectDetailsScreen() {
   const [inputModalVisible, setInputModalVisible] = useState(false);
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [galleryModalVisible, setGalleryModalVisible] = useState(false);
+  const [optionsModalVisible, setOptionsModalVisible] = useState(false);
+
+  // --- EDITOR STATES ---
+  const [editorVisible, setEditorVisible] = useState(false);
+  const [tempImageUri, setTempImageUri] = useState<string | null>(null);
+  const [tempGpsLoc, setTempGpsLoc] = useState<GeoPoint | undefined>(undefined);
+  const [taskForEditing, setTaskForEditing] = useState<Task | null>(null);
+
+  const [selectedTaskForOptions, setSelectedTaskForOptions] =
+    useState<Task | null>(null);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
 
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState("");
@@ -198,6 +218,16 @@ export default function ProjectDetailsScreen() {
   >(null);
 
   const videoRef = useRef<Video>(null);
+
+  // --- LOCATION PERMISSION ---
+  useEffect(() => {
+    (async () => {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        console.log("Location permission denied");
+      }
+    })();
+  }, []);
 
   // --- INIT LOAD ---
   useEffect(() => {
@@ -255,28 +285,37 @@ export default function ProjectDetailsScreen() {
     return Array.from(map.values()).filter((t) => t && t.id);
   }, [cloudTasks, localTasks]);
 
-  // --- AUTO COMPLETE LOGIC ---
+  // --- AUTOMATIC STATUS ONLY ---
+  // Ελέγχουμε αν άλλαξε κάτι στα tasks και ενημερώνουμε το status ΑΥΤΟΜΑΤΑ
   useEffect(() => {
-    if (loading || combinedTasks.length === 0) return;
-    const allDone = combinedTasks.every((t) => t.status === "completed");
-    const newStatus = allDone ? "completed" : "active";
+    if (combinedTasks.length > 0) {
+      // Έλεγχος: Είναι ΟΛΑ τα tasks ολοκληρωμένα;
+      const allDone = combinedTasks.every((t) => t.status === "completed");
 
-    if (newStatus !== projectStatus) {
-      setProjectStatus(newStatus);
-      updateDoc(doc(db, "projects", projectId), { status: newStatus }).catch(
-        (e) => console.log("Status update delayed (offline)"),
-      );
-      AsyncStorage.getItem(CACHE_KEY).then((cached) => {
-        if (cached) {
-          const d = JSON.parse(cached);
-          AsyncStorage.setItem(
-            CACHE_KEY,
-            JSON.stringify({ ...d, status: newStatus }),
-          );
-        }
-      });
+      // Αν είναι όλα done και το status δεν είναι ήδη completed, ενημέρωσε
+      if (allDone && projectStatus !== "completed") {
+        updateProjectStatus("completed");
+      }
+      // Αν ΔΕΝ είναι όλα done αλλά το status είναι completed, γύρνα το σε active
+      else if (!allDone && projectStatus === "completed") {
+        updateProjectStatus("active");
+      }
     }
-  }, [combinedTasks]);
+  }, [combinedTasks]); // Τρέχει όποτε αλλάξει κάτι στα tasks
+
+  const updateProjectStatus = async (newStatus: "active" | "completed") => {
+    setProjectStatus(newStatus); // Ενημέρωση τοπικά για άμεση απόκριση
+
+    const net = await Network.getNetworkStateAsync();
+    if (net.isConnected) {
+      try {
+        // Ενημέρωση και στη βάση
+        await updateDoc(doc(db, "projects", projectId), { status: newStatus });
+      } catch (e) {
+        console.log("Status update failed", e);
+      }
+    }
+  };
 
   // --- STRICT CLEANUP ---
   useEffect(() => {
@@ -286,11 +325,22 @@ export default function ProjectDetailsScreen() {
     const remainingLocal = localTasks.filter((localT) => {
       const cloudT = cloudMap.get(localT.id);
       if (!cloudT) return true;
-      if (localT.value !== cloudT.value) return true;
-      if (localT.status !== cloudT.status) return true;
-      if ((localT.images?.length || 0) !== (cloudT.images?.length || 0))
-        return true;
-      return false;
+
+      const localVal = localT.value || "";
+      const cloudVal = cloudT.value || "";
+      const localStatus = localT.status;
+      const cloudStatus = cloudT.status;
+      const localImgCount = localT.images?.length || 0;
+      const cloudImgCount = cloudT.images?.length || 0;
+
+      if (
+        localVal === cloudVal &&
+        localStatus === cloudStatus &&
+        localImgCount === cloudImgCount
+      ) {
+        return false;
+      }
+      return true;
     });
 
     if (remainingLocal.length !== localTasks.length) {
@@ -298,20 +348,6 @@ export default function ProjectDetailsScreen() {
       AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remainingLocal));
     }
   }, [cloudTasks, localTasks]);
-
-  // --- AUTO SYNC (WIFI) ---
-  useEffect(() => {
-    const sub = Network.addNetworkStateListener(async (state) => {
-      if (
-        state.isConnected &&
-        state.type === Network.NetworkStateType.WIFI &&
-        localTasks.length > 0
-      ) {
-        await syncNow();
-      }
-    });
-    return () => sub && sub.remove();
-  }, [localTasks]);
 
   // --- ACTIONS ---
   const saveTaskLocal = async (task: Task) => {
@@ -323,33 +359,253 @@ export default function ProjectDetailsScreen() {
       AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(newLocalList));
       return newLocalList;
     });
+
     if (activeTaskForGallery && activeTaskForGallery.id === task.id)
       setActiveTaskForGallery(taskWithFlag);
 
     const net = await Network.getNetworkStateAsync();
-    if (net.isConnected && net.type === Network.NetworkStateType.WIFI) {
+    if (net.isConnected) {
       syncNow().catch((e) => console.log("Sync skipped/failed"));
     }
   };
 
-  const handleAddTask = async () => {
+  // --- CREATE / EDIT ---
+  const openCreateModal = () => {
+    setEditingTaskId(null);
+    setNewTaskTitle("");
+    setNewTaskDescription("");
+    setNewTaskType("photo");
+    setCreateModalVisible(true);
+  };
+
+  const handleSaveTask = async () => {
     if (!newTaskTitle.trim())
       return Alert.alert("Προσοχή", "Τίτλος υποχρεωτικός");
-    const newItem: Task = {
-      id: Date.now().toString(),
-      title: newTaskTitle,
-      description: newTaskDescription,
-      type: newTaskType,
-      status: "pending",
-      value: null,
-      images: [],
-      isLocal: true,
-    };
+
+    let taskToSave: Task;
+    if (editingTaskId) {
+      const existingTask = combinedTasks.find((t) => t.id === editingTaskId);
+      if (!existingTask) return;
+      taskToSave = {
+        ...existingTask,
+        title: newTaskTitle,
+        description: newTaskDescription,
+        type: newTaskType,
+        isLocal: true,
+      };
+    } else {
+      taskToSave = {
+        id: Date.now().toString(),
+        title: newTaskTitle,
+        description: newTaskDescription,
+        type: newTaskType,
+        status: "pending",
+        value: null,
+        images: [],
+        imageLocations: [],
+        isLocal: true,
+      };
+    }
     setCreateModalVisible(false);
     setNewTaskTitle("");
     setNewTaskDescription("");
-    await saveTaskLocal(newItem);
+    setEditingTaskId(null);
+    await saveTaskLocal(taskToSave);
   };
+
+  const handleLongPressTask = (task: Task) => {
+    if (Platform.OS !== "web") {
+      setSelectedTaskForOptions(task);
+      setOptionsModalVisible(true);
+    }
+  };
+
+  const handleEditOption = () => {
+    if (selectedTaskForOptions) {
+      setEditingTaskId(selectedTaskForOptions.id);
+      setNewTaskTitle(selectedTaskForOptions.title);
+      setNewTaskDescription(selectedTaskForOptions.description || "");
+      setNewTaskType(selectedTaskForOptions.type);
+      setOptionsModalVisible(false);
+      setCreateModalVisible(true);
+    }
+  };
+
+  const handleDeleteOption = () => {
+    setOptionsModalVisible(false);
+    if (selectedTaskForOptions) handleDeleteCompletely(selectedTaskForOptions);
+  };
+
+  const handleDeleteCompletely = (task: Task) => {
+    Alert.alert("Διαγραφή", "Σίγουρα;", [
+      { text: "Όχι", style: "cancel" },
+      {
+        text: "Διαγραφή",
+        style: "destructive",
+        onPress: async () => {
+          setLocalTasks((prev) => {
+            const remaining = prev.filter((t) => t.id !== task.id);
+            AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remaining));
+            return remaining;
+          });
+          setCloudTasks((prev) => prev.filter((t) => t.id !== task.id));
+          const net = await Network.getNetworkStateAsync();
+          if (net.isConnected) {
+            const updated = cloudTasks.filter((t) => t.id !== task.id);
+            updateDoc(doc(db, "projects", projectId), { tasks: updated }).catch(
+              (e) => {},
+            );
+          }
+        },
+      },
+    ]);
+  };
+
+  // --- CAMERA LOGIC ---
+  const launchCamera = async (task: Task) => {
+    try {
+      // 1. Get Location
+      let gpsLoc: GeoPoint | undefined;
+      try {
+        const loc = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        gpsLoc = { lat: loc.coords.latitude, lng: loc.coords.longitude };
+      } catch (e) {
+        console.log("GPS Failed");
+      }
+
+      if (task.type === "video") {
+        const r = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+          allowsEditing: true,
+          videoMaxDuration: 4,
+          quality: 0,
+        });
+
+        if (!r.canceled && r.assets[0].uri) {
+          setProcessing(true);
+          try {
+            const videoUri = r.assets[0].uri;
+            const fileInfo = await FileSystem.getInfoAsync(videoUri);
+            if (fileInfo.exists && fileInfo.size > 900000) {
+              Alert.alert(
+                "Πολύ μεγάλο αρχείο",
+                "Το βίντεο ξεπερνά το όριο του 1MB.",
+              );
+              setProcessing(false);
+              return;
+            }
+            const base64Video = await FileSystem.readAsStringAsync(videoUri, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+            const finalUri = `data:video/mp4;base64,${base64Video}`;
+            await addMediaToTask(task.id, finalUri, gpsLoc);
+          } catch (e) {
+            Alert.alert("Σφάλμα", "Απέτυχε η αποθήκευση του βίντεο.");
+          } finally {
+            setProcessing(false);
+          }
+        }
+      } else {
+        // --- PHOTO: ENABLE NATIVE CROP FIRST ---
+        const r = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true, // Native Crop
+          quality: 0.8,
+        });
+
+        if (!r.canceled && r.assets[0].uri) {
+          // To Drawing Editor
+          setTaskForEditing(task);
+          setTempImageUri(r.assets[0].uri);
+          setTempGpsLoc(gpsLoc);
+          setEditorVisible(true);
+        }
+      }
+    } catch (e) {
+      Alert.alert("Error", "Camera failed");
+      setProcessing(false);
+    }
+  };
+
+  const handleEditorSave = async (editedUri: string) => {
+    setEditorVisible(false);
+    setProcessing(true);
+
+    try {
+      const m = await ImageManipulator.manipulateAsync(
+        editedUri,
+        [{ resize: { width: 800 } }],
+        {
+          compress: 0.5,
+          format: ImageManipulator.SaveFormat.JPEG,
+          base64: true,
+        },
+      );
+
+      if (m.base64 && taskForEditing) {
+        if (m.base64.length > 1048576) {
+          Alert.alert("Σφάλμα", "Η εικόνα είναι πολύ μεγάλη.");
+        } else {
+          await addMediaToTask(
+            taskForEditing.id,
+            `data:image/jpeg;base64,${m.base64}`,
+            tempGpsLoc,
+          );
+        }
+      }
+    } catch (e) {
+      Alert.alert("Σφάλμα", "Απέτυχε η αποθήκευση της επεξεργασμένης εικόνας.");
+    } finally {
+      setProcessing(false);
+      setTempImageUri(null);
+      setTaskForEditing(null);
+    }
+  };
+
+  const addMediaToTask = async (
+    tid: string,
+    uri: string,
+    location?: GeoPoint,
+  ) => {
+    const t = combinedTasks.find((x) => x.id === tid);
+    if (t) {
+      const imgs = [...(t.images || []), uri];
+      const newLoc = location || { lat: 0, lng: 0 };
+      const locs = [...(t.imageLocations || []), newLoc];
+
+      await saveTaskLocal({
+        ...t,
+        images: imgs,
+        imageLocations: locs,
+        status: "completed",
+      });
+    }
+  };
+
+  const removeMediaFromTask = async (uri: string) => {
+    if (activeTaskForGallery) {
+      const idx = activeTaskForGallery.images?.findIndex((i) => i === uri);
+      if (idx !== undefined && idx !== -1) {
+        const newImages = [...(activeTaskForGallery.images || [])];
+        const newLocs = [...(activeTaskForGallery.imageLocations || [])];
+
+        newImages.splice(idx, 1);
+        if (newLocs.length > idx) newLocs.splice(idx, 1);
+
+        const st = newImages.length > 0 ? "completed" : "pending";
+        setSelectedMediaForView(null);
+        await saveTaskLocal({
+          ...activeTaskForGallery,
+          images: newImages,
+          imageLocations: newLocs,
+          status: st as any,
+        });
+      }
+    }
+  };
+
   const handleSaveInput = async () => {
     setInputModalVisible(false);
     if (currentTaskId && inputValue) {
@@ -365,27 +621,6 @@ export default function ProjectDetailsScreen() {
       if (t) await saveTaskLocal({ ...t, value: null, status: "pending" });
     }
   };
-  const addMediaToTask = async (tid: string, uri: string) => {
-    const t = combinedTasks.find((x) => x.id === tid);
-    if (t) {
-      const imgs = [...(t.images || []), uri];
-      await saveTaskLocal({ ...t, images: imgs, status: "completed" });
-    }
-  };
-
-  const removeMediaFromTask = async (uri: string) => {
-    setSelectedMediaForView(null);
-    if (activeTaskForGallery) {
-      const imgs = activeTaskForGallery.images?.filter((i) => i !== uri) || [];
-      const st = imgs.length > 0 ? "completed" : "pending";
-      await saveTaskLocal({
-        ...activeTaskForGallery,
-        images: imgs,
-        status: st as any,
-      });
-    }
-  };
-
   const confirmDeleteMedia = () => {
     if (!selectedMediaForView) return;
     Alert.alert("Διαγραφή", "Διαγραφή αρχείου;", [
@@ -398,228 +633,329 @@ export default function ProjectDetailsScreen() {
     ]);
   };
 
-  const handleDeleteCompletely = (task: Task) => {
-    Alert.alert("Διαγραφή", "Σίγουρα;", [
-      { text: "Όχι" },
-      {
-        text: "Ναι",
-        style: "destructive",
-        onPress: async () => {
-          setLocalTasks((prev) => {
-            const remaining = prev.filter((t) => t.id !== task.id);
-            AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remaining));
-            return remaining;
-          });
-          setCloudTasks((prev) => prev.filter((t) => t.id !== task.id));
-          const net = await Network.getNetworkStateAsync();
-          if (net.isConnected && net.type === Network.NetworkStateType.WIFI) {
-            const updated = cloudTasks.filter((t) => t.id !== task.id);
-            updateDoc(doc(db, "projects", projectId), { tasks: updated }).catch(
-              (e) => {},
-            );
-          }
-        },
-      },
-    ]);
-  };
-
-  // --- CAMERA LOGIC (PHOTO & VIDEO) ---
-  const launchCamera = async (task: Task) => {
-    try {
-      // A. VIDEO HANDLING
-      if (task.type === "video") {
-        const r = await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-          allowsEditing: true,
-          videoMaxDuration: 4,
-          quality: 0,
-        });
-
-        if (!r.canceled && r.assets[0].uri) {
-          setProcessing(true);
-          try {
-            const videoUri = r.assets[0].uri;
-
-            // 1. ΕΛΕΓΧΟΣ ΜΕΓΕΘΟΥΣ
-            const fileInfo = await FileSystem.getInfoAsync(videoUri);
-            if (fileInfo.exists && fileInfo.size > 900000) {
-              Alert.alert(
-                "Πολύ μεγάλο αρχείο",
-                "Το βίντεο ξεπερνά το όριο του 1MB.",
-              );
-              setProcessing(false);
-              return;
-            }
-
-            // 2. CONVERT TO BASE64
-            const base64Video = await FileSystem.readAsStringAsync(videoUri, {
-              encoding: FileSystem.EncodingType.Base64,
-            });
-            const finalUri = `data:video/mp4;base64,${base64Video}`;
-
-            await addMediaToTask(task.id, finalUri);
-          } catch (e) {
-            console.log("Video Error", e);
-            Alert.alert("Σφάλμα", "Απέτυχε η αποθήκευση του βίντεο.");
-          } finally {
-            setProcessing(false);
-          }
-        }
+  // --- MAP & SHARE ---
+  const openMediaLocation = () => {
+    if (!selectedMediaForView || !activeTaskForGallery) return;
+    const idx = activeTaskForGallery.images?.indexOf(selectedMediaForView);
+    if (
+      idx !== undefined &&
+      idx !== -1 &&
+      activeTaskForGallery.imageLocations &&
+      activeTaskForGallery.imageLocations[idx]
+    ) {
+      const loc = activeTaskForGallery.imageLocations[idx];
+      if (loc.lat !== 0 && loc.lng !== 0) {
+        const url = `https://www.google.com/maps/search/?api=1&query=${loc.lat},${loc.lng}`;
+        Linking.openURL(url);
+      } else {
+        Alert.alert(
+          "Πληροφορία",
+          "Δεν έχει καταγραφεί τοποθεσία για αυτό το αρχείο.",
+        );
       }
-      // B. PHOTO HANDLING
-      else {
-        const r = await ImagePicker.launchCameraAsync({
-          quality: 0.5,
-          base64: true,
-        });
-        if (!r.canceled && r.assets[0].uri) {
-          setProcessing(true);
-          try {
-            const m = await ImageManipulator.manipulateAsync(
-              r.assets[0].uri,
-              [{ resize: { width: 800 } }],
-              {
-                compress: 0.4,
-                format: ImageManipulator.SaveFormat.JPEG,
-                base64: true,
-              },
-            );
-
-            if (m.base64) {
-              const base64Img = `data:image/jpeg;base64,${m.base64}`;
-              await addMediaToTask(task.id, base64Img);
-            }
-          } catch (e) {
-            Alert.alert("Σφάλμα", "Η φωτογραφία ήταν πολύ μεγάλη.");
-          } finally {
-            setProcessing(false);
-          }
-        }
-      }
-    } catch (e) {
-      Alert.alert("Error", "Camera failed");
-      setProcessing(false);
     }
   };
 
   const handleShare = async (uri: string) => {
     if (!(await Sharing.isAvailableAsync())) return;
-
     try {
       const isVideo = uri.startsWith("data:video");
       const ext = isVideo ? ".mp4" : ".jpg";
       const base64Data = uri.split("base64,")[1];
       const filename = FileSystem.cacheDirectory + `temp_share${ext}`;
-
       await FileSystem.writeAsStringAsync(filename, base64Data, {
         encoding: FileSystem.EncodingType.Base64,
       });
-
       await Sharing.shareAsync(filename);
     } catch (error) {
       Alert.alert("Σφάλμα", "Δεν ήταν δυνατή η κοινοποίηση.");
     }
   };
-
   const handleSyncPress = async () => {
     const net = await Network.getNetworkStateAsync();
     if (!net.isConnected) return Alert.alert("No Internet");
     syncNow();
   };
 
+  // --- GENERATE PDF ---
   const generatePDF = async () => {
     setProcessing(true);
     try {
+      const dateStr = new Date().toLocaleDateString("el-GR", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
+
       let rowsHTML = "";
+
       combinedTasks.forEach((task, index) => {
-        // Logic για το Status Badge
         const isDone = task.status === "completed";
+
+        // Status Badge Logic
         const statusBadge = isDone
-          ? `<span class="badge badge-success">Ολοκληρώθηκε</span>`
-          : `<span class="badge badge-pending">Εκκρεμεί</span>`;
-        // Logic για το Value (Αποτέλεσμα)
-        let valueDisplay = "-";
+          ? `<span class="badge badge-success">ΟΛΟΚΛΗΡΩΘΗΚΕ</span>`
+          : `<span class="badge badge-pending">ΕΚΚΡΕΜΕΙ</span>`;
+
+        // Result / Value Logic
+        let valueDisplay = '<span style="color: #94a3b8;">-</span>';
+
         if (task.type === "video") {
-          valueDisplay = `<div class="media-tag">🎥 Βίντεο</div>`;
+          const count = task.images ? task.images.length : 0;
+          valueDisplay =
+            count > 0
+              ? `<div class="media-box video"><span class="icon">🎥</span> Βίντεο Καταγράφηκε</div>`
+              : `<span style="color: #cbd5e1;">Χωρίς Βίντεο</span>`;
         } else if (task.type === "photo") {
-          valueDisplay = `<div class="media-tag">📷 Φωτογραφίες (${task.images?.length || 0})</div>`;
+          const count = task.images ? task.images.length : 0;
+          valueDisplay =
+            count > 0
+              ? `<div class="media-box photo"><span class="icon">📷</span> ${count} Φωτογραφίες</div>`
+              : `<span style="color: #cbd5e1;">Χωρίς Φωτογραφίες</span>`;
         } else if (task.value) {
           valueDisplay = `<div class="value-box">${task.value}</div>`;
         }
-        // Logic για την περιγραφή (να φαίνεται αχνά από κάτω)
+
+        // Description Logic
         const descHTML = task.description
-          ? `<div style="color: #6b7280; font-size: 11px; margin-top: 4px;">${task.description}</div>`
+          ? `<div class="desc">${task.description}</div>`
           : "";
+
+        // Icon selection based on type
+        let typeIcon = "📝";
+        if (task.type === "photo") typeIcon = "📷";
+        if (task.type === "video") typeIcon = "🎥";
+        if (task.type === "measurement") typeIcon = "📏";
+
         rowsHTML += `
             <tr>
-                <td style="text-align: center; color: #6b7280;">${index + 1}</td>
+                <td style="text-align: center; color: #64748b; font-weight: bold;">${index + 1}</td>
                 <td>
-                    <div style="font-weight: 600; color: #111827;">${task.title}</div>
+                    <div class="task-title">${typeIcon} ${task.title}</div>
                     ${descHTML}
                 </td>
-                <td>${statusBadge}</td>
-                <td>${valueDisplay}</td>
+                <td style="text-align: center;">${statusBadge}</td>
+                <td style="text-align: right;">${valueDisplay}</td>
             </tr>`;
       });
+
       const html = `
         <!DOCTYPE html>
         <html>
         <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width,initial-scale=1.0">
             <style>
                 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-                body { font-family: 'Inter', Helvetica, Arial, sans-serif; padding: 40px; color: #1f2937; -webkit-print-color-adjust: exact; }
-                .header { margin-bottom: 40px; border-bottom: 2px solid #2563eb; padding-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end; }
-                .title-box h1 { margin: 0; color: #111827; font-size: 24px; text-transform: uppercase; letter-spacing: -0.5px; }
-                .title-box p { margin: 5px 0 0; color: #6b7280; font-size: 12px; }
-                .meta-box { text-align: right; }
-                .meta-box div { font-size: 12px; color: #4b5563; margin-bottom: 4px; }
-                table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
-                th { text-align: left; background-color: #f9fafb; color: #6b7280; padding: 12px 16px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #e5e7eb; }
-                td { padding: 16px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
-                .badge { padding: 4px 10px; border-radius: 99px; font-size: 10px; font-weight: 700; text-transform: uppercase; display: inline-block; }
+                
+                body {
+                    font-family: 'Inter', Helvetica, Arial, sans-serif;
+                    padding: 40px;
+                    color: #1e293b;
+                    background: #ffffff;
+                }
+                
+                /* HEADER */
+                .header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: flex-start;
+                    border-bottom: 2px solid #2563eb;
+                    padding-bottom: 20px;
+                    margin-bottom: 30px;
+                }
+                .logo-placeholder {
+                    width: 50px;
+                    height: 50px;
+                    background: #2563eb;
+                    color: white;
+                    border-radius: 8px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 24px;
+                    font-weight: bold;
+                    box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
+                }
+                .project-info h1 {
+                    margin: 0;
+                    font-size: 22px;
+                    color: #0f172a;
+                    letter-spacing: -0.5px;
+                }
+                .project-info p {
+                    margin: 4px 0 0;
+                    color: #64748b;
+                    font-size: 12px;
+                }
+                .meta-info {
+                    text-align: right;
+                    font-size: 11px;
+                    color: #64748b;
+                }
+                .meta-info strong { color: #334155; }
+
+                /* SUMMARY CARDS */
+                .summary {
+                    display: flex;
+                    gap: 15px;
+                    margin-bottom: 30px;
+                }
+                .card {
+                    flex: 1;
+                    background: #f8fafc;
+                    padding: 15px;
+                    border-radius: 8px;
+                    border: 1px solid #e2e8f0;
+                }
+                .card-label { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; }
+                .card-value { font-size: 18px; font-weight: 700; color: #0f172a; margin-top: 5px; }
+                .card-value.green { color: #059669; }
+
+                /* TABLE */
+                table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    font-size: 13px;
+                }
+                th {
+                    text-align: left;
+                    background-color: #f1f5f9;
+                    color: #475569;
+                    padding: 12px 16px;
+                    font-size: 10px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.8px;
+                    font-weight: 700;
+                    border-bottom: 2px solid #e2e8f0;
+                }
+                td {
+                    padding: 16px;
+                    border-bottom: 1px solid #f1f5f9;
+                    vertical-align: top;
+                }
+                tr:last-child td { border-bottom: none; }
+                tr:nth-child(even) { background-color: #fafafa; }
+
+                /* CONTENT STYLES */
+                .task-title {
+                    font-weight: 600;
+                    color: #1e293b;
+                    font-size: 14px;
+                }
+                .desc {
+                    color: #94a3b8;
+                    font-size: 11px;
+                    margin-top: 4px;
+                    font-style: italic;
+                    line-height: 1.4;
+                }
+                
+                /* BADGES */
+                .badge {
+                    padding: 4px 10px;
+                    border-radius: 99px;
+                    font-size: 9px;
+                    font-weight: 800;
+                    letter-spacing: 0.5px;
+                    display: inline-block;
+                }
                 .badge-success { background-color: #dcfce7; color: #166534; }
-                .badge-pending { background-color: #f3f4f6; color: #4b5563; }
-                .value-box { background: #eff6ff; color: #1e3a8a; padding: 6px 10px; border-radius: 6px; font-family: monospace; font-weight: bold; display: inline-block; border: 1px solid #dbeafe; }
-                .media-tag { color: #4b5563; font-style: italic; font-size: 12px; background: #f3f4f6; padding: 4px 8px; border-radius: 4px; display: inline-block; }
-                .footer { margin-top: 50px; text-align: center; color: #9ca3af; font-size: 10px; border-top: 1px solid #e5e7eb; padding-top: 20px; }
+                .badge-pending { background-color: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
+
+                /* VALUE BOXES */
+                .value-box {
+                    background: #eff6ff;
+                    color: #1d4ed8;
+                    padding: 6px 12px;
+                    border-radius: 6px;
+                    font-family: 'Courier New', monospace;
+                    font-weight: 700;
+                    display: inline-block;
+                    border: 1px solid #dbeafe;
+                    font-size: 12px;
+                }
+                .media-box {
+                    display: inline-flex;
+                    align-items: center;
+                    padding: 5px 10px;
+                    border-radius: 6px;
+                    font-size: 11px;
+                    font-weight: 600;
+                }
+                .media-box.photo { background: #fdf2f8; color: #db2777; border: 1px solid #fce7f3; }
+                .media-box.video { background: #fff7ed; color: #ea580c; border: 1px solid #ffedd5; }
+                .icon { margin-right: 5px; font-size: 12px; }
+
+                /* FOOTER */
+                .footer {
+                    margin-top: 50px;
+                    text-align: center;
+                    color: #cbd5e1;
+                    font-size: 9px;
+                    border-top: 1px solid #f1f5f9;
+                    padding-top: 20px;
+                }
             </style>
         </head>
         <body>
             <div class="header">
-                <div class="title-box">
-                    <h1>${projectName}</h1>
-                    <p>Αναφορά Εργασιών</p>
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <div class="logo-placeholder">${projectName.charAt(0).toUpperCase()}</div>
+                    <div class="project-info">
+                        <h1>${projectName}</h1>
+                        <p>Αναφορά Προόδου & Εργασιών</p>
+                    </div>
                 </div>
-                <div class="meta-box">
-                    <div><strong>Ημερομηνία:</strong> ${new Date().toLocaleDateString("el-GR")}</div>
-                    <div><strong>Tasks:</strong> ${combinedTasks.length} Σύνολο</div>
-                    <div><strong>Status:</strong> ${projectStatus === "completed" ? "ΟΛΟΚΛΗΡΩΜΕΝΟ" : "ΣΕ ΕΞΕΛΙΞΗ"}</div>
+                <div class="meta-info">
+                    <div><strong>Ημερομηνία:</strong> ${dateStr}</div>
+                    <div style="margin-top: 4px;"><strong>ID Έργου:</strong> #${projectId.slice(0, 6)}</div>
                 </div>
             </div>
+
+            <div class="summary">
+                <div class="card">
+                    <div class="card-label">ΣΥΝΟΛΟ ΕΡΓΑΣΙΩΝ</div>
+                    <div class="card-value">${totalTasks}</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">ΟΛΟΚΛΗΡΩΜΕΝΕΣ</div>
+                    <div class="card-value green">${completedTasks}</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">ΚΑΤΑΣΤΑΣΗ</div>
+                    <div class="card-value" style="color: ${projectStatus === "completed" ? "#059669" : "#2563eb"}; font-size: 14px;">
+                        ${projectStatus === "completed" ? "✅ ΟΛΟΚΛΗΡΩΜΕΝΟ" : "🔄 ΣΕ ΕΞΕΛΙΞΗ"}
+                    </div>
+                </div>
+            </div>
+
             <table>
                 <thead>
                     <tr>
                         <th style="width: 5%; text-align: center;">#</th>
-                        <th style="width: 45%">Εργασια / Περιγραφη</th>
-                        <th style="width: 20%">Κατασταση</th>
-                        <th style="width: 30%">Αποτελεσμα / Αρχειο</th>
+                        <th style="width: 45%">ΠΕΡΙΓΡΑΦΗ ΕΡΓΑΣΙΑΣ</th>
+                        <th style="width: 20%; text-align: center;">ΚΑΤΑΣΤΑΣΗ</th>
+                        <th style="width: 30%; text-align: right;">ΑΠΟΤΕΛΕΣΜΑ / MEDIA</th>
                     </tr>
                 </thead>
                 <tbody>
                     ${rowsHTML}
                 </tbody>
             </table>
+
             <div class="footer">
-                Δημιουργήθηκε από την εφαρμογή Ergon Work Management &bull; ${new Date().toLocaleTimeString("el-GR")}
+                Ergon Work Management • Δημιουργήθηκε αυτόματα στις ${new Date().toLocaleTimeString("el-GR")}
             </div>
         </body>
         </html>
         `;
+
       const { uri } = await Print.printToFileAsync({ html });
       await Sharing.shareAsync(uri);
     } catch (e) {
-      Alert.alert("PDF Error", "Προέκυψε σφάλμα κατά τη δημιουργία του PDF.");
+      Alert.alert("PDF Error", "Δεν ήταν δυνατή η δημιουργία του PDF.");
     } finally {
       setProcessing(false);
     }
@@ -658,6 +994,8 @@ export default function ProjectDetailsScreen() {
           >
             <Ionicons name="arrow-back" size={24} color="#333" />
           </TouchableOpacity>
+
+          {/* HEADER ICON - DISPLAY ONLY (REMOVED ONPRESS) */}
           <View
             style={[
               styles.projectLogoPlaceholder,
@@ -674,6 +1012,7 @@ export default function ProjectDetailsScreen() {
               color="white"
             />
           </View>
+
           <View style={{ marginLeft: 15, flex: 1 }}>
             <Text
               style={[
@@ -692,7 +1031,6 @@ export default function ProjectDetailsScreen() {
             </Text>
           </View>
         </View>
-
         <View style={{ flexDirection: "row", gap: 8 }}>
           {!isSyncing && localTasks.length > 0 && (
             <TouchableOpacity
@@ -741,26 +1079,24 @@ export default function ProjectDetailsScreen() {
                 setInputModalVisible(true);
               }
             }}
-            onLongPress={handleDeleteCompletely}
+            onLongPress={handleLongPressTask}
             isSyncing={isSyncing}
           />
         )}
         contentContainerStyle={{ padding: 20, paddingBottom: 100 }}
       />
 
-      <TouchableOpacity
-        style={[
-          styles.fab,
-          { bottom: 20 + insets.bottom },
-          projectStatus === "completed" && { backgroundColor: "#94a3b8" },
-        ]}
-        disabled={projectStatus === "completed"}
-        onPress={() => setCreateModalVisible(true)}
-      >
-        <Ionicons name="add" size={32} color="white" />
-      </TouchableOpacity>
+      {/* FAB - Κρύβεται ΑΥΤΟΜΑΤΑ αν είναι completed */}
+      {Platform.OS !== "web" && projectStatus !== "completed" && (
+        <TouchableOpacity
+          style={[styles.fab, { bottom: 20 + insets.bottom }]}
+          onPress={openCreateModal}
+        >
+          <Ionicons name="add" size={32} color="white" />
+        </TouchableOpacity>
+      )}
 
-      {/* NEW TASK MODAL */}
+      {/* MODALS */}
       <Modal visible={createModalVisible} transparent animationType="slide">
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -774,12 +1110,13 @@ export default function ProjectDetailsScreen() {
             ]}
           >
             <View style={styles.modalHeaderRow}>
-              <Text style={styles.modalHeader}>Νέα Ανάθεση</Text>
+              <Text style={styles.modalHeader}>
+                {editingTaskId ? "Επεξεργασία" : "Νέα Ανάθεση"}
+              </Text>
               <TouchableOpacity onPress={() => setCreateModalVisible(false)}>
                 <Ionicons name="close" size={24} color="#999" />
               </TouchableOpacity>
             </View>
-
             <ScrollView
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
@@ -792,7 +1129,6 @@ export default function ProjectDetailsScreen() {
                 value={newTaskTitle}
                 onChangeText={setNewTaskTitle}
               />
-
               <Text style={styles.label}>Περιγραφή</Text>
               <TextInput
                 style={[styles.input, { height: 60, textAlignVertical: "top" }]}
@@ -802,7 +1138,6 @@ export default function ProjectDetailsScreen() {
                 multiline
                 numberOfLines={2}
               />
-
               <Text style={styles.label}>Τύπος Εργασίας</Text>
               <View style={styles.optionsContainer}>
                 <TouchableOpacity
@@ -892,14 +1227,74 @@ export default function ProjectDetailsScreen() {
               </View>
               <TouchableOpacity
                 style={styles.mainButton}
-                onPress={handleAddTask}
+                onPress={handleSaveTask}
               >
-                <Text style={styles.mainButtonText}>ΔΗΜΙΟΥΡΓΙΑ</Text>
+                <Text style={styles.mainButtonText}>
+                  {editingTaskId ? "ΑΠΟΘΗΚΕΥΣΗ" : "ΔΗΜΙΟΥΡΓΙΑ"}
+                </Text>
               </TouchableOpacity>
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      <Modal
+        visible={optionsModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setOptionsModalVisible(false)}
+      >
+        <View style={styles.optionsOverlay}>
+          <View style={styles.optionsMenuContainer}>
+            <View style={styles.optionsHeader}>
+              <Text style={styles.optionsTitle}>
+                {selectedTaskForOptions?.title}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.optionButton}
+              onPress={handleEditOption}
+            >
+              <Ionicons name="pencil" size={22} color="#2563eb" />
+              <Text style={[styles.optionTextBase, { color: "#2563eb" }]}>
+                Επεξεργασία
+              </Text>
+            </TouchableOpacity>
+            <View style={styles.separator} />
+            <TouchableOpacity
+              style={styles.optionButton}
+              onPress={handleDeleteOption}
+            >
+              <Ionicons name="trash" size={22} color="#ef4444" />
+              <Text style={[styles.optionTextBase, { color: "#ef4444" }]}>
+                Διαγραφή
+              </Text>
+            </TouchableOpacity>
+            <View style={styles.separator} />
+            <TouchableOpacity
+              style={styles.optionButton}
+              onPress={() => setOptionsModalVisible(false)}
+            >
+              <Text style={[styles.optionTextBase, { color: "#64748b" }]}>
+                Άκυρο
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* CUSTOM IMAGE EDITOR (Only show if not web) */}
+      {Platform.OS !== "web" && (
+        <ImageEditorModal
+          visible={editorVisible}
+          imageUri={tempImageUri}
+          onClose={() => {
+            setEditorVisible(false);
+            setTempImageUri(null);
+          }}
+          onSave={handleEditorSave}
+        />
+      )}
 
       <InputModal
         visible={inputModalVisible}
@@ -918,7 +1313,6 @@ export default function ProjectDetailsScreen() {
         description={currentTaskDescription}
       />
 
-      {/* GALLERY MODAL */}
       <Modal
         visible={galleryModalVisible}
         animationType="slide"
@@ -936,7 +1330,6 @@ export default function ProjectDetailsScreen() {
               <Text style={styles.galleryTitle} numberOfLines={1}>
                 {activeTaskForGallery?.title}
               </Text>
-              {/* ΝΕΟ: Εμφάνιση Περιγραφής */}
               {activeTaskForGallery?.description ? (
                 <Text style={styles.galleryDesc} numberOfLines={2}>
                   {activeTaskForGallery.description}
@@ -1010,8 +1403,6 @@ export default function ProjectDetailsScreen() {
           </View>
         </SafeAreaView>
       </Modal>
-
-      {/* FULL SCREEN MEDIA MODAL */}
       <Modal
         visible={!!selectedMediaForView}
         transparent
@@ -1035,7 +1426,6 @@ export default function ProjectDetailsScreen() {
               contentFit="contain"
             />
           )}
-
           <TouchableOpacity
             style={styles.closeModal}
             onPress={() => setSelectedMediaForView(null)}
@@ -1043,6 +1433,15 @@ export default function ProjectDetailsScreen() {
             <Ionicons name="arrow-back" size={30} color="white" />
           </TouchableOpacity>
           <View style={styles.toolBar}>
+            <TouchableOpacity
+              style={styles.toolBtn}
+              onPress={openMediaLocation}
+            >
+              <Ionicons name="map" size={24} color="#3b82f6" />
+              <Text style={[styles.toolText, { color: "#3b82f6" }]}>
+                Χάρτης
+              </Text>
+            </TouchableOpacity>
             <TouchableOpacity
               style={styles.toolBtn}
               onPress={() => confirmDeleteMedia()}
@@ -1355,4 +1754,33 @@ const styles = StyleSheet.create({
     borderColor: "#333",
   },
   addPhotoText: { color: "#666", marginTop: 5, fontSize: 12 },
+
+  optionsOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+    paddingBottom: 30,
+    paddingHorizontal: 10,
+  },
+  optionsMenuContainer: {
+    backgroundColor: "white",
+    borderRadius: 14,
+    overflow: "hidden",
+  },
+  optionsHeader: {
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+    alignItems: "center",
+  },
+  optionsTitle: { color: "#64748b", fontSize: 13, fontWeight: "600" },
+  optionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 16,
+    gap: 10,
+  },
+  optionTextBase: { fontSize: 17, fontWeight: "600" },
+  separator: { height: 1, backgroundColor: "#f1f5f9" },
 });
