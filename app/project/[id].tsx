@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { ResizeMode, Video } from "expo-av";
 import * as FileSystem from "expo-file-system/legacy";
 import { Image } from "expo-image";
 import * as ImageManipulator from "expo-image-manipulator";
@@ -8,7 +9,8 @@ import * as Network from "expo-network";
 import * as Print from "expo-print";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
-import React, { useEffect, useMemo, useState } from "react";
+
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -39,7 +41,7 @@ type Task = {
   id: string;
   title: string;
   description?: string;
-  type: "photo" | "measurement" | "general";
+  type: "photo" | "measurement" | "general" | "video";
   status: "pending" | "completed";
   value: string | null;
   images?: string[];
@@ -52,6 +54,12 @@ const PROJECT_CACHE_KEY_PREFIX = "cached_project_tasks_";
 // --- TASK ITEM ---
 const TaskItem = ({ item, onPress, onLongPress, isSyncing }: any) => {
   if (!item) return null;
+
+  let iconName: any = "document-text";
+  if (item.type === "photo") iconName = "camera";
+  else if (item.type === "measurement") iconName = "construct";
+  else if (item.type === "video") iconName = "videocam";
+
   return (
     <View style={styles.cardContainer}>
       <TouchableOpacity
@@ -68,13 +76,7 @@ const TaskItem = ({ item, onPress, onLongPress, isSyncing }: any) => {
           ]}
         >
           <Ionicons
-            name={
-              item.type === "photo"
-                ? "camera"
-                : item.type === "measurement"
-                  ? "construct"
-                  : "document-text"
-            }
+            name={iconName}
             size={22}
             color={item.status === "completed" ? "#059669" : "#2563eb"}
           />
@@ -105,19 +107,40 @@ const TaskItem = ({ item, onPress, onLongPress, isSyncing }: any) => {
           )}
         </View>
         <View style={styles.rightContainer}>
-          {item.type === "photo" ? (
+          {item.type === "photo" || item.type === "video" ? (
             item.images && item.images.length > 0 ? (
               <View style={styles.thumbnailBox}>
-                <Image
-                  source={{ uri: item.images[item.images.length - 1] }}
-                  style={styles.thumbImage}
-                />
+                {item.type === "video" ? (
+                  <View
+                    style={[
+                      styles.thumbImage,
+                      {
+                        backgroundColor: "#000",
+                        justifyContent: "center",
+                        alignItems: "center",
+                      },
+                    ]}
+                  >
+                    <Ionicons name="play" size={20} color="white" />
+                  </View>
+                ) : (
+                  <Image
+                    source={{ uri: item.images[item.images.length - 1] }}
+                    style={styles.thumbImage}
+                  />
+                )}
                 <View style={styles.badge}>
                   <Text style={styles.badgeText}>{item.images.length}</Text>
                 </View>
               </View>
             ) : (
-              <Ionicons name="camera-outline" size={24} color="#cbd5e1" />
+              <Ionicons
+                name={
+                  item.type === "video" ? "videocam-outline" : "camera-outline"
+                }
+                size={24}
+                color="#cbd5e1"
+              />
             )
           ) : item.status === "completed" ? (
             <Text style={styles.valueText} numberOfLines={1}>
@@ -159,17 +182,22 @@ export default function ProjectDetailsScreen() {
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [currentTaskType, setCurrentTaskType] = useState("measurement");
+  const [currentTaskDescription, setCurrentTaskDescription] = useState("");
+
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskDescription, setNewTaskDescription] = useState("");
   const [newTaskType, setNewTaskType] = useState<
-    "photo" | "measurement" | "general"
+    "photo" | "measurement" | "general" | "video"
   >("photo");
+
   const [activeTaskForGallery, setActiveTaskForGallery] = useState<Task | null>(
     null,
   );
-  const [selectedImageForView, setSelectedImageForView] = useState<
+  const [selectedMediaForView, setSelectedMediaForView] = useState<
     string | null
   >(null);
+
+  const videoRef = useRef<Video>(null);
 
   // --- INIT LOAD ---
   useEffect(() => {
@@ -304,54 +332,6 @@ export default function ProjectDetailsScreen() {
     }
   };
 
-  const generatePDF = async () => {
-    setProcessing(true);
-    try {
-      let rowsHTML = "";
-      let photosHTML = "";
-      combinedTasks.forEach((task, index) => {
-        const statusColor = task.status === "completed" ? "#dcfce7" : "#f1f5f9";
-        const statusText =
-          task.status === "completed" ? "Ολοκληρώθηκε" : "Εκκρεμεί";
-        const valueDisplay = task.value
-          ? `<strong>${task.value}</strong>`
-          : "-";
-        rowsHTML += `
-          <tr style="background-color: ${statusColor}">
-            <td style="padding: 10px; border-bottom: 1px solid #ddd;">${index + 1}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd;">
-              <strong>${task.title}</strong><br/>
-              <span style="font-size: 12px; color: #666;">${task.description || ""}</span>
-            </td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd;">${statusText}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd;">${valueDisplay}</td>
-          </tr>`;
-        if (task.images && task.images.length > 0) {
-          photosHTML += `
-            <div style="margin-bottom: 20px; break-inside: avoid;">
-              <h3>${task.title} (Φωτογραφίες)</h3>
-              <div style="display: flex; flex-wrap: wrap; gap: 10px;">
-                ${task.images.map((img) => `<img src="${img}" style="width: 150px; height: 150px; object-fit: cover; border-radius: 8px; border: 1px solid #eee;" />`).join("")}
-              </div>
-            </div>`;
-        }
-      });
-      const htmlContent = `
-        <!DOCTYPE html><html><head><meta charset="utf-8">
-        <style>body{font-family:'Helvetica',sans-serif;padding:20px}h1{color:#2563eb;border-bottom:2px solid #2563eb;padding-bottom:10px}table{width:100%;border-collapse:collapse;margin-top:20px}th{text-align:left;padding:10px;background-color:#f8fafc;border-bottom:2px solid #ddd}.footer{margin-top:50px;text-align:center;font-size:12px;color:#999}</style>
-        </head><body><h1>Αναφορά Έργου: ${projectName}</h1><p>Ημερομηνία: ${new Date().toLocaleDateString("el-GR")}</p><h2>Λίστα Εργασιών</h2><table><thead><tr><th>#</th><th>Εργασία</th><th>Κατάσταση</th><th>Μέτρηση</th></tr></thead><tbody>${rowsHTML}</tbody></table><div style="margin-top:40px;">${photosHTML}</div><div class="footer">Ergon Work Management App</div></body></html>`;
-      const { uri } = await Print.printToFileAsync({ html: htmlContent });
-      await Sharing.shareAsync(uri, {
-        UTI: ".pdf",
-        mimeType: "application/pdf",
-      });
-    } catch (error) {
-      Alert.alert("Σφάλμα PDF");
-    } finally {
-      setProcessing(false);
-    }
-  };
-
   const handleAddTask = async () => {
     if (!newTaskTitle.trim())
       return Alert.alert("Προσοχή", "Τίτλος υποχρεωτικός");
@@ -385,7 +365,7 @@ export default function ProjectDetailsScreen() {
       if (t) await saveTaskLocal({ ...t, value: null, status: "pending" });
     }
   };
-  const addImageToTask = async (tid: string, uri: string) => {
+  const addMediaToTask = async (tid: string, uri: string) => {
     const t = combinedTasks.find((x) => x.id === tid);
     if (t) {
       const imgs = [...(t.images || []), uri];
@@ -393,8 +373,8 @@ export default function ProjectDetailsScreen() {
     }
   };
 
-  const removeImageFromTask = async (uri: string) => {
-    setSelectedImageForView(null);
+  const removeMediaFromTask = async (uri: string) => {
+    setSelectedMediaForView(null);
     if (activeTaskForGallery) {
       const imgs = activeTaskForGallery.images?.filter((i) => i !== uri) || [];
       const st = imgs.length > 0 ? "completed" : "pending";
@@ -406,21 +386,16 @@ export default function ProjectDetailsScreen() {
     }
   };
 
-  // --- CONFIRM IMAGE DELETE ---
-  const confirmDeleteImage = () => {
-    if (!selectedImageForView) return;
-    Alert.alert(
-      "Διαγραφή Φωτογραφίας",
-      "Είστε σίγουροι ότι θέλετε να διαγράψετε αυτή τη φωτογραφία;",
-      [
-        { text: "Άκυρο", style: "cancel" },
-        {
-          text: "Διαγραφή",
-          style: "destructive",
-          onPress: () => removeImageFromTask(selectedImageForView),
-        },
-      ],
-    );
+  const confirmDeleteMedia = () => {
+    if (!selectedMediaForView) return;
+    Alert.alert("Διαγραφή", "Διαγραφή αρχείου;", [
+      { text: "Άκυρο", style: "cancel" },
+      {
+        text: "Διαγραφή",
+        style: "destructive",
+        onPress: () => removeMediaFromTask(selectedMediaForView),
+      },
+    ]);
   };
 
   const handleDeleteCompletely = (task: Task) => {
@@ -448,62 +423,100 @@ export default function ProjectDetailsScreen() {
     ]);
   };
 
-  // --- COMPRESSED CAMERA ---
-  const launchCamera = async (taskId: string) => {
-    const r = await ImagePicker.launchCameraAsync({
-      quality: 0.5,
-      base64: true,
-    });
-    if (!r.canceled && r.assets[0].uri) {
-      setProcessing(true);
-      try {
-        const m = await ImageManipulator.manipulateAsync(
-          r.assets[0].uri,
-          [{ resize: { width: 800 } }],
-          {
-            compress: 0.4,
-            format: ImageManipulator.SaveFormat.JPEG,
-            base64: true,
-          },
-        );
+  // --- CAMERA LOGIC (PHOTO & VIDEO) ---
+  const launchCamera = async (task: Task) => {
+    try {
+      // A. VIDEO HANDLING
+      if (task.type === "video") {
+        const r = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+          allowsEditing: true,
+          videoMaxDuration: 4,
+          quality: 0,
+        });
 
-        if (m.base64) {
-          const base64Img = `data:image/jpeg;base64,${m.base64}`;
-          await addImageToTask(taskId, base64Img);
+        if (!r.canceled && r.assets[0].uri) {
+          setProcessing(true);
+          try {
+            const videoUri = r.assets[0].uri;
+
+            // 1. ΕΛΕΓΧΟΣ ΜΕΓΕΘΟΥΣ
+            const fileInfo = await FileSystem.getInfoAsync(videoUri);
+            if (fileInfo.exists && fileInfo.size > 900000) {
+              Alert.alert(
+                "Πολύ μεγάλο αρχείο",
+                "Το βίντεο ξεπερνά το όριο του 1MB.",
+              );
+              setProcessing(false);
+              return;
+            }
+
+            // 2. CONVERT TO BASE64
+            const base64Video = await FileSystem.readAsStringAsync(videoUri, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+            const finalUri = `data:video/mp4;base64,${base64Video}`;
+
+            await addMediaToTask(task.id, finalUri);
+          } catch (e) {
+            console.log("Video Error", e);
+            Alert.alert("Σφάλμα", "Απέτυχε η αποθήκευση του βίντεο.");
+          } finally {
+            setProcessing(false);
+          }
         }
-      } catch (e) {
-        console.log("Camera Error", e);
-        Alert.alert("Σφάλμα", "Η φωτογραφία ήταν πολύ μεγάλη.");
-      } finally {
-        setProcessing(false);
       }
+      // B. PHOTO HANDLING
+      else {
+        const r = await ImagePicker.launchCameraAsync({
+          quality: 0.5,
+          base64: true,
+        });
+        if (!r.canceled && r.assets[0].uri) {
+          setProcessing(true);
+          try {
+            const m = await ImageManipulator.manipulateAsync(
+              r.assets[0].uri,
+              [{ resize: { width: 800 } }],
+              {
+                compress: 0.4,
+                format: ImageManipulator.SaveFormat.JPEG,
+                base64: true,
+              },
+            );
+
+            if (m.base64) {
+              const base64Img = `data:image/jpeg;base64,${m.base64}`;
+              await addMediaToTask(task.id, base64Img);
+            }
+          } catch (e) {
+            Alert.alert("Σφάλμα", "Η φωτογραφία ήταν πολύ μεγάλη.");
+          } finally {
+            setProcessing(false);
+          }
+        }
+      }
+    } catch (e) {
+      Alert.alert("Error", "Camera failed");
+      setProcessing(false);
     }
   };
 
-  // --- SHARE FIX (BASE64 SUPPORT) ---
   const handleShare = async (uri: string) => {
-    if (!(await Sharing.isAvailableAsync())) {
-      Alert.alert("Σφάλμα", "Η κοινοποίηση δεν είναι διαθέσιμη");
-      return;
-    }
+    if (!(await Sharing.isAvailableAsync())) return;
 
     try {
-      // Αν είναι Base64 (από Firebase), το σώζουμε προσωρινά
-      if (uri.startsWith("data:image")) {
-        const base64Data = uri.split("base64,")[1];
-        const filename = FileSystem.cacheDirectory + "temp_share_image.jpg";
+      const isVideo = uri.startsWith("data:video");
+      const ext = isVideo ? ".mp4" : ".jpg";
+      const base64Data = uri.split("base64,")[1];
+      const filename = FileSystem.cacheDirectory + `temp_share${ext}`;
 
-        await FileSystem.writeAsStringAsync(filename, base64Data, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
+      await FileSystem.writeAsStringAsync(filename, base64Data, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
 
-        await Sharing.shareAsync(filename);
-      } else {
-        // Αν είναι τοπικό αρχείο
-        await Sharing.shareAsync(uri);
-      }
+      await Sharing.shareAsync(filename);
     } catch (error) {
-      console.log("Share Error:", error);
       Alert.alert("Σφάλμα", "Δεν ήταν δυνατή η κοινοποίηση.");
     }
   };
@@ -512,6 +525,104 @@ export default function ProjectDetailsScreen() {
     const net = await Network.getNetworkStateAsync();
     if (!net.isConnected) return Alert.alert("No Internet");
     syncNow();
+  };
+
+  const generatePDF = async () => {
+    setProcessing(true);
+    try {
+      let rowsHTML = "";
+      combinedTasks.forEach((task, index) => {
+        // Logic για το Status Badge
+        const isDone = task.status === "completed";
+        const statusBadge = isDone
+          ? `<span class="badge badge-success">Ολοκληρώθηκε</span>`
+          : `<span class="badge badge-pending">Εκκρεμεί</span>`;
+        // Logic για το Value (Αποτέλεσμα)
+        let valueDisplay = "-";
+        if (task.type === "video") {
+          valueDisplay = `<div class="media-tag">🎥 Βίντεο</div>`;
+        } else if (task.type === "photo") {
+          valueDisplay = `<div class="media-tag">📷 Φωτογραφίες (${task.images?.length || 0})</div>`;
+        } else if (task.value) {
+          valueDisplay = `<div class="value-box">${task.value}</div>`;
+        }
+        // Logic για την περιγραφή (να φαίνεται αχνά από κάτω)
+        const descHTML = task.description
+          ? `<div style="color: #6b7280; font-size: 11px; margin-top: 4px;">${task.description}</div>`
+          : "";
+        rowsHTML += `
+            <tr>
+                <td style="text-align: center; color: #6b7280;">${index + 1}</td>
+                <td>
+                    <div style="font-weight: 600; color: #111827;">${task.title}</div>
+                    ${descHTML}
+                </td>
+                <td>${statusBadge}</td>
+                <td>${valueDisplay}</td>
+            </tr>`;
+      });
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+            <style>
+                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+                body { font-family: 'Inter', Helvetica, Arial, sans-serif; padding: 40px; color: #1f2937; -webkit-print-color-adjust: exact; }
+                .header { margin-bottom: 40px; border-bottom: 2px solid #2563eb; padding-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end; }
+                .title-box h1 { margin: 0; color: #111827; font-size: 24px; text-transform: uppercase; letter-spacing: -0.5px; }
+                .title-box p { margin: 5px 0 0; color: #6b7280; font-size: 12px; }
+                .meta-box { text-align: right; }
+                .meta-box div { font-size: 12px; color: #4b5563; margin-bottom: 4px; }
+                table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+                th { text-align: left; background-color: #f9fafb; color: #6b7280; padding: 12px 16px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #e5e7eb; }
+                td { padding: 16px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+                .badge { padding: 4px 10px; border-radius: 99px; font-size: 10px; font-weight: 700; text-transform: uppercase; display: inline-block; }
+                .badge-success { background-color: #dcfce7; color: #166534; }
+                .badge-pending { background-color: #f3f4f6; color: #4b5563; }
+                .value-box { background: #eff6ff; color: #1e3a8a; padding: 6px 10px; border-radius: 6px; font-family: monospace; font-weight: bold; display: inline-block; border: 1px solid #dbeafe; }
+                .media-tag { color: #4b5563; font-style: italic; font-size: 12px; background: #f3f4f6; padding: 4px 8px; border-radius: 4px; display: inline-block; }
+                .footer { margin-top: 50px; text-align: center; color: #9ca3af; font-size: 10px; border-top: 1px solid #e5e7eb; padding-top: 20px; }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <div class="title-box">
+                    <h1>${projectName}</h1>
+                    <p>Αναφορά Εργασιών</p>
+                </div>
+                <div class="meta-box">
+                    <div><strong>Ημερομηνία:</strong> ${new Date().toLocaleDateString("el-GR")}</div>
+                    <div><strong>Tasks:</strong> ${combinedTasks.length} Σύνολο</div>
+                    <div><strong>Status:</strong> ${projectStatus === "completed" ? "ΟΛΟΚΛΗΡΩΜΕΝΟ" : "ΣΕ ΕΞΕΛΙΞΗ"}</div>
+                </div>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 5%; text-align: center;">#</th>
+                        <th style="width: 45%">Εργασια / Περιγραφη</th>
+                        <th style="width: 20%">Κατασταση</th>
+                        <th style="width: 30%">Αποτελεσμα / Αρχειο</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rowsHTML}
+                </tbody>
+            </table>
+            <div class="footer">
+                Δημιουργήθηκε από την εφαρμογή Ergon Work Management &bull; ${new Date().toLocaleTimeString("el-GR")}
+            </div>
+        </body>
+        </html>
+        `;
+      const { uri } = await Print.printToFileAsync({ html });
+      await Sharing.shareAsync(uri);
+    } catch (e) {
+      Alert.alert("PDF Error", "Προέκυψε σφάλμα κατά τη δημιουργία του PDF.");
+    } finally {
+      setProcessing(false);
+    }
   };
 
   const totalTasks = combinedTasks.length;
@@ -534,7 +645,7 @@ export default function ProjectDetailsScreen() {
         <View style={styles.loadingOverlay}>
           <ActivityIndicator size="large" color="#2563eb" />
           <Text style={{ marginTop: 10, fontWeight: "bold", color: "#333" }}>
-            Επεξεργασία...
+            Επεξεργασία Media...
           </Text>
         </View>
       )}
@@ -618,20 +729,23 @@ export default function ProjectDetailsScreen() {
         renderItem={({ item }) => (
           <TaskItem
             item={item}
-            onPress={(t: Task) =>
-              t.type === "photo"
-                ? (setActiveTaskForGallery(t), setGalleryModalVisible(true))
-                : (setCurrentTaskId(t.id),
-                  setCurrentTaskType(t.type),
-                  setInputValue(t.value || ""),
-                  setInputModalVisible(true))
-            }
+            onPress={(t: Task) => {
+              if (t.type === "photo" || t.type === "video") {
+                setActiveTaskForGallery(t);
+                setGalleryModalVisible(true);
+              } else {
+                setCurrentTaskId(t.id);
+                setCurrentTaskType(t.type);
+                setInputValue(t.value || "");
+                setCurrentTaskDescription(t.description || "");
+                setInputModalVisible(true);
+              }
+            }}
             onLongPress={handleDeleteCompletely}
             isSyncing={isSyncing}
           />
         )}
         contentContainerStyle={{ padding: 20, paddingBottom: 100 }}
-        removeClippedSubviews={false}
       />
 
       <TouchableOpacity
@@ -646,7 +760,7 @@ export default function ProjectDetailsScreen() {
         <Ionicons name="add" size={32} color="white" />
       </TouchableOpacity>
 
-      {/* MODAL - ΔΙΟΡΘΩΣΗ ΓΙΑ ANDROID (ΑΠΕΝΕΡΓΟΠΟΙΗΣΗ KEYBOARD AVOIDING) */}
+      {/* NEW TASK MODAL */}
       <Modal visible={createModalVisible} transparent animationType="slide">
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -673,11 +787,12 @@ export default function ProjectDetailsScreen() {
               <Text style={styles.label}>Τίτλος</Text>
               <TextInput
                 style={styles.input}
-                placeholder="π.χ. Έλεγχος Κουζίνας"
+                placeholder="π.χ. Έλεγχος Σωληνώσεων"
                 autoFocus
                 value={newTaskTitle}
                 onChangeText={setNewTaskTitle}
               />
+
               <Text style={styles.label}>Περιγραφή</Text>
               <TextInput
                 style={[styles.input, { height: 60, textAlignVertical: "top" }]}
@@ -687,6 +802,7 @@ export default function ProjectDetailsScreen() {
                 multiline
                 numberOfLines={2}
               />
+
               <Text style={styles.label}>Τύπος Εργασίας</Text>
               <View style={styles.optionsContainer}>
                 <TouchableOpacity
@@ -698,7 +814,7 @@ export default function ProjectDetailsScreen() {
                 >
                   <Ionicons
                     name="camera"
-                    size={28}
+                    size={24}
                     color={newTaskType === "photo" ? "white" : "#64748b"}
                   />
                   <Text
@@ -707,7 +823,28 @@ export default function ProjectDetailsScreen() {
                       newTaskType === "photo" && { color: "white" },
                     ]}
                   >
-                    Φωτογραφία
+                    Φώτο
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.optionCard,
+                    newTaskType === "video" && styles.optionCardActive,
+                  ]}
+                  onPress={() => setNewTaskType("video")}
+                >
+                  <Ionicons
+                    name="videocam"
+                    size={24}
+                    color={newTaskType === "video" ? "white" : "#64748b"}
+                  />
+                  <Text
+                    style={[
+                      styles.optionText,
+                      newTaskType === "video" && { color: "white" },
+                    ]}
+                  >
+                    Βίντεο
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -719,7 +856,7 @@ export default function ProjectDetailsScreen() {
                 >
                   <Ionicons
                     name="construct"
-                    size={28}
+                    size={24}
                     color={newTaskType === "measurement" ? "white" : "#64748b"}
                   />
                   <Text
@@ -740,7 +877,7 @@ export default function ProjectDetailsScreen() {
                 >
                   <Ionicons
                     name="document-text"
-                    size={28}
+                    size={24}
                     color={newTaskType === "general" ? "white" : "#64748b"}
                   />
                   <Text
@@ -778,8 +915,10 @@ export default function ProjectDetailsScreen() {
         onChangeText={setInputValue}
         keyboardType="default"
         isMultiline={currentTaskType === "general"}
+        description={currentTaskDescription}
       />
 
+      {/* GALLERY MODAL */}
       <Modal
         visible={galleryModalVisible}
         animationType="slide"
@@ -793,10 +932,17 @@ export default function ProjectDetailsScreen() {
             >
               <Ionicons name="arrow-back" size={28} color="white" />
             </TouchableOpacity>
-            <Text style={styles.galleryTitle}>
-              {activeTaskForGallery?.title}
-            </Text>
-            <View style={{ width: 28 }} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.galleryTitle} numberOfLines={1}>
+                {activeTaskForGallery?.title}
+              </Text>
+              {/* ΝΕΟ: Εμφάνιση Περιγραφής */}
+              {activeTaskForGallery?.description ? (
+                <Text style={styles.galleryDesc} numberOfLines={2}>
+                  {activeTaskForGallery.description}
+                </Text>
+              ) : null}
+            </View>
           </View>
           <View style={{ flex: 1, padding: 1 }}>
             <FlatList
@@ -807,24 +953,55 @@ export default function ProjectDetailsScreen() {
                   <TouchableOpacity
                     style={styles.addPhotoTile}
                     onPress={() =>
-                      activeTaskForGallery &&
-                      launchCamera(activeTaskForGallery.id)
+                      activeTaskForGallery && launchCamera(activeTaskForGallery)
                     }
                   >
-                    <Ionicons name="camera" size={32} color="#666" />
+                    <Ionicons
+                      name={
+                        activeTaskForGallery?.type === "video"
+                          ? "videocam"
+                          : "camera"
+                      }
+                      size={32}
+                      color="#666"
+                    />
                     <Text style={styles.addPhotoText}>Προσθήκη</Text>
                   </TouchableOpacity>
                 ) : (
                   <TouchableOpacity
                     style={styles.photoTile}
-                    onPress={() => setSelectedImageForView(item)}
+                    onPress={() => setSelectedMediaForView(item)}
                   >
-                    <Image
-                      source={{ uri: item }}
-                      style={{ width: "100%", height: "100%" }}
-                      contentFit="cover"
-                      cachePolicy="memory-disk"
-                    />
+                    {activeTaskForGallery?.type === "video" ? (
+                      <View
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          justifyContent: "center",
+                          alignItems: "center",
+                          backgroundColor: "#111",
+                        }}
+                      >
+                        <Ionicons name="play-circle" size={40} color="white" />
+                        <Text
+                          style={{
+                            color: "white",
+                            fontSize: 10,
+                            position: "absolute",
+                            bottom: 5,
+                          }}
+                        >
+                          VIDEO
+                        </Text>
+                      </View>
+                    ) : (
+                      <Image
+                        source={{ uri: item }}
+                        style={{ width: "100%", height: "100%" }}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                      />
+                    )}
                   </TouchableOpacity>
                 )
               }
@@ -834,27 +1011,41 @@ export default function ProjectDetailsScreen() {
         </SafeAreaView>
       </Modal>
 
+      {/* FULL SCREEN MEDIA MODAL */}
       <Modal
-        visible={!!selectedImageForView}
+        visible={!!selectedMediaForView}
         transparent
-        onRequestClose={() => setSelectedImageForView(null)}
+        onRequestClose={() => setSelectedMediaForView(null)}
       >
         <View style={styles.modalBackground}>
-          <Image
-            source={{ uri: selectedImageForView || "" }}
-            style={styles.fullImage}
-            contentFit="contain"
-          />
+          {selectedMediaForView?.startsWith("data:video") ? (
+            <Video
+              ref={videoRef}
+              style={styles.fullImage}
+              source={{ uri: selectedMediaForView }}
+              useNativeControls
+              resizeMode={ResizeMode.CONTAIN}
+              isLooping
+              shouldPlay
+            />
+          ) : (
+            <Image
+              source={{ uri: selectedMediaForView || "" }}
+              style={styles.fullImage}
+              contentFit="contain"
+            />
+          )}
+
           <TouchableOpacity
             style={styles.closeModal}
-            onPress={() => setSelectedImageForView(null)}
+            onPress={() => setSelectedMediaForView(null)}
           >
             <Ionicons name="arrow-back" size={30} color="white" />
           </TouchableOpacity>
           <View style={styles.toolBar}>
             <TouchableOpacity
               style={styles.toolBtn}
-              onPress={() => confirmDeleteImage()}
+              onPress={() => confirmDeleteMedia()}
             >
               <Ionicons name="trash-outline" size={24} color="#ef4444" />
               <Text style={[styles.toolText, { color: "#ef4444" }]}>
@@ -864,7 +1055,7 @@ export default function ProjectDetailsScreen() {
             <TouchableOpacity
               style={styles.toolBtn}
               onPress={() =>
-                selectedImageForView && handleShare(selectedImageForView)
+                selectedMediaForView && handleShare(selectedMediaForView)
               }
             >
               <Ionicons name="share-outline" size={24} color="white" />
@@ -927,7 +1118,6 @@ const styles = StyleSheet.create({
   progressSection: { backgroundColor: "white", paddingBottom: 0 },
   progressBarBg: { height: 3, backgroundColor: "#e2e8f0", width: "100%" },
   progressBarFill: { height: "100%", backgroundColor: "#10b981" },
-  content: { padding: 20 },
   cardContainer: {
     backgroundColor: "white",
     borderRadius: 16,
@@ -1010,7 +1200,6 @@ const styles = StyleSheet.create({
     borderColor: "white",
   },
   badgeText: { color: "white", fontSize: 10, fontWeight: "bold" },
-
   fab: {
     position: "absolute",
     right: 20,
@@ -1023,23 +1212,20 @@ const styles = StyleSheet.create({
     elevation: 8,
     zIndex: 999,
   },
-
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(15, 23, 42, 0.6)",
     justifyContent: "flex-end",
   },
-
   modalContent: {
     backgroundColor: "white",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    paddingHorizontal: 24, // Μόνο πλάι
-    paddingTop: 24, // Μόνο πάνω
+    paddingHorizontal: 24,
+    paddingTop: 24,
     elevation: 20,
     maxHeight: "80%",
   },
-
   modalHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1145,13 +1331,13 @@ const styles = StyleSheet.create({
   toolText: { color: "white", fontSize: 11, marginTop: 5, fontWeight: "600" },
   galleryHeader: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
     padding: 20,
     paddingTop: 50,
     backgroundColor: "#000",
   },
   galleryTitle: { color: "white", fontSize: 18, fontWeight: "bold" },
+  galleryDesc: { color: "#9ca3af", fontSize: 12, marginTop: 2 },
   photoTile: {
     flex: 1 / 3,
     aspectRatio: 1,
