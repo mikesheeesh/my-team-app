@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ergon Work - Πρόσκληση Ομάδας</title>
+  <meta name="description" content="Πρόσκληση για είσοδο στην ομάδα Ergon Work">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 20px;
+    }
+
+    .container {
+      text-align: center;
+      max-width: 450px;
+      width: 100%;
+      animation: fadeIn 0.5s ease-in;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .logo {
+      font-size: 80px;
+      margin-bottom: 20px;
+      animation: bounce 1s ease-in-out;
+    }
+
+    @keyframes bounce {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+
+    h1 {
+      margin: 0 0 10px 0;
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    .subtitle {
+      opacity: 0.95;
+      margin-bottom: 30px;
+      font-size: 16px;
+      font-weight: 500;
+    }
+
+    .code-section {
+      background: rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(10px);
+      padding: 20px;
+      border-radius: 16px;
+      margin-bottom: 30px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .code-label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      opacity: 0.8;
+      margin-bottom: 10px;
+      font-weight: 600;
+    }
+
+    .code {
+      font-size: 28px;
+      font-weight: bold;
+      letter-spacing: 4px;
+      font-family: 'Courier New', monospace;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      display: inline-block;
+      min-width: 180px;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 20px;
+      font-size: 16px;
+      font-weight: 500;
+    }
+
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 3px solid rgba(255, 255, 255, 0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    #download {
+      display: none;
+      animation: slideUp 0.5s ease-out;
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .download-section {
+      margin-top: 30px;
+    }
+
+    .download-text {
+      font-size: 15px;
+      margin-bottom: 20px;
+      opacity: 0.9;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      background: white;
+      color: #667eea;
+      padding: 16px 36px;
+      border-radius: 30px;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 17px;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+    }
+
+    .btn:active {
+      transform: translateY(0);
+    }
+
+    .icon {
+      font-size: 24px;
+    }
+
+    .footer {
+      margin-top: 40px;
+      font-size: 13px;
+      opacity: 0.7;
+    }
+
+    .error {
+      background: rgba(239, 68, 68, 0.2);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      padding: 15px;
+      border-radius: 12px;
+      margin-top: 20px;
+    }
+
+    @media (max-width: 480px) {
+      .logo { font-size: 64px; }
+      h1 { font-size: 26px; }
+      .code { font-size: 24px; letter-spacing: 3px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">📸</div>
+    <h1>Ergon Work</h1>
+    <p class="subtitle">Διαχείριση Εργασιών Ομάδας</p>
+
+    <div class="code-section">
+      <div class="code-label">Κωδικός Πρόσκλησης</div>
+      <div class="code" id="codeDisplay">------</div>
+    </div>
+
+    <div id="opening" class="status">
+      <div class="spinner"></div>
+      <span>Ανοίγει η εφαρμογή...</span>
+    </div>
+
+    <div id="download">
+      <div class="download-section">
+        <p class="download-text">Δεν έχετε εγκατεστημένη την εφαρμογή;</p>
+        <a href="#" id="downloadBtn" class="btn">
+          <span class="icon">📱</span>
+          Κατεβάστε το App
+        </a>
+      </div>
+      <div class="error" id="errorSection" style="display: none;">
+        <strong>⚠️ Προσοχή:</strong> Η εφαρμογή δεν βρέθηκε στη συσκευή σας.
+      </div>
+    </div>
+
+    <div class="footer">
+      <p>Ergon Work &copy; 2026</p>
+      <p>Professional Team Management</p>
+    </div>
+  </div>
+
+  <script>
+    // Get invite code from URL
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+
+    // Configuration - UPDATE THESE VALUES
+    const DEEP_LINK_SCHEME = 'ergonwork'; // Your app's deep link scheme
+    const APK_DOWNLOAD_URL = 'https://expo.dev/artifacts/eas/YOUR_APK_URL.apk'; // Your APK download URL
+
+    if (code && code.length === 6) {
+      // Display the code
+      document.getElementById('codeDisplay').textContent = code;
+
+      // Try to open the app with deep link
+      const deepLink = `${DEEP_LINK_SCHEME}://join?inviteCode=${code}`;
+
+      // Attempt 1: Direct deep link
+      window.location.href = deepLink;
+
+      // Attempt 2: For Android, try Intent URL
+      setTimeout(() => {
+        const intentUrl = `intent://join?inviteCode=${code}#Intent;scheme=${DEEP_LINK_SCHEME};package=com.yourcompany.ergonwork;end`;
+        window.location.href = intentUrl;
+      }, 500);
+
+      // If app not installed, show download section after 2.5 seconds
+      const downloadTimer = setTimeout(() => {
+        document.getElementById('opening').style.display = 'none';
+        document.getElementById('download').style.display = 'block';
+        document.getElementById('errorSection').style.display = 'block';
+
+        // Set download URL
+        document.getElementById('downloadBtn').href = APK_DOWNLOAD_URL;
+      }, 2500);
+
+      // If page becomes hidden (app opened), clear the timeout
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          clearTimeout(downloadTimer);
+        }
+      });
+
+      // Also listen for blur event (when user switches to another app)
+      window.addEventListener('blur', () => {
+        clearTimeout(downloadTimer);
+      });
+
+    } else {
+      // Invalid or missing code
+      document.getElementById('codeDisplay').textContent = 'INVALID';
+      document.getElementById('opening').innerHTML = '<span>❌ Μη έγκυρος κωδικός πρόσκλησης</span>';
+      document.querySelector('.code-section').style.borderColor = 'rgba(239, 68, 68, 0.4)';
+      document.querySelector('.code-section').style.background = 'rgba(239, 68, 68, 0.15)';
+    }
+  </script>
+</body>
+</html>
