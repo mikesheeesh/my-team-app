@@ -26,7 +26,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -42,17 +42,48 @@ import { useSync } from "../context/SyncContext";
 // --- TYPES ---
 type GeoPoint = { lat: number; lng: number };
 
-type Task = {
+type PhotoTask = {
   id: string;
   title: string;
   description?: string;
-  type: "photo" | "measurement" | "general" | "video";
+  type: "photo";
   status: "pending" | "completed";
-  value: string | null;
-  images?: string[];
-  imageLocations?: GeoPoint[];
+  images: string[];
+  imageLocations: GeoPoint[];
   isLocal?: boolean;
 };
+
+type VideoTask = {
+  id: string;
+  title: string;
+  description?: string;
+  type: "video";
+  status: "pending" | "completed";
+  value: string;
+  isLocal?: boolean;
+};
+
+type MeasurementTask = {
+  id: string;
+  title: string;
+  description?: string;
+  type: "measurement";
+  status: "pending" | "completed";
+  value: string;
+  isLocal?: boolean;
+};
+
+type GeneralTask = {
+  id: string;
+  title: string;
+  description?: string;
+  type: "general";
+  status: "pending" | "completed";
+  value: string;
+  isLocal?: boolean;
+};
+
+type Task = PhotoTask | VideoTask | MeasurementTask | GeneralTask;
 
 const OFFLINE_QUEUE_KEY = "offline_tasks_queue_";
 const PROJECT_CACHE_KEY_PREFIX = "cached_project_tasks_";
@@ -116,40 +147,41 @@ const TaskItem = ({ item, onPress, onLongPress, isSyncing }: any) => {
           )}
         </View>
         <View style={styles.rightContainer}>
-          {item.type === "photo" || item.type === "video" ? (
-            item.images && item.images.length > 0 ? (
+          {item.type === "photo" ? (
+            item.images.length > 0 ? (
               <View style={styles.thumbnailBox}>
-                {item.type === "video" ? (
-                  <View
-                    style={[
-                      styles.thumbImage,
-                      {
-                        backgroundColor: "#000",
-                        justifyContent: "center",
-                        alignItems: "center",
-                      },
-                    ]}
-                  >
-                    <Ionicons name="play" size={20} color="white" />
-                  </View>
-                ) : (
-                  <Image
-                    source={{ uri: item.images[item.images.length - 1] }}
-                    style={styles.thumbImage}
-                  />
-                )}
+                <Image
+                  source={{ uri: item.images[item.images.length - 1] }}
+                  style={styles.thumbImage}
+                />
                 <View style={styles.badge}>
                   <Text style={styles.badgeText}>{item.images.length}</Text>
                 </View>
               </View>
             ) : (
-              <Ionicons
-                name={
-                  item.type === "video" ? "videocam-outline" : "camera-outline"
-                }
-                size={24}
-                color="#cbd5e1"
-              />
+              <Ionicons name="camera-outline" size={24} color="#cbd5e1" />
+            )
+          ) : item.type === "video" ? (
+            item.value && item.value.length > 0 ? (
+              <View style={styles.thumbnailBox}>
+                <View
+                  style={[
+                    styles.thumbImage,
+                    {
+                      backgroundColor: "#000",
+                      justifyContent: "center",
+                      alignItems: "center",
+                    },
+                  ]}
+                >
+                  <Ionicons name="play" size={20} color="white" />
+                </View>
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>1</Text>
+                </View>
+              </View>
+            ) : (
+              <Ionicons name="videocam-outline" size={24} color="#cbd5e1" />
             )
           ) : item.status === "completed" ? (
             <Text style={styles.valueText} numberOfLines={1}>
@@ -326,20 +358,30 @@ export default function ProjectDetailsScreen() {
       const cloudT = cloudMap.get(localT.id);
       if (!cloudT) return true;
 
-      const localVal = localT.value || "";
-      const cloudVal = cloudT.value || "";
+      // Check if types match
+      if (localT.type !== cloudT.type) return true;
+
       const localStatus = localT.status;
       const cloudStatus = cloudT.status;
-      const localImgCount = localT.images?.length || 0;
-      const cloudImgCount = cloudT.images?.length || 0;
 
-      if (
-        localVal === cloudVal &&
-        localStatus === cloudStatus &&
-        localImgCount === cloudImgCount
+      // Type-specific comparisons
+      if (localT.type === "photo" && cloudT.type === "photo") {
+        const localImgCount = localT.images.length;
+        const cloudImgCount = cloudT.images.length;
+        if (localStatus === cloudStatus && localImgCount === cloudImgCount) {
+          return false;
+        }
+      } else if (
+        (localT.type === "video" || localT.type === "measurement" || localT.type === "general") &&
+        (cloudT.type === "video" || cloudT.type === "measurement" || cloudT.type === "general")
       ) {
-        return false;
+        const localVal = localT.value;
+        const cloudVal = cloudT.value;
+        if (localVal === cloudVal && localStatus === cloudStatus) {
+          return false;
+        }
       }
+
       return true;
     });
 
@@ -383,29 +425,47 @@ export default function ProjectDetailsScreen() {
       return Alert.alert("Προσοχή", "Τίτλος υποχρεωτικός");
 
     let taskToSave: Task;
-    if (editingTaskId) {
-      const existingTask = combinedTasks.find((t) => t.id === editingTaskId);
-      if (!existingTask) return;
+    const baseTask = {
+      id: editingTaskId || Date.now().toString(),
+      title: newTaskTitle,
+      description: newTaskDescription,
+      status: (editingTaskId ? combinedTasks.find((t) => t.id === editingTaskId)?.status : "pending") as "pending" | "completed",
+      isLocal: true,
+    };
+
+    if (newTaskType === "photo") {
+      const existingTask = editingTaskId ? combinedTasks.find((t) => t.id === editingTaskId) : null;
       taskToSave = {
-        ...existingTask,
-        title: newTaskTitle,
-        description: newTaskDescription,
-        type: newTaskType,
-        isLocal: true,
+        ...baseTask,
+        type: "photo",
+        images: existingTask?.type === "photo" ? existingTask.images : [],
+        imageLocations: existingTask?.type === "photo" ? existingTask.imageLocations : [],
+      };
+    } else if (newTaskType === "video") {
+      const existingTask = editingTaskId ? combinedTasks.find((t) => t.id === editingTaskId) : null;
+      taskToSave = {
+        ...baseTask,
+        type: "video",
+        value: existingTask?.type === "video" ? existingTask.value : "",
+      };
+    } else if (newTaskType === "measurement") {
+      const existingTask = editingTaskId ? combinedTasks.find((t) => t.id === editingTaskId) : null;
+      const existingValue = existingTask?.type === "measurement" || existingTask?.type === "general" ? existingTask.value : "";
+      taskToSave = {
+        ...baseTask,
+        type: "measurement",
+        value: existingValue,
       };
     } else {
+      const existingTask = editingTaskId ? combinedTasks.find((t) => t.id === editingTaskId) : null;
+      const existingValue = existingTask?.type === "general" || existingTask?.type === "measurement" ? existingTask.value : "";
       taskToSave = {
-        id: Date.now().toString(),
-        title: newTaskTitle,
-        description: newTaskDescription,
-        type: newTaskType,
-        status: "pending",
-        value: null,
-        images: [],
-        imageLocations: [],
-        isLocal: true,
+        ...baseTask,
+        type: "general",
+        value: existingValue,
       };
     }
+
     setCreateModalVisible(false);
     setNewTaskTitle("");
     setNewTaskDescription("");
@@ -570,10 +630,12 @@ export default function ProjectDetailsScreen() {
     location?: GeoPoint,
   ) => {
     const t = combinedTasks.find((x) => x.id === tid);
-    if (t) {
-      const imgs = [...(t.images || []), uri];
+    if (!t) return;
+
+    if (t.type === "photo") {
+      const imgs = [...t.images, uri];
       const newLoc = location || { lat: 0, lng: 0 };
-      const locs = [...(t.imageLocations || []), newLoc];
+      const locs = [...t.imageLocations, newLoc];
 
       await saveTaskLocal({
         ...t,
@@ -581,15 +643,23 @@ export default function ProjectDetailsScreen() {
         imageLocations: locs,
         status: "completed",
       });
+    } else if (t.type === "video") {
+      await saveTaskLocal({
+        ...t,
+        value: uri,
+        status: "completed",
+      });
     }
   };
 
   const removeMediaFromTask = async (uri: string) => {
-    if (activeTaskForGallery) {
-      const idx = activeTaskForGallery.images?.findIndex((i) => i === uri);
-      if (idx !== undefined && idx !== -1) {
-        const newImages = [...(activeTaskForGallery.images || [])];
-        const newLocs = [...(activeTaskForGallery.imageLocations || [])];
+    if (!activeTaskForGallery) return;
+
+    if (activeTaskForGallery.type === "photo") {
+      const idx = activeTaskForGallery.images.findIndex((i: string) => i === uri);
+      if (idx !== -1) {
+        const newImages = [...activeTaskForGallery.images];
+        const newLocs = [...activeTaskForGallery.imageLocations];
 
         newImages.splice(idx, 1);
         if (newLocs.length > idx) newLocs.splice(idx, 1);
@@ -600,9 +670,16 @@ export default function ProjectDetailsScreen() {
           ...activeTaskForGallery,
           images: newImages,
           imageLocations: newLocs,
-          status: st as any,
+          status: st as "completed" | "pending",
         });
       }
+    } else if (activeTaskForGallery.type === "video") {
+      setSelectedMediaForView(null);
+      await saveTaskLocal({
+        ...activeTaskForGallery,
+        value: "",
+        status: "pending",
+      });
     }
   };
 
@@ -610,15 +687,18 @@ export default function ProjectDetailsScreen() {
     setInputModalVisible(false);
     if (currentTaskId && inputValue) {
       const t = combinedTasks.find((x) => x.id === currentTaskId);
-      if (t)
+      if (t && (t.type === "measurement" || t.type === "general" || t.type === "video")) {
         await saveTaskLocal({ ...t, value: inputValue, status: "completed" });
+      }
     }
   };
   const handleClearValue = async () => {
     setInputModalVisible(false);
     if (currentTaskId) {
       const t = combinedTasks.find((x) => x.id === currentTaskId);
-      if (t) await saveTaskLocal({ ...t, value: null, status: "pending" });
+      if (t && (t.type === "measurement" || t.type === "general" || t.type === "video")) {
+        await saveTaskLocal({ ...t, value: "", status: "pending" });
+      }
     }
   };
   const confirmDeleteMedia = () => {
@@ -636,23 +716,26 @@ export default function ProjectDetailsScreen() {
   // --- MAP & SHARE ---
   const openMediaLocation = () => {
     if (!selectedMediaForView || !activeTaskForGallery) return;
-    const idx = activeTaskForGallery.images?.indexOf(selectedMediaForView);
-    if (
-      idx !== undefined &&
-      idx !== -1 &&
-      activeTaskForGallery.imageLocations &&
-      activeTaskForGallery.imageLocations[idx]
-    ) {
-      const loc = activeTaskForGallery.imageLocations[idx];
-      if (loc.lat !== 0 && loc.lng !== 0) {
-        const url = `https://www.google.com/maps/search/?api=1&query=${loc.lat},${loc.lng}`;
-        Linking.openURL(url);
-      } else {
-        Alert.alert(
-          "Πληροφορία",
-          "Δεν έχει καταγραφεί τοποθεσία για αυτό το αρχείο.",
-        );
+
+    if (activeTaskForGallery.type === "photo") {
+      const idx = activeTaskForGallery.images.indexOf(selectedMediaForView);
+      if (idx !== -1 && activeTaskForGallery.imageLocations[idx]) {
+        const loc = activeTaskForGallery.imageLocations[idx];
+        if (loc.lat !== 0 && loc.lng !== 0) {
+          const url = `https://www.google.com/maps/search/?api=1&query=${loc.lat},${loc.lng}`;
+          Linking.openURL(url);
+        } else {
+          Alert.alert(
+            "Πληροφορία",
+            "Δεν έχει καταγραφεί τοποθεσία για αυτό το αρχείο.",
+          );
+        }
       }
+    } else {
+      Alert.alert(
+        "Πληροφορία",
+        "Η τοποθεσία είναι διαθέσιμη μόνο για φωτογραφίες.",
+      );
     }
   };
 
@@ -702,13 +785,12 @@ export default function ProjectDetailsScreen() {
         let valueDisplay = '<span style="color: #94a3b8;">-</span>';
 
         if (task.type === "video") {
-          const count = task.images ? task.images.length : 0;
-          valueDisplay =
-            count > 0
-              ? `<div class="media-box video"><span class="icon">🎥</span> Βίντεο Καταγράφηκε</div>`
-              : `<span style="color: #cbd5e1;">Χωρίς Βίντεο</span>`;
+          const hasVideo = task.value && task.value.length > 0;
+          valueDisplay = hasVideo
+            ? `<div class="media-box video"><span class="icon">🎥</span> Βίντεο Καταγράφηκε</div>`
+            : `<span style="color: #cbd5e1;">Χωρίς Βίντεο</span>`;
         } else if (task.type === "photo") {
-          const count = task.images ? task.images.length : 0;
+          const count = task.images.length;
           valueDisplay =
             count > 0
               ? `<div class="media-box photo"><span class="icon">📷</span> ${count} Φωτογραφίες</div>`
@@ -1339,7 +1421,14 @@ export default function ProjectDetailsScreen() {
           </View>
           <View style={{ flex: 1, padding: 1 }}>
             <FlatList
-              data={[...(activeTaskForGallery?.images || []), "ADD"]}
+              data={[
+                ...(activeTaskForGallery?.type === "photo" || activeTaskForGallery?.type === "video"
+                  ? activeTaskForGallery.type === "photo"
+                    ? activeTaskForGallery.images
+                    : activeTaskForGallery.value ? [activeTaskForGallery.value] : []
+                  : []),
+                "ADD"
+              ]}
               numColumns={3}
               renderItem={({ item }) =>
                 item === "ADD" ? (

@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Expo & Web Builds
+.expo/
+dist/
+web-build/
+
+# Android/iOS builds
+android/
+ios/
+
+# Assets (εικόνες, γραμματοσειρές - δεν χρειάζεται να τις διαβάζει ως κώδικα)
+assets/
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.ttf
+*.otf
+
+# Git & Cache
+.git/
+.cache/
+
+# Firebase & Logs
+.firebase/
+*.log
+firebase-debug.log
+
+# Environment variables (για ασφάλεια)
+.env
+.env.local

@@ -120,28 +120,74 @@ projects/{projectId}
 ├── members: string[]
 ├── createdBy: string
 ├── createdAt: timestamp
-└── tasks: [
-    {
-      id: string,
-      title: string,
-      description?: string,                    // NEW: Task description
-      type: "photo" | "measurement" | "general" | "video",  // NEW: Video type
-      status: "pending" | "completed",
-      value: string | null,
-      images?: string[] (base64),
-      imageLocations?: GeoPoint[],             // NEW: GPS coordinates
-      isLocal?: boolean                        // Flag for offline tasks
-    }
-  ]
+└── tasks: Task[]  // Discriminated Union (see Task Types below)
 ```
 
-**GeoPoint Type:**
+**Task Types (Discriminated Union):**
+
+Το Task schema χρησιμοποιεί **Discriminated Union Types** για type-safe data structure χωρίς unused fields:
+
 ```typescript
+// Common GeoPoint Type
 type GeoPoint = {
-  lat: number,
-  lng: number
+  lat: number;
+  lng: number;
 }
+
+// Photo Task - Contains images array με GPS locations
+type PhotoTask = {
+  id: string;
+  title: string;
+  description?: string;
+  type: "photo";                    // Discriminator
+  status: "pending" | "completed";
+  images: string[];                 // Base64 encoded images
+  imageLocations: GeoPoint[];       // GPS for each image
+  isLocal?: boolean;
+}
+
+// Video Task - Contains single video URI
+type VideoTask = {
+  id: string;
+  title: string;
+  description?: string;
+  type: "video";                    // Discriminator
+  status: "pending" | "completed";
+  value: string;                    // Base64 video URI
+  isLocal?: boolean;
+}
+
+// Measurement Task - Contains numeric/text value
+type MeasurementTask = {
+  id: string;
+  title: string;
+  description?: string;
+  type: "measurement";              // Discriminator
+  status: "pending" | "completed";
+  value: string;                    // Measurement value
+  isLocal?: boolean;
+}
+
+// General Task - Contains text notes
+type GeneralTask = {
+  id: string;
+  title: string;
+  description?: string;
+  type: "general";                  // Discriminator
+  status: "pending" | "completed";
+  value: string;                    // Text content
+  isLocal?: boolean;
+}
+
+// Union Type
+type Task = PhotoTask | VideoTask | MeasurementTask | GeneralTask;
 ```
+
+**Πλεονεκτήματα Discriminated Unions:**
+- ✅ Type-safe: TypeScript εξασφαλίζει σωστή πρόσβαση σε properties
+- ✅ No unused fields: Κάθε task type έχει μόνο τα fields που χρειάζεται
+- ✅ Clear semantics: Ο τύπος του task καθορίζει τα available properties
+- ✅ Better IntelliSense: Auto-complete δείχνει μόνο valid properties
 
 ### 3.4 Collection: `invites`
 ```javascript
