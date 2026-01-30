@@ -82,24 +82,32 @@ export default function InviteMembersScreen() {
         status: "active",
       });
 
-      // TODO: Replace with your GitHub Pages URL or custom domain
-      // Format: https://[username].github.io/[repo-name]/join?code=ABC123
-      // Or: https://yourdomain.com/join?code=ABC123
-      const webInviteLink = `https://YOUR_GITHUB_USERNAME.github.io/my-team-app/join?code=${shortCode}`;
+      const isExpoGo = Constants.appOwnership === "expo";
+      const scheme = isExpoGo ? "exp" : "ergonwork";
 
-      console.log("Created Invite Link:", webInviteLink);
+      const deepLink = Linking.createURL("join", {
+        scheme: scheme,
+        queryParams: { inviteCode: shortCode },
+      });
+
+      console.log("Created Link:", deepLink);
+
+      const downloadLink = "https://expo.dev/artifacts/eas/....apk";
 
       const message = `👋 Πρόσκληση για την ομάδα "${teamName}"
 
-🔗 Πάτα εδώ για είσοδο:
-${webInviteLink}
+1️⃣ Κατέβασε το App (αν δεν το έχεις):
+${downloadLink}
+
+2️⃣ Πάτα για είσοδο:
+${deepLink}
 
 🔑 Κωδικός: ${shortCode}
 (Λήγει σε 2 λεπτά)`;
 
       await Share.share({
         message: message,
-        title: `Ergon Work: ${teamName}`,
+        title: `TeamCamera: ${teamName}`,
       });
     } catch (error: any) {
       Alert.alert("Σφάλμα", error.message);
