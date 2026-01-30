@@ -34,6 +34,14 @@
 | Firestore | NoSQL Database |
 | AsyncStorage | Local caching & offline queue |
 | Expo Router | File-based navigation |
+| React Native SVG | Drawing & annotations |
+| React Native View Shot | Canvas capture |
+| Expo Location | GPS coordinates |
+| Expo AV | Video playback |
+| Expo FileSystem | File operations & base64 |
+| NetInfo | Network status monitoring |
+| Expo Print | PDF generation |
+| Expo Sharing | Native share functionality |
 
 ### 2.2 Αρχιτεκτονική
 ```
@@ -116,13 +124,23 @@ projects/{projectId}
     {
       id: string,
       title: string,
-      description: string,
-      type: "photo" | "measurement" | "general",
+      description?: string,                    // NEW: Task description
+      type: "photo" | "measurement" | "general" | "video",  // NEW: Video type
       status: "pending" | "completed",
       value: string | null,
-      images: string[] (base64)
+      images?: string[] (base64),
+      imageLocations?: GeoPoint[],             // NEW: GPS coordinates
+      isLocal?: boolean                        // Flag for offline tasks
     }
   ]
+```
+
+**GeoPoint Type:**
+```typescript
+type GeoPoint = {
+  lat: number,
+  lng: number
+}
 ```
 
 ### 3.4 Collection: `invites`
@@ -205,24 +223,74 @@ invites/{inviteId}
 - Auto-complete όταν όλα τα tasks ολοκληρωθούν
 
 ### 5.5 Task Management
-- Τρεις τύποι tasks:
-  - **Photo**: Λήψη και αποθήκευση φωτογραφιών
+- Τέσσερις τύποι tasks:
+  - **Photo**: Λήψη και αποθήκευση φωτογραφιών με GPS coordinates
+  - **Video**: Βίντεο έως 4 δευτερόλεπτα (max 900KB)
   - **Measurement**: Καταγραφή μετρήσεων
   - **General**: Κείμενο/σημειώσεις
+- Task descriptions (προαιρετικό πεδίο κειμένου)
 - Progress tracking (pending → completed)
-- Long press για διαγραφή
+- Task editing (τίτλος, περιγραφή, τύπος)
+- Long press για επεξεργασία/διαγραφή
+- Αυτόματη ολοκλήρωση όταν προστεθεί media (photo/video)
 
 ### 5.6 Offline Support
 - Cache με AsyncStorage
 - Offline queue για pending uploads
 - Auto-sync σε WiFi connection
-- Visual indicator για local tasks
+- Manual sync με cellular data confirmation
+- Visual indicator για local tasks ("Τοπικό" badge)
+- Sync button με cloud icon όταν υπάρχουν pending tasks
+- Real-time network monitoring με NetInfo
 
 ### 5.7 PDF Reports
-- Αυτόματη δημιουργία αναφοράς
-- Πίνακας tasks με status
-- Ενσωματωμένες φωτογραφίες
-- Share functionality
+- Αυτόματη δημιουργία αναφοράς με προηγμένο styling
+- Summary cards (total tasks, completed, status)
+- Πίνακας tasks με:
+  - Task type icons (📷 📹 📏 📝)
+  - Descriptions
+  - Color-coded status badges
+  - Media count indicators
+- Gallery section με φωτογραφίες και βίντεο
+- Project metadata (ID, timestamp)
+- Professional layout με Inter font
+- Share functionality (PDF export)
+
+### 5.8 Advanced Image Editor
+- Drawing/annotation tools με pen
+- Pan & zoom capabilities (1x έως 3x)
+- Color selection (6 χρώματα: κόκκινο, κίτρινο, πράσινο, μπλε, άσπρο, μαύρο)
+- Stroke width options (3px, 6px, 10px)
+- Undo functionality
+- Reset/clear all drawings
+- Native crop on capture
+- Smooth gesture handling με PanResponder
+- ViewShot integration για image capture
+- Real-time SVG path rendering
+
+### 5.9 Location Services
+- GPS coordinates attached to images
+- Location tracking με expo-location (Accuracy.Balanced)
+- Location display in media viewer
+- Google Maps integration με deep linking
+- Fallback handling για offline GPS
+- Location validation (check for 0,0 defaults)
+
+### 5.10 Media Management
+- Photo & Video gallery viewer
+- Media sharing (native share sheet)
+- Media deletion με confirmation
+- Video playback με native controls
+- Image compression (800px width, 40% quality)
+- Base64 encoding για offline storage
+- File system caching για sharing
+- Index-based media organization με location sync
+
+### 5.11 Auto-Complete Projects
+- Automatic status update σε "completed" όταν όλα τα tasks ολοκληρωθούν
+- Reverse update σε "active" αν κάποιο task γίνει pending
+- Real-time status tracking με useEffect
+- Firestore sync για project status changes
 
 ---
 
@@ -252,23 +320,32 @@ invites/{inviteId}
 - [x] Team creation & management
 - [x] Invite system
 - [x] Project & task management
-- [x] Photo tasks
-- [x] Offline support
-- [x] PDF reports
+- [x] Photo tasks με GPS coordinates
+- [x] Video tasks (4-second max)
+- [x] Advanced image editor με drawing/annotations
+- [x] Offline support με cellular confirmation
+- [x] PDF reports με advanced layout
+- [x] Task descriptions
+- [x] Task editing & deletion
+- [x] Media sharing
+- [x] Location tracking
+- [x] Auto-complete projects
+- [x] Web support
 
 ### Phase 2 - Enhanced Features
 - [ ] Push notifications
-- [ ] Task comments
-- [ ] Task deadlines
-- [ ] File attachments (beyond photos)
+- [ ] Task comments & mentions
+- [ ] Task deadlines & reminders
+- [ ] File attachments (PDFs, docs)
 - [ ] Calendar view
+- [ ] Extended video duration (>4s)
+- [ ] Cloud storage integration
 
 ### Phase 3 - Advanced
 - [ ] Analytics dashboard
 - [ ] Time tracking
-- [ ] Geolocation tracking
 - [ ] Voice notes
-- [ ] Video capture
+- [ ] Multi-language support
 
 ### Phase 4 - Enterprise
 - [ ] LDAP/SSO integration
@@ -317,13 +394,30 @@ invites/{inviteId}
 ### 10.2 Firebase Usage
 - **Auth**: 10K verifications/month (free tier)
 - **Firestore**: 50K reads, 20K writes/day (free tier)
-- **Storage**: 5GB (free tier)
+- **Storage**: Base64 encoding used (no Firebase Storage needed currently)
 
-### 10.3 Performance Targets
+### 10.3 Android Permissions
+- `CAMERA` - Photo/video capture
+- `RECORD_AUDIO` - Video recording
+- `READ_EXTERNAL_STORAGE` - Media access
+- `WRITE_EXTERNAL_STORAGE` - Media saving
+- `READ_MEDIA_VISUAL_USER_SELECTED` - Scoped storage
+- `ACCESS_MEDIA_LOCATION` - GPS exif data
+- `READ_MEDIA_IMAGES` - Image gallery
+- `READ_MEDIA_VIDEO` - Video gallery
+- `READ_MEDIA_AUDIO` - Audio metadata
+- `ACCESS_FINE_LOCATION` - GPS coordinates
+- `ACCESS_COARSE_LOCATION` - Approximate location
+
+### 10.4 Performance Targets
 - App launch: <2 seconds
-- Screen transition: <300ms
+- Screen transition: <300ms (με 500ms navigation lock)
 - Offline task save: <100ms
 - Sync operation: <5 seconds per project
+- Image compression: <1 second per image
+- Video encoding: <2 seconds per video
+- PDF generation: <3 seconds για 20 tasks
+- Drawing/annotation: Real-time με Animated Values
 
 ---
 

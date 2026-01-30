@@ -8,9 +8,14 @@
 5. [Project Management Flow](#5-project-management-flow)
 6. [Task Management Flow](#6-task-management-flow)
 7. [Photo Task Flow](#7-photo-task-flow)
-8. [Offline Sync Flow](#8-offline-sync-flow)
-9. [PDF Generation Flow](#9-pdf-generation-flow)
-10. [User Role Management Flow](#10-user-role-management-flow)
+8. [Video Task Flow](#8-video-task-flow)
+9. [Image Editor Flow](#9-image-editor-flow)
+10. [Task Edit & Delete Flow](#10-task-edit--delete-flow)
+11. [Media Sharing Flow](#11-media-sharing-flow)
+12. [Offline Sync Flow](#12-offline-sync-flow)
+13. [Auto-Complete Project Flow](#13-auto-complete-project-flow)
+14. [PDF Generation Flow](#14-pdf-generation-flow)
+15. [User Role Management Flow](#15-user-role-management-flow)
 
 ---
 
@@ -487,7 +492,7 @@ ergonwork://join?inviteCode=ABC123
 ΒΗΜΑ 2: Input
 ├── Title (required)
 ├── Description (optional)
-└── Type selection: "photo" | "measurement" | "general"
+└── Type selection: "photo" | "video" | "measurement" | "general"
 
 ΒΗΜΑ 3: Create Task Object
 └── newItem = {
@@ -498,6 +503,7 @@ ergonwork://join?inviteCode=ABC123
     ├── status: "pending"
     ├── value: null
     ├── images: []
+    ├── imageLocations: []                 // NEW: GPS array
     └── isLocal: true
   }
 
@@ -553,14 +559,23 @@ ergonwork://join?inviteCode=ABC123
 ΒΗΜΑ 1: Request Permission
 └── ImagePicker.launchCameraAsync({
     ├── quality: 0.5
-    └── base64: true
+    ├── base64: true
+    └── allowsEditing: true        // NEW: Native crop
   })
 
 ΒΗΜΑ 2: Check Result
 ├── ΑΝ canceled → return
 └── ΑΛΛΙΩΣ uri = result.assets[0].uri
 
-ΒΗΜΑ 3: Compress Image
+ΒΗΜΑ 3: Get GPS Location
+├── requestForegroundPermissionsAsync()
+├── getCurrentPositionAsync({
+│     accuracy: Accuracy.Balanced
+│   })
+├── location = { lat: coords.latitude, lng: coords.longitude }
+└── ΑΝ error → location = { lat: 0, lng: 0 }
+
+ΒΗΜΑ 4: Compress Image
 └── ImageManipulator.manipulateAsync(uri,
     [{ resize: { width: 800 } }],
     {
@@ -570,13 +585,14 @@ ergonwork://join?inviteCode=ABC123
     }
   )
 
-ΒΗΜΑ 4: Convert to Base64 URI
+ΒΗΜΑ 5: Convert to Base64 URI
 └── base64Img = `data:image/jpeg;base64,${m.base64}`
 
-ΒΗΜΑ 5: Add to Task
+ΒΗΜΑ 6: Add to Task με Location
 └── saveTaskLocal({
     ...task,
     ├── images: [...task.images, base64Img]
+    ├── imageLocations: [...(task.imageLocations || []), location]  // NEW
     └── status: "completed"
   })
 ```
@@ -622,11 +638,285 @@ ergonwork://join?inviteCode=ABC123
 
 ---
 
-## 8. OFFLINE SYNC FLOW
+## 8. VIDEO TASK FLOW
+
+### Αρχείο: `app/project/[id].tsx`
+
+### 8.1 Launch Video Capture Flow
+```
+ΒΗΜΑ 1: Request Permission
+└── ImagePicker.launchCameraAsync({
+    ├── mediaTypes: ImagePicker.MediaTypeOptions.Videos
+    ├── quality: 0.5
+    ├── videoMaxDuration: 4         // 4 seconds max
+    └── base64: true
+  })
+
+ΒΗΜΑ 2: Check Result
+├── ΑΝ canceled → return
+└── ΑΛΛΙΩΣ uri = result.assets[0].uri
+
+ΒΗΜΑ 3: Validate Video Size
+├── fileInfo = await FileSystem.getInfoAsync(uri)
+├── sizeInKB = fileInfo.size / 1024
+├── ΑΝ sizeInKB > 900:
+│   └── Alert "Βίντεο πολύ μεγάλο (max ~1MB)"
+└── ΑΛΛΙΩΣ συνέχεια
+
+ΒΗΜΑ 4: Convert to Base64
+├── base64Data = await FileSystem.readAsStringAsync(uri, {
+│     encoding: FileSystem.EncodingType.Base64
+│   })
+└── base64Video = `data:video/mp4;base64,${base64Data}`
+
+ΒΗΜΑ 5: Add to Task
+└── saveTaskLocal({
+    ...task,
+    ├── value: base64Video
+    └── status: "completed"
+  })
+```
+
+### 8.2 Video Playback Flow
+```
+ΒΗΜΑ 1: Gallery Open
+└── User πατάει task με video
+
+ΒΗΜΑ 2: Display Video Player
+└── <Video
+    ├── source={{ uri: task.value }}
+    ├── useNativeControls
+    ├── resizeMode: "contain"
+    ├── style={{ width, height }}
+    └── shouldPlay={false}
+  />
+
+ΒΗΜΑ 3: Controls
+├── Play/Pause
+├── Seek bar
+└── Fullscreen
+```
+
+---
+
+## 9. IMAGE EDITOR FLOW
+
+### Αρχείο: `app/components/ImageEditorModal.tsx`
+
+### 9.1 Open Image Editor Flow
+```
+ΒΗΜΑ 1: Launch from Task
+├── User επιλέγει εικόνα από gallery
+├── setImageToEdit(imageUri)
+└── setEditorVisible(true)
+
+ΒΗΜΑ 2: Initialize State
+├── scale = useRef(new Animated.Value(1))
+├── translateX = useRef(new Animated.Value(0))
+├── translateY = useRef(new Animated.Value(0))
+├── paths = []
+├── currentColor = "#ef4444" (κόκκινο)
+└── strokeWidth = 3
+```
+
+### 9.2 Drawing Flow
+```
+ΒΗΜΑ 1: Select Pen Tool
+└── setMode("draw")
+
+ΒΗΜΑ 2: Choose Color & Stroke
+├── User επιλέγει χρώμα (red, yellow, green, blue, white, black)
+└── User επιλέγει πάχος (3px, 6px, 10px)
+
+ΒΗΜΑ 3: Draw on Canvas
+├── PanResponder tracks touch gestures
+├── On Move:
+│   ├── path += `L${x},${y} `
+│   └── Update SVG path
+└── On Release:
+    ├── Complete path
+    └── Add to paths array
+
+ΒΗΜΑ 4: Undo
+├── User πατάει Undo
+└── paths.pop() → Remove last stroke
+```
+
+### 9.3 Pan/Zoom Flow
+```
+ΒΗΜΑ 1: Select Move Tool
+└── setMode("move")
+
+ΒΗΜΑ 2: Pan Gesture
+├── PanResponder tracks drag
+├── dx = gestureState.dx / PAN_DAMPING (1.5)
+├── dy = gestureState.dy / PAN_DAMPING
+├── translateX.setValue(dx)
+└── translateY.setValue(dy)
+
+ΒΗΜΑ 3: Zoom Controls
+├── Zoom In:
+│   ├── newScale = Math.min(scale + 0.5, 3)
+│   └── Animated.timing(scale, { toValue: newScale })
+└── Zoom Out:
+    ├── newScale = Math.max(scale - 0.5, 1)
+    └── Animated.timing(scale, { toValue: newScale })
+```
+
+### 9.4 Save Edited Image Flow
+```
+ΒΗΜΑ 1: User πατάει "Αποθήκευση"
+└── setCapturing(true)
+
+ΒΗΜΑ 2: Capture Canvas
+├── captureRef.current.capture()
+└── Returns new URI
+
+ΒΗΜΑ 3: Convert to Base64
+├── base64 = await FileSystem.readAsStringAsync(uri, {
+│     encoding: Base64
+│   })
+└── base64Img = `data:image/jpeg;base64,${base64}`
+
+ΒΗΜΑ 4: Replace Original
+├── onSave(base64Img)
+├── Close modal
+└── Update task με new image
+```
+
+---
+
+## 10. TASK EDIT & DELETE FLOW
+
+### Αρχείο: `app/project/[id].tsx`
+
+### 10.1 Edit Task Flow
+```
+ΒΗΜΑ 1: Long Press Task
+├── ΑΝ Platform.OS !== "web":
+│   └── Show action sheet (Edit / Delete)
+└── ΑΛΛΙΩΣ show buttons
+
+ΒΗΜΑ 2: Select Edit
+├── setEditingTaskId(task.id)
+├── setNewTaskTitle(task.title)
+├── setNewTaskDescription(task.description || "")
+├── setNewTaskType(task.type)
+└── setCreateModalVisible(true)
+
+ΒΗΜΑ 3: Modify Fields
+├── User αλλάζει title
+├── User αλλάζει description
+└── User αλλάζει type (photo/video/measurement/general)
+
+ΒΗΜΑ 4: Save Changes
+└── saveTaskLocal({
+    ...task,
+    ├── title: newTaskTitle
+    ├── description: newTaskDescription
+    └── type: newTaskType
+  })
+
+ΒΗΜΑ 5: Close Modal
+└── setCreateModalVisible(false)
+```
+
+### 10.2 Delete Task Flow
+```
+ΒΗΜΑ 1: Long Press Task
+└── User επιλέγει "Διαγραφή"
+
+ΒΗΜΑ 2: Confirmation
+└── Alert "Οριστική διαγραφή του task;"
+
+ΒΗΜΑ 3: Remove from Local
+├── newLocal = localTasks.filter(t => t.id !== task.id)
+└── AsyncStorage.setItem(QUEUE_KEY, newLocal)
+
+ΒΗΜΑ 4: Remove from Cloud
+├── cloudList = cloudTasks.filter(t => t.id !== task.id)
+└── updateDoc(projectRef, { tasks: cloudList })
+
+ΒΗΜΑ 5: UI Update
+└── Task εξαφανίζεται από λίστα
+```
+
+---
+
+## 11. MEDIA SHARING FLOW
+
+### Αρχείο: `app/project/[id].tsx`
+
+### 11.1 Share Image Flow
+```
+ΒΗΜΑ 1: Open Image Viewer
+└── User πατάει εικόνα από gallery
+
+ΒΗΜΑ 2: Press Share Button
+└── handleShareImage()
+
+ΒΗΜΑ 3: Convert Base64 to File
+├── ΑΝ imgUri.startsWith("data:image"):
+│   ├── base64 = imgUri.split(",")[1]
+│   ├── fileUri = FileSystem.cacheDirectory + "share.jpg"
+│   └── FileSystem.writeAsStringAsync(fileUri, base64, {
+│       encoding: Base64
+│     })
+└── ΑΛΛΙΩΣ fileUri = imgUri
+
+ΒΗΜΑ 4: Native Share
+└── Sharing.shareAsync(fileUri, {
+    ├── UTI: ".jpg"
+    └── mimeType: "image/jpeg"
+  })
+```
+
+### 11.2 Share Video Flow
+```
+ΒΗΜΑ 1: Open Video Viewer
+└── User βλέπει video σε gallery
+
+ΒΗΜΑ 2: Convert Base64 to File
+├── base64 = videoUri.split(",")[1]
+├── fileUri = FileSystem.cacheDirectory + "share.mp4"
+└── FileSystem.writeAsStringAsync(fileUri, base64, { Base64 })
+
+ΒΗΜΑ 3: Native Share
+└── Sharing.shareAsync(fileUri, {
+    ├── UTI: ".mp4"
+    └── mimeType: "video/mp4"
+  })
+```
+
+### 11.3 Delete Media Flow
+```
+ΒΗΜΑ 1: User πατάει Delete
+└── Alert "Διαγραφή φωτογραφίας;"
+
+ΒΗΜΑ 2: Remove from Arrays
+├── images = task.images.filter((_, i) => i !== index)
+├── locations = task.imageLocations?.filter((_, i) => i !== index)
+└── newStatus = images.length > 0 ? "completed" : "pending"
+
+ΒΗΜΑ 3: Update Task
+└── saveTaskLocal({
+    ...task,
+    ├── images
+    ├── imageLocations: locations
+    └── status: newStatus
+  })
+
+ΒΗΜΑ 4: Close Viewer
+└── setSelectedImageForView(null)
+```
+
+---
+
+## 12. OFFLINE SYNC FLOW
 
 ### Αρχείο: `app/context/SyncContext.tsx`
 
-### 8.1 Network Listener Flow
+### 12.1 Network Listener Flow
 ```
 ΒΗΜΑ 1: Setup Listener
 └── NetInfo.addEventListener(state => {...})
@@ -640,7 +930,30 @@ ergonwork://join?inviteCode=ABC123
 └── unsubscribe on unmount
 ```
 
-### 8.2 Global Sync Process
+### 12.2 Manual Sync με Cellular Confirmation Flow
+```
+ΒΗΜΑ 1: User πατάει Sync Button
+└── syncNow() called
+
+ΒΗΜΑ 2: Network Check
+├── netState = await NetInfo.fetch()
+├── ΑΝ !netState.isConnected:
+│   └── Alert "Δεν υπάρχει σύνδεση"
+└── ΑΛΛΙΩΣ συνέχεια
+
+ΒΗΜΑ 3: Cellular Data Confirmation
+├── ΑΝ netState.type === "cellular":
+│   ├── Alert "Είστε συνδεδεμένοι με δεδομένα κινητής.
+│   │        Θέλετε να προχωρήσετε σε συγχρονισμό;"
+│   ├── Buttons: ["Άκυρο", "Συγχρονισμός"]
+│   └── ΑΝ user πατάει Άκυρο → return
+└── ΑΛΛΙΩΣ (WiFi) → Συνέχεια
+
+ΒΗΜΑ 4: Perform Sync
+└── performGlobalSync()
+```
+
+### 12.3 Global Sync Process
 ```
 ΒΗΜΑ 1: Lock Check
 ├── ΑΝ isSyncingRef.current → return
@@ -696,7 +1009,7 @@ FOR each queueKey:
 └── setSyncState(false)
 ```
 
-### 8.3 Local Task Cleanup Flow
+### 12.4 Local Task Cleanup Flow
 ```
 ΒΗΜΑ 1: Watch cloudTasks & localTasks
 └── useEffect(() => {...}, [cloudTasks, localTasks])
@@ -723,7 +1036,80 @@ FOR each queueKey:
 
 ---
 
-## 9. PDF GENERATION FLOW
+## 13. AUTO-COMPLETE PROJECT FLOW
+
+### Αρχείο: `app/project/[id].tsx`
+
+### 13.1 Automatic Status Update Flow
+```
+ΒΗΜΑ 1: Watch Combined Tasks
+└── useEffect(() => {...}, [combinedTasks])
+
+ΒΗΜΑ 2: Check All Tasks Status
+├── allDone = combinedTasks.every(t => t.status === "completed")
+├── ΑΝ allDone && combinedTasks.length > 0:
+│   └── newStatus = "completed"
+└── ΑΛΛΙΩΣ newStatus = "active"
+
+ΒΗΜΑ 3: Compare with Current Status
+├── ΑΝ newStatus !== projectStatus:
+│   └── Συνέχεια
+└── ΑΛΛΙΩΣ no action (skip update)
+
+ΒΗΜΑ 4: Optimistic UI Update
+└── setProjectStatus(newStatus)
+
+ΒΗΜΑ 5: Firestore Update
+└── updateDoc(doc(db, "projects", projectId), {
+    status: newStatus
+  })
+
+ΒΗΜΑ 6: Cache Update
+└── AsyncStorage.setItem(CACHE_KEY, {
+    ...cachedData,
+    status: newStatus
+  })
+```
+
+### 13.2 Status Change Scenarios
+```
+SCENARIO A: All Tasks Completed
+───────────────────────────────────
+ΠΡΙΝ: projectStatus = "active"
+      tasks = [
+        { status: "pending" },
+        { status: "completed" }
+      ]
+
+USER ACTION: Ολοκληρώνει το pending task
+
+ΜΕΤΑ: projectStatus = "completed" (auto-update)
+      tasks = [
+        { status: "completed" },
+        { status: "completed" }
+      ]
+
+
+SCENARIO B: Task Becomes Pending Again
+───────────────────────────────────────
+ΠΡΙΝ: projectStatus = "completed"
+      tasks = [
+        { status: "completed" },
+        { status: "completed" }
+      ]
+
+USER ACTION: Διαγράφει φωτογραφία από task
+
+ΜΕΤΑ: projectStatus = "active" (auto-revert)
+      tasks = [
+        { status: "pending" },
+        { status: "completed" }
+      ]
+```
+
+---
+
+## 14. PDF GENERATION FLOW
 
 ### Αρχείο: `app/project/[id].tsx` → `generatePDF()`
 
@@ -731,62 +1117,221 @@ FOR each queueKey:
 ΒΗΜΑ 1: Set Processing State
 └── setProcessing(true)
 
-ΒΗΜΑ 2: Build Tasks Table HTML
+ΒΗΜΑ 2: Calculate Summary Stats
+├── totalTasks = combinedTasks.length
+├── completedCount = combinedTasks.filter(t => t.status === "completed").length
+├── progressPercent = (completedCount / totalTasks) * 100
+└── projectIcon = projectStatus === "completed" ? "✅" : "📋"
+
+ΒΗΜΑ 3: Build Summary Cards HTML
+└── summaryHTML = `
+    <div class="summary-grid">
+      <div class="summary-card">
+        <div class="card-number">{totalTasks}</div>
+        <div>Συνολικές Αναθέσεις</div>
+      </div>
+      <div class="summary-card">
+        <div class="card-number">{completedCount}</div>
+        <div>Ολοκληρωμένες</div>
+      </div>
+      <div class="summary-card status-{projectStatus}">
+        {projectIcon} {statusText}
+      </div>
+    </div>`
+
+ΒΗΜΑ 4: Build Tasks Table HTML με Icons
 └── FOR each task in combinedTasks:
-    ├── statusColor = completed ? "#dcfce7" : "#f1f5f9"
-    ├── statusText = completed ? "Ολοκληρώθηκε" : "Εκκρεμεί"
-    ├── valueDisplay = task.value || "-"
-    └── rowsHTML += `<tr>...</tr>`
+    ├── taskIcon = {
+    │   photo: "📷",
+    │   video: "🎥",
+    │   measurement: "📏",
+    │   general: "📝"
+    │ }[task.type]
+    ├── statusBadge = completed
+    │   ? `<span class="badge-completed">Ολοκληρώθηκε</span>`
+    │   : `<span class="badge-pending">Εκκρεμεί</span>`
+    ├── mediaInfo = task.images?.length
+    │   ? `📷 ${task.images.length} Φωτογραφίες`
+    │   : (task.value?.includes("video") ? "🎥 Βίντεο" : "-")
+    ├── description = task.description || "-"
+    └── rowsHTML += `
+        <tr>
+          <td>{taskIcon} {task.title}</td>
+          <td class="desc">{description}</td>
+          <td>{statusBadge}</td>
+          <td>{mediaInfo}</td>
+        </tr>`
 
-ΒΗΜΑ 3: Build Photos Section HTML
-└── FOR each task with images:
-    └── photosHTML += `
-        <div>
-          <h3>{task.title}</h3>
-          <div style="flex">
-            {images.map(img => <img src={img} />)}
-          </div>
-        </div>`
+ΒΗΜΑ 5: Build Gallery Section HTML
+└── FOR each task with images OR video:
+    ├── ΑΝ task.images?.length > 0:
+    │   └── mediaHTML += `
+    │       <div class="media-box">
+    │         <h3>📷 {task.title}</h3>
+    │         <div class="photo-grid">
+    │           {images.map(img =>
+    │             `<img src="${img}" />`
+    │           )}
+    │         </div>
+    │       </div>`
+    └── ΑΝ task.value?.includes("video"):
+        └── mediaHTML += `
+            <div class="media-box">
+              <h3>🎥 {task.title}</h3>
+              <div class="video-icon">▶️ Βίντεο Καταγράφηκε</div>
+            </div>`
 
-ΒΗΜΑ 4: Compose Full HTML
+ΒΗΜΑ 6: Compose Full HTML με Professional Styling
 └── htmlContent = `
     <!DOCTYPE html>
     <html>
       <head>
-        <style>...</style>
+        <meta charset="utf-8" />
+        <style>
+          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
+          body {
+            font-family: 'Inter', sans-serif;
+            padding: 40px;
+            background: #f8f9fa;
+          }
+
+          .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+          }
+
+          .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin-bottom: 30px;
+          }
+
+          .summary-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+          }
+
+          .card-number {
+            font-size: 32px;
+            font-weight: 700;
+            color: #667eea;
+          }
+
+          .badge-completed {
+            background: #dcfce7;
+            color: #166534;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+          }
+
+          .badge-pending {
+            background: #f1f5f9;
+            color: #475569;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+          }
+
+          table {
+            width: 100%;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 30px;
+          }
+
+          .media-box {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+          }
+
+          .photo-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+          }
+
+          .photo-grid img {
+            width: 100%;
+            border-radius: 4px;
+          }
+
+          .footer {
+            margin-top: 40px;
+            text-align: center;
+            color: #64748b;
+            font-size: 12px;
+          }
+        </style>
       </head>
       <body>
-        <h1>Αναφορά Έργου: {projectName}</h1>
-        <p>Ημερομηνία: {date}</p>
+        <div class="header">
+          <h1>{projectIcon} {projectName}</h1>
+          <p>Ημερομηνία: {date}</p>
+          <p>Project ID: {projectId.slice(0,6)}</p>
+        </div>
+
+        {summaryHTML}
+
         <table>
-          <thead>...</thead>
-          <tbody>{rowsHTML}</tbody>
+          <thead>
+            <tr>
+              <th>Ανάθεση</th>
+              <th>Περιγραφή</th>
+              <th>Κατάσταση</th>
+              <th>Media</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rowsHTML}
+          </tbody>
         </table>
-        <div>{photosHTML}</div>
-        <div class="footer">Ergon Work Management App</div>
+
+        {mediaHTML}
+
+        <div class="footer">
+          Ergon Work Management App<br/>
+          Generated at {timestamp}
+        </div>
       </body>
     </html>`
 
-ΒΗΜΑ 5: Generate PDF
-└── { uri } = await Print.printToFileAsync({ html: htmlContent })
+ΒΗΜΑ 7: Generate PDF
+└── { uri } = await Print.printToFileAsync({
+    html: htmlContent,
+    base64: false
+  })
 
-ΒΗΜΑ 6: Share
+ΒΗΜΑ 8: Share
 └── await Sharing.shareAsync(uri, {
     ├── UTI: ".pdf"
     └── mimeType: "application/pdf"
   })
 
-ΒΗΜΑ 7: Cleanup
+ΒΗΜΑ 9: Cleanup
 └── setProcessing(false)
 ```
 
 ---
 
-## 10. USER ROLE MANAGEMENT FLOW
+## 15. USER ROLE MANAGEMENT FLOW
 
 ### Αρχείο: `app/team/[id].tsx` → `changeUserRole()`
 
-### 10.1 Promote Flow
+### 15.1 Promote Flow
 ```
 ΒΗΜΑ 1: Permission Check
 ├── ΑΝ myRole === "Supervisor" && targetUser.role !== "User":
@@ -809,7 +1354,7 @@ FOR each queueKey:
   })
 ```
 
-### 10.2 Demote Flow
+### 15.2 Demote Flow
 ```
 ΒΗΜΑ 1: Permission Check
 └── (Same as Promote)
@@ -821,7 +1366,7 @@ FOR each queueKey:
 ΒΗΜΑ 3-4: (Same as Promote)
 ```
 
-### 10.3 Kick Flow
+### 15.3 Kick Flow
 ```
 ΒΗΜΑ 1: Permission Check
 ├── ΑΝ myRole === "Supervisor" && targetUser.role !== "User":
