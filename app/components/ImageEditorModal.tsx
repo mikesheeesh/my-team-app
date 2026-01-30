@@ -2,17 +2,17 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    Animated,
-    Dimensions,
-    Modal,
-    PanResponder,
-    SafeAreaView,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Animated,
+  Dimensions,
+  Modal,
+  PanResponder,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import ViewShot from "react-native-view-shot";
@@ -392,7 +392,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 15,
-    paddingVertical: 10,
+    paddingTop: 50,
+    paddingBottom: 15,
     backgroundColor: "#111",
     borderBottomWidth: 1,
     borderBottomColor: "#222",
@@ -400,14 +401,14 @@ const styles = StyleSheet.create({
   },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 15 },
   iconBtn: { padding: 5 },
-  textBtn: { padding: 5 },
+  textBtn: { padding: 5, marginRight: 25 },
 
   footer: {
     backgroundColor: "#111",
     borderTopWidth: 1,
     borderTopColor: "#222",
     paddingVertical: 10,
-    paddingBottom: 20,
+    paddingBottom: 50,
   },
   toolsRow: {
     flexDirection: "row",
@@ -464,7 +465,7 @@ const styles = StyleSheet.create({
 
   overlayGuide: {
     position: "absolute",
-    top: 10,
+    top: 110,
     alignSelf: "center",
     backgroundColor: "rgba(0,0,0,0.6)",
     paddingHorizontal: 12,
