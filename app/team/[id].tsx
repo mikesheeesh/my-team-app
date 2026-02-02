@@ -346,6 +346,11 @@ export default function TeamProjectsScreen() {
             ? { ...g, projects: [...g.projects, newProject] }
             : g,
         );
+
+        // Update local state immediately for UI refresh
+        setGroups(updatedGroups);
+
+        // Update Firestore
         await updateTeamData("groups", updatedGroups);
 
         // 2. Δημιουργία του εγγράφου στη συλλογή Projects
@@ -360,7 +365,14 @@ export default function TeamProjectsScreen() {
           title: tempValue,
           projects: [],
         };
-        await updateTeamData("groups", [...groups, newGroup]);
+
+        const updatedGroupsList = [...groups, newGroup];
+
+        // Update local state immediately for UI refresh
+        setGroups(updatedGroupsList);
+
+        // Update Firestore
+        await updateTeamData("groups", updatedGroupsList);
       } else if (inputMode === "teamName") {
         await updateTeamData("name", tempValue);
       }
@@ -523,6 +535,11 @@ export default function TeamProjectsScreen() {
                 }
               : g,
           );
+
+          // Update local state immediately for UI refresh
+          setGroups(updatedGroups);
+
+          // Update Firestore
           await updateTeamData("groups", updatedGroups);
 
           // 2. Διαγραφή του εγγράφου από τη συλλογή Projects

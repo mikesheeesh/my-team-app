@@ -12,6 +12,12 @@ import { Alert } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
+import {
+  uploadImageToStorage,
+  uploadVideoToStorage,
+  uploadBase64ToStorage,
+  generateMediaId,
+} from "../../utils/storageUtils";
 
 const OFFLINE_QUEUE_PREFIX = "offline_tasks_queue_";
 
@@ -104,41 +110,108 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
         let currentCloudList = projectSnap.data().tasks || [];
         let changesMade = false;
 
+        // Get teamId for Storage paths
+        const teamId = projectSnap.data().teamId;
+        if (!teamId) {
+          console.error("⚠️ No teamId found for project:", projectId);
+          await AsyncStorage.removeItem(key);
+          continue;
+        }
+
         for (const task of localList) {
           let finalValue = task.value;
           let processedImages: string[] = [];
 
-          // Images -> Base64
+          // Images -> Firebase Storage
           if (task.images && task.images.length > 0) {
             for (const imgUri of task.images) {
-              if (imgUri && imgUri.startsWith("file://")) {
-                try {
-                  const base64Data = await FileSystem.readAsStringAsync(
+              if (!imgUri) continue;
+
+              try {
+                if (imgUri.startsWith("file://")) {
+                  // Local file → Upload to Storage
+                  const mediaId = generateMediaId();
+                  const storageUrl = await uploadImageToStorage(
                     imgUri,
-                    { encoding: "base64" },
+                    teamId,
+                    projectId,
+                    task.id,
+                    mediaId
                   );
-                  processedImages.push(`data:image/jpeg;base64,${base64Data}`);
-                } catch (e) {
-                  console.log("Skip Img", e);
+                  processedImages.push(storageUrl);
+                  console.log("✓ Uploaded local image to Storage");
+                } else if (imgUri.startsWith("data:image")) {
+                  // Base64 data → Migrate to Storage
+                  const mediaId = generateMediaId();
+                  const storageUrl = await uploadBase64ToStorage(
+                    imgUri,
+                    teamId,
+                    projectId,
+                    task.id,
+                    mediaId,
+                    "image"
+                  );
+                  processedImages.push(storageUrl);
+                  console.log("✓ Migrated base64 image to Storage");
+                } else if (imgUri.startsWith("https://firebasestorage")) {
+                  // Already in Storage → Keep as-is
+                  processedImages.push(imgUri);
+                } else {
+                  // Unknown format → Keep as-is
+                  processedImages.push(imgUri);
                 }
-              } else {
+              } catch (e) {
+                console.error("Failed to process image:", e);
+                // Keep original URI on error
                 processedImages.push(imgUri);
               }
             }
           }
-          // Value -> Base64
-          if (
-            task.type === "photo" &&
-            task.value &&
-            task.value.startsWith("file://")
-          ) {
+
+          // Value -> Firebase Storage (for photos/videos)
+          if (task.value) {
             try {
-              const base64Data = await FileSystem.readAsStringAsync(
-                task.value,
-                { encoding: "base64" },
-              );
-              finalValue = `data:image/jpeg;base64,${base64Data}`;
-            } catch (e) {}
+              if (task.value.startsWith("file://")) {
+                // Local file → Upload to Storage
+                const mediaId = generateMediaId();
+                if (task.type === "photo") {
+                  finalValue = await uploadImageToStorage(
+                    task.value,
+                    teamId,
+                    projectId,
+                    task.id,
+                    mediaId
+                  );
+                  console.log("✓ Uploaded local photo to Storage");
+                } else if (task.type === "video") {
+                  finalValue = await uploadVideoToStorage(
+                    task.value,
+                    teamId,
+                    projectId,
+                    task.id,
+                    mediaId
+                  );
+                  console.log("✓ Uploaded local video to Storage");
+                }
+              } else if (task.value.startsWith("data:image") || task.value.startsWith("data:video")) {
+                // Base64 data → Migrate to Storage
+                const mediaId = generateMediaId();
+                const mediaType = task.type === "photo" ? "image" : "video";
+                finalValue = await uploadBase64ToStorage(
+                  task.value,
+                  teamId,
+                  projectId,
+                  task.id,
+                  mediaId,
+                  mediaType
+                );
+                console.log(`✓ Migrated base64 ${mediaType} to Storage`);
+              }
+              // else: Already Storage URL or text value → Keep as-is
+            } catch (e) {
+              console.error("Failed to process task value:", e);
+              // Keep original value on error
+            }
           }
 
           const { isLocal, ...cleanTask } = task;

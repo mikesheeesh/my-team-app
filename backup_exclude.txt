@@ -1,0 +1,10 @@
+node_modules
+.git
+.expo
+BackUp
+backup.bat
+backup_exclude.txt
+.DS_Store
+Thumbs.db
+*.log
+.env.local

@@ -35,6 +35,14 @@ import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { auth, db } from "../../firebaseConfig";
 
+// STORAGE UTILITIES
+import {
+  uploadImageToStorage,
+  uploadVideoToStorage,
+  deleteMediaFromStorage,
+  generateMediaId,
+} from "../../utils/storageUtils";
+
 import ImageEditorModal from "../components/ImageEditorModal";
 import InputModal from "../components/InputModal";
 import { useSync } from "../context/SyncContext";
@@ -212,6 +220,7 @@ export default function ProjectDetailsScreen() {
   const [projectStatus, setProjectStatus] = useState<
     "active" | "pending" | "completed"
   >("active");
+  const [teamId, setTeamId] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
 
@@ -271,6 +280,7 @@ export default function ProjectDetailsScreen() {
           setCloudTasks(d.tasks || []);
           setProjectName(d.name || "");
           setProjectStatus(d.status || "active");
+          setTeamId(d.teamId || "");
         }
         const local = await AsyncStorage.getItem(QUEUE_KEY);
         if (local) setLocalTasks(JSON.parse(local));
@@ -294,12 +304,14 @@ export default function ProjectDetailsScreen() {
             setCloudTasks(fetched);
             setProjectName(data.title || "Project");
             setProjectStatus(data.status || "active");
+            setTeamId(data.teamId || "");
             AsyncStorage.setItem(
               CACHE_KEY,
               JSON.stringify({
                 name: data.title,
                 tasks: fetched,
                 status: data.status,
+                teamId: data.teamId,
               }),
             );
           }
@@ -553,29 +565,35 @@ export default function ProjectDetailsScreen() {
         const r = await ImagePicker.launchCameraAsync({
           mediaTypes: ImagePicker.MediaTypeOptions.Videos,
           videoMaxDuration: 4,
-          quality: 0,
+          videoQuality: ImagePicker.UIImagePickerControllerQualityType.High, // 1080p quality
         });
 
         if (!r.canceled && r.assets[0].uri) {
           setProcessing(true);
           try {
             const videoUri = r.assets[0].uri;
-            const fileInfo = await FileSystem.getInfoAsync(videoUri);
-            if (fileInfo.exists && fileInfo.size > 900000) {
-              Alert.alert(
-                "Πολύ μεγάλο αρχείο",
-                "Το βίντεο ξεπερνά το όριο του 1MB.",
-              );
+
+            // Validate teamId before upload
+            if (!teamId) {
+              Alert.alert("Σφάλμα", "Δεν βρέθηκε η ομάδα του project.");
               setProcessing(false);
               return;
             }
-            const base64Video = await FileSystem.readAsStringAsync(videoUri, {
-              encoding: FileSystem.EncodingType.Base64,
-            });
-            const finalUri = `data:video/mp4;base64,${base64Video}`;
-            await addMediaToTask(task.id, finalUri, gpsLoc);
-          } catch (e) {
-            Alert.alert("Σφάλμα", "Απέτυχε η αποθήκευση του βίντεο.");
+
+            // Upload to Firebase Storage
+            const mediaId = generateMediaId();
+            const storageUrl = await uploadVideoToStorage(
+              videoUri,
+              teamId,
+              projectId,
+              task.id,
+              mediaId
+            );
+
+            // Save Storage URL to Firestore
+            await addMediaToTask(task.id, storageUrl, gpsLoc);
+          } catch (e: any) {
+            Alert.alert("Σφάλμα", e.message || "Απέτυχε η αποθήκευση του βίντεο.");
           } finally {
             setProcessing(false);
           }
@@ -606,29 +624,65 @@ export default function ProjectDetailsScreen() {
     setProcessing(true);
 
     try {
+      console.log("📸 Starting image save process...");
+      console.log("  - Edited URI:", editedUri);
+      console.log("  - Team ID:", teamId);
+      console.log("  - Project ID:", projectId);
+
+      // Compress with 70% quality, NO RESIZE (full camera resolution)
       const m = await ImageManipulator.manipulateAsync(
         editedUri,
-        [{ resize: { width: 800 } }],
+        [], // No resize - keep full camera resolution
         {
-          compress: 0.5,
+          compress: 0.7, // 70% quality
           format: ImageManipulator.SaveFormat.JPEG,
-          base64: true,
         },
       );
 
-      if (m.base64 && taskForEditing) {
-        if (m.base64.length > 1048576) {
-          Alert.alert("Σφάλμα", "Η εικόνα είναι πολύ μεγάλη.");
-        } else {
-          await addMediaToTask(
-            taskForEditing.id,
-            `data:image/jpeg;base64,${m.base64}`,
-            tempGpsLoc,
-          );
-        }
+      console.log("✓ Image manipulated successfully");
+      console.log("  - Compressed URI:", m.uri);
+
+      if (!m.uri) {
+        throw new Error("Η επεξεργασία εικόνας δεν παρήγαγε URI");
       }
-    } catch (e) {
-      Alert.alert("Σφάλμα", "Απέτυχε η αποθήκευση της επεξεργασμένης εικόνας.");
+
+      if (!taskForEditing) {
+        throw new Error("Δεν βρέθηκε το task για επεξεργασία");
+      }
+
+      if (!teamId) {
+        throw new Error("Δεν βρέθηκε η ομάδα του project");
+      }
+
+      console.log("📤 Uploading to Firebase Storage...");
+      const mediaId = generateMediaId();
+      const storageUrl = await uploadImageToStorage(
+        m.uri,
+        teamId,
+        projectId,
+        taskForEditing.id,
+        mediaId
+      );
+
+      console.log("✓ Upload complete!");
+      console.log("  - Storage URL:", storageUrl);
+
+      // Save Storage URL (not base64) to task
+      await addMediaToTask(
+        taskForEditing.id,
+        storageUrl,
+        tempGpsLoc,
+      );
+
+      console.log("✓ Image saved successfully to task");
+    } catch (e: any) {
+      console.error("❌ Image save error:", e);
+      console.error("  - Error message:", e.message);
+      console.error("  - Error stack:", e.stack);
+      Alert.alert(
+        "Σφάλμα",
+        e.message || "Απέτυχε η αποθήκευση της επεξεργασμένης εικόνας."
+      );
     } finally {
       setProcessing(false);
       setTempImageUri(null);
@@ -667,6 +721,18 @@ export default function ProjectDetailsScreen() {
   const removeMediaFromTask = async (uri: string) => {
     if (!activeTaskForGallery) return;
 
+    // DELETE FROM STORAGE FIRST (if it's a Storage URL)
+    if (uri && uri.startsWith("https://firebasestorage.googleapis.com")) {
+      try {
+        await deleteMediaFromStorage(uri);
+        console.log("✓ Media deleted from Storage");
+      } catch (error) {
+        console.error("Failed to delete from Storage:", error);
+        // Continue anyway - remove from Firestore even if Storage delete fails
+      }
+    }
+
+    // THEN REMOVE FROM FIRESTORE
     if (activeTaskForGallery.type === "photo") {
       const idx = activeTaskForGallery.images.findIndex((i: string) => i === uri);
       if (idx !== -1) {
@@ -754,15 +820,31 @@ export default function ProjectDetailsScreen() {
   const handleShare = async (uri: string) => {
     if (!(await Sharing.isAvailableAsync())) return;
     try {
-      const isVideo = uri.startsWith("data:video");
-      const ext = isVideo ? ".mp4" : ".jpg";
-      const base64Data = uri.split("base64,")[1];
-      const filename = FileSystem.cacheDirectory + `temp_share${ext}`;
-      await FileSystem.writeAsStringAsync(filename, base64Data, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      await Sharing.shareAsync(filename);
+      // Handle Storage URLs (download first)
+      if (uri.startsWith("https://firebasestorage")) {
+        await Sharing.shareAsync(uri, {
+          UTI: uri.includes(".mp4") ? "public.movie" : "public.image",
+        });
+        return;
+      }
+
+      // Handle base64 data URIs (legacy)
+      if (uri.startsWith("data:")) {
+        const isVideo = uri.startsWith("data:video");
+        const ext = isVideo ? ".mp4" : ".jpg";
+        const base64Data = uri.split("base64,")[1];
+        if (!base64Data) {
+          Alert.alert("Σφάλμα", "Μη έγκυρα δεδομένα εικόνας.");
+          return;
+        }
+        const filename = FileSystem.cacheDirectory + `temp_share${ext}`;
+        await FileSystem.writeAsStringAsync(filename, base64Data, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        await Sharing.shareAsync(filename);
+      }
     } catch (error) {
+      console.error("Share error:", error);
       Alert.alert("Σφάλμα", "Δεν ήταν δυνατή η κοινοποίηση.");
     }
   };

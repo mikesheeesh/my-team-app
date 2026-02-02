@@ -9,6 +9,7 @@ import {
   initializeAuth,
 } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 import { Platform } from "react-native";
 
 // Βάλε τα δικά σου στοιχεία εδώ
@@ -38,6 +39,7 @@ if (Platform.OS === "web") {
 }
 
 const db = getFirestore(app);
+const storage = getStorage(app);
 
-export { auth, db };
+export { auth, db, storage };
 
