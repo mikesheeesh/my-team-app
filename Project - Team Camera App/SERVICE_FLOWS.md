@@ -16,6 +16,9 @@
 13. [Auto-Complete Project Flow](#13-auto-complete-project-flow)
 14. [PDF Generation Flow](#14-pdf-generation-flow)
 15. [User Role Management Flow](#15-user-role-management-flow)
+16. [Project Search & Filter Flow](#16-project-search--filter-flow)
+17. [3-Stage Project Status Flow](#17-3-stage-project-status-flow)
+18. [Role Change Cleanup Flow](#18-role-change-cleanup-flow)
 
 ---
 
@@ -1398,6 +1401,293 @@ USER ACTION: Διαγράφει φωτογραφία από task
 
 ---
 
+## 16. PROJECT SEARCH & FILTER FLOW
+
+### Αρχείο: `app/team/[id].tsx`
+
+### 16.1 Filter Persistence Flow
+```
+ΒΗΜΑ 1: Load Saved Filters on Mount
+├── FILTER_CACHE_KEY = `team_filters_${teamId}`
+├── AsyncStorage.getItem(FILTER_CACHE_KEY)
+├── ΑΝ cached:
+│   ├── setSearchQuery(saved.search)
+│   └── setStatusFilter(saved.status)
+└── ΑΛΛΙΩΣ default values (searchQuery: "", statusFilter: "all")
+
+ΒΗΜΑ 2: Auto-Save on Filter Change
+└── useEffect(() => {
+    AsyncStorage.setItem(FILTER_CACHE_KEY, JSON.stringify({
+      search: searchQuery,
+      status: statusFilter
+    }))
+  }, [searchQuery, statusFilter, teamId])
+```
+
+### 16.2 Search Flow
+```
+ΒΗΜΑ 1: User Types in Search Bar
+├── TextInput.onChangeText(text)
+└── setSearchQuery(text)
+
+ΒΗΜΑ 2: Apply Filter
+└── visibleGroups = groups.map(g => {
+    projects: g.projects.filter(p =>
+      p.title.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+  })
+
+ΒΗΜΑ 3: Clear Search
+├── User πατάει X icon
+└── setSearchQuery("")
+```
+
+### 16.3 Status Filter Flow (Bottom Sheet Modal)
+```
+ΒΗΜΑ 1: Open Filter Modal
+├── User πατάει filter icon button
+└── setFilterModalVisible(true)
+
+ΒΗΜΑ 2: Display Options με Radio Buttons
+├── "Όλα" (all)
+├── "Ενεργά" (active) με ACTIVE badge
+├── "Εκκρεμή" (pending) με PENDING badge
+└── "Ολοκληρωμένα" (completed) με DONE badge
+
+ΒΗΜΑ 3: User Selection
+├── User επιλέγει status
+├── setStatusFilter(selectedStatus)
+└── setFilterModalVisible(false)
+
+ΒΗΜΑ 4: Apply Status Filter
+└── visibleGroups = groups.map(g => {
+    projects: roleFilteredProjects.filter(p =>
+      statusFilter === "all" || p.status === statusFilter
+    )
+  })
+
+ΒΗΜΑ 5: Visual Indicator
+├── ΑΝ statusFilter !== "all":
+│   ├── Filter button → blue background
+│   └── Show badge dot (blue)
+└── ΑΛΛΙΩΣ default gray styling
+```
+
+### 16.4 Combined Filter Logic
+```
+FLOW: Search + Status Filter (3-stage pipeline)
+
+ΒΗΜΑ 1: Role-based Filter
+├── ΑΝ myRole === "User":
+│   └── projects = g.projects.filter(p =>
+│       p.members.includes(userId) || p.supervisors.includes(userId)
+│     )
+└── ΑΛΛΙΩΣ show all projects
+
+ΒΗΜΑ 2: Status Filter
+├── ΑΝ statusFilter !== "all":
+│   └── projects = roleFilteredProjects.filter(p =>
+│       p.status === statusFilter
+│     )
+└── ΑΛΛΙΩΣ keep all
+
+ΒΗΜΑ 3: Search Filter
+├── ΑΝ searchQuery.trim():
+│   └── projects = statusFilteredProjects.filter(p =>
+│       p.title.toLowerCase().includes(searchQuery.toLowerCase())
+│     )
+└── ΑΛΛΙΩΣ keep all
+
+ΒΗΜΑ 4: Hide Empty Groups (User role only)
+└── ΑΝ myRole === "User":
+    └── groups = groups.filter(g => g.projects.length > 0)
+```
+
+---
+
+## 17. 3-STAGE PROJECT STATUS FLOW
+
+### Αρχείο: `app/project/[id].tsx`
+
+### 17.1 Automatic Status Transition Flow
+```
+PROJECT STATUS STATES:
+├── "active" (default) - Καμία ανάθεση ολοκληρωμένη
+├── "pending" - Κάποιες αναθέσεις ολοκληρωμένες (αλλά όχι όλες)
+└── "completed" - Όλες οι αναθέσεις ολοκληρωμένες
+
+ΒΗΜΑ 1: Watch Combined Tasks
+└── useEffect(() => {...}, [combinedTasks])
+
+ΒΗΜΑ 2: Calculate Completion Stats
+├── completedCount = combinedTasks.filter(t => t.status === "completed").length
+├── totalCount = combinedTasks.length
+└── ΑΝ totalCount === 0 → status = "active"
+
+ΒΗΜΑ 3: Determine New Status
+├── ΑΝ completedCount === totalCount:
+│   └── newStatus = "completed" (100%)
+├── ΑΝ completedCount > 0:
+│   └── newStatus = "pending" (partial completion)
+└── ΑΛΛΙΩΣ:
+    └── newStatus = "active" (0%)
+
+ΒΗΜΑ 4: Check if Changed
+├── ΑΝ newStatus !== projectStatus:
+│   └── Συνέχεια
+└── ΑΛΛΙΩΣ skip update (no change)
+
+ΒΗΜΑ 5: Optimistic UI Update
+└── setProjectStatus(newStatus)
+
+ΒΗΜΑ 6: Firestore Update
+└── updateDoc(projectRef, { status: newStatus })
+
+ΒΗΜΑ 7: Cache Update
+└── AsyncStorage.setItem(CACHE_KEY, {
+    ...cached,
+    status: newStatus
+  })
+```
+
+### 17.2 Status Transition Scenarios
+```
+SCENARIO A: Active → Pending
+────────────────────────────
+Initial: 5 tasks, 0 completed → status = "active"
+Action:  User completes 1 task
+Result:  5 tasks, 1 completed → status = "pending"
+
+SCENARIO B: Pending → Completed
+────────────────────────────────
+Initial: 5 tasks, 4 completed → status = "pending"
+Action:  User completes last task
+Result:  5 tasks, 5 completed → status = "completed"
+
+SCENARIO C: Completed → Pending (Revert)
+─────────────────────────────────────────
+Initial: 3 tasks, 3 completed → status = "completed"
+Action:  User deletes photo from task (task becomes pending)
+Result:  3 tasks, 2 completed → status = "pending"
+
+SCENARIO D: Pending → Active (Full Revert)
+───────────────────────────────────────────
+Initial: 2 tasks, 1 completed → status = "pending"
+Action:  User deletes completed task OR marks it pending
+Result:  2 tasks, 0 completed → status = "active"
+```
+
+### 17.3 Status Badge Visual Indicators
+```
+UI COMPONENTS:
+
+Active Status Badge:
+├── Background: #dbeafe (light blue)
+├── Text: "ACTIVE"
+├── Color: #2563eb (blue)
+└── Icon: 📋
+
+Pending Status Badge:
+├── Background: #fef3c7 (light yellow)
+├── Text: "PENDING"
+├── Color: #d97706 (orange)
+└── Icon: ⏳
+
+Completed Status Badge:
+├── Background: #dcfce7 (light green)
+├── Text: "DONE"
+├── Color: #16a34a (green)
+└── Icon: ✅
+```
+
+---
+
+## 18. ROLE CHANGE CLEANUP FLOW
+
+### Αρχείο: `app/team/[id].tsx` → `changeUserRole()`
+
+### 18.1 Role Change με Project Cleanup
+```
+ΒΗΜΑ 1: Determine New Role
+├── Promote:
+│   ├── User → Supervisor
+│   └── Supervisor → Admin
+└── Demote:
+    ├── Admin → Supervisor
+    └── Supervisor → User
+
+ΒΗΜΑ 2: Update Team Document
+└── updateDoc(teamRef, {
+    [`roles.${targetUser.id}`]: newRole
+  })
+
+ΒΗΜΑ 3: Cleanup από Projects (IMPORTANT!)
+├── Query all team projects:
+│   └── query(collection(db, "projects"), where("teamId", "==", teamId))
+│
+└── FOR each project:
+    │
+    ├── CASE 1: User → Supervisor
+    │   └── updateDoc(projectRef, {
+    │       members: arrayRemove(targetUser.id)
+    │     })
+    │       └── ΔΕΝ προσθέτει στο supervisors[] (manual assignment)
+    │
+    ├── CASE 2: Supervisor → User
+    │   └── updateDoc(projectRef, {
+    │       supervisors: arrayRemove(targetUser.id)
+    │     })
+    │       └── ΔΕΝ προσθέτει στο members[] (manual assignment)
+    │
+    ├── CASE 3: Supervisor → Admin
+    │   └── updateDoc(projectRef, {
+    │       supervisors: arrayRemove(targetUser.id)
+    │     })
+    │       └── Admins have automatic access (no array needed)
+    │
+    └── CASE 4: Admin → Supervisor
+        └── Promise.resolve() (Admins were never in project arrays)
+```
+
+### 18.2 Manual Re-Assignment Flow
+```
+ΜΕΤΑ ΤΗΝ ΑΛΛΑΓΗ ΡΟΛΟΥ:
+
+ΒΗΜΑ 1: Role Change Completed
+├── User's role updated in teams collection
+└── User removed από project arrays (supervisors[] ή members[])
+
+ΒΗΜΑ 2: Manual Re-Assignment (if needed)
+├── Founder/Admin/Supervisor opens Project Settings modal
+├── Sees updated role for user in assignment lists:
+│   ├── "Supervisors" section: Only shows users με role === "Supervisor"
+│   └── "Μέλη (Users)" section: Only shows users με role === "User"
+└── Manually checks/unchecks user for project assignment
+
+ΒΗΜΑ 3: Assignment Update
+└── toggleProjectRole(userId, type) → Updates project arrays
+```
+
+### 18.3 Why No Auto-Assignment?
+```
+DESIGN DECISION: Manual Assignment Only
+
+ΛΟΓΟΣ 1: Granular Control
+├── Admins may not want ALL Supervisors in ALL projects
+└── Project assignments should be deliberate, not automatic
+
+ΛΟΓΟΣ 2: Role Hierarchy
+├── Admins & Founders: Automatic access (don't appear in UI)
+├── Supervisors: Manual selection per project
+└── Users: Manual selection per project
+
+ΛΟΓΟΣ 3: Cleanup Prevention
+├── Prevents clutter in project arrays
+└── Only actively assigned users appear
+```
+
+---
+
 ## APPENDIX: STATE MANAGEMENT SUMMARY
 
 ### Global State (Context)
@@ -1431,6 +1721,6 @@ Firestore
 
 **Repository**: `/home/administrator/projects/my-team-app`
 
-**Version**: 1.0.0
+**Version**: 1.1.0
 
-**Last Updated**: Ιανουάριος 2026
+**Last Updated**: Φεβρουάριος 2026

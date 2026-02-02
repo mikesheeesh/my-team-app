@@ -16,6 +16,23 @@
   Full web support με react-native-web
   Platform-specific conditionals για optimized UX
 
+- [x] **Φίλτρα αναζήτησης**
+  Search bar για project titles (always visible)
+  Filter by status (active/pending/completed) με Bottom Sheet Modal
+  AsyncStorage persistence για filters (per team)
+  Visual indicators (badge dot) για active filters
+
+- [x] **3-Stage Project Status**
+  Automatic status transitions: active → pending → completed
+  Pending status όταν έστω 1 task ολοκληρωθεί
+  Real-time status updates με Firestore listeners
+
+- [x] **Role Change Cleanup Logic**
+  Automatic removal από projects όταν αλλάζει ρόλος χρήστη
+  User → Supervisor: Αφαίρεση από members[]
+  Supervisor → User/Admin: Αφαίρεση από supervisors[]
+  ΟΧΙ automatic assignment (manual selection only)
+
 ---
 
 ## 🚧 Pending Features
@@ -27,11 +44,10 @@
   - [ ] Αυτόματη ανάθεση σε Supervisor κατά τη δημιουργία
   - [ ] Update permissions matrix στο BUSINESS_PLAN.md
 
-- [ ] **Φίλτρα αναζήτησης**
-  - [ ] Search bar για projects
-  - [ ] Filter by status (active/completed/pending)
+- [ ] **Task Search & Filtering**
+  - [ ] Search tasks by title/description (within projects)
+  - [ ] Filter tasks by status/priority
   - [ ] Filter by assigned members
-  - [ ] Search tasks by title/description
 
 ### 🟡 Μέτρια Προτεραιότητα
 
@@ -56,12 +72,12 @@
 
 | Κατηγορία | Completed | Pending | Total |
 |-----------|-----------|---------|-------|
-| Core Features | 3 | 0 | 3 |
+| Core Features | 6 | 0 | 6 |
 | New Features | 0 | 2 | 2 |
 | Rejected | 1 | 0 | 1 |
-| **ΣΥΝΟΛΟ** | **3** | **2** | **5** |
+| **ΣΥΝΟΛΟ** | **6** | **2** | **8** |
 
-**Progress:** 60% ολοκληρωμένο
+**Progress:** 75% ολοκληρωμένο
 
 ---
 
@@ -69,10 +85,12 @@
 
 - Τα completed features έχουν ήδη documented στα BUSINESS_PLAN.md & SERVICE_FLOWS.md
 - Supervisor role update θα χρειαστεί schema changes στο Firestore
-- Φίλτρα αναζήτησης: consider using Algolia ή client-side filtering
-- Project locking: soft-delete approach με `status: "archived"`
+- Project search/filter: Implemented με client-side filtering (AsyncStorage persistence)
+- 3-stage status: Auto-updates με Firestore real-time listeners
+- Role cleanup: Αφαιρεί χρήστες από projects, αλλά ΟΧΙ auto-assignment
+- Project locking: soft-delete approach με `status: "archived"` (pending)
 
 ---
 
-**Last Updated:** Ιανουάριος 2026
-**Version:** 1.0.0
+**Last Updated:** Φεβρουάριος 2026
+**Version:** 1.1.0

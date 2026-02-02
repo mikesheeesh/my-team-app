@@ -552,7 +552,6 @@ export default function ProjectDetailsScreen() {
       if (task.type === "video") {
         const r = await ImagePicker.launchCameraAsync({
           mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-          allowsEditing: true,
           videoMaxDuration: 4,
           quality: 0,
         });
@@ -582,10 +581,9 @@ export default function ProjectDetailsScreen() {
           }
         }
       } else {
-        // --- PHOTO: ENABLE NATIVE CROP FIRST ---
+        // --- PHOTO: Direct to Drawing Editor ---
         const r = await ImagePicker.launchCameraAsync({
           mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: true, // Native Crop
           quality: 0.8,
         });
 

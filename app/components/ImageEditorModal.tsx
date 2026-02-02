@@ -63,6 +63,9 @@ export default function ImageEditorModal({
   // Zoom State (Παραμένει state γιατί γίνεται με κλικ, όχι gesture)
   const [scale, setScale] = useState(1);
 
+  // Hint visibility state
+  const [showHint, setShowHint] = useState(true);
+
   // --- NEW: ANIMATED VALUES FOR PANNING (Για ομαλή κίνηση) ---
   // Αντί για useState, χρησιμοποιούμε Animated.Value που δεν προκαλεί re-renders
   const panX = useRef(new Animated.Value(0)).current;
@@ -75,6 +78,9 @@ export default function ImageEditorModal({
   const widthRef = useRef(selectedWidth);
   const toolRef = useRef(activeTool);
   const scaleRef = useRef(scale);
+
+  // Track if last drawing point was in bounds to prevent jump lines
+  const wasInBounds = useRef(true);
 
   useEffect(() => {
     colorRef.current = selectedColor;
@@ -89,6 +95,15 @@ export default function ImageEditorModal({
     scaleRef.current = scale;
   }, [scale]);
 
+  // Auto-hide hint after 2 seconds when tool changes
+  useEffect(() => {
+    setShowHint(true);
+    const timer = setTimeout(() => {
+      setShowHint(false);
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [activeTool]);
+
   const viewShotRef = useRef<ViewShot>(null);
   const { width, height } = Dimensions.get("window");
   const CANVAS_HEIGHT = height - 160;
@@ -98,11 +113,14 @@ export default function ImageEditorModal({
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
+      // CRITICAL: Επέτρεψε termination όταν το touch πάει σε άλλα UI elements
+      onPanResponderTerminationRequest: () => true,
 
       onPanResponderGrant: (evt) => {
         const { locationX, locationY } = evt.nativeEvent;
         if (toolRef.current === "pen") {
           setCurrentPath(`M${locationX},${locationY}`);
+          wasInBounds.current = true;
         }
         // Στο 'move' δεν χρειάζεται να κάνουμε κάτι στο grant πλέον
       },
@@ -111,8 +129,53 @@ export default function ImageEditorModal({
         const { locationX, locationY } = evt.nativeEvent;
 
         if (toolRef.current === "pen") {
-          // ZΩΓΡΑΦΙΣΜΑ
-          setCurrentPath((prev) => `${prev} L${locationX},${locationY}`);
+          // ZΩΓΡΑΦΙΣΜΑ - με αυστηρό έλεγχο ορίων για να μην πηδάει η γραμμή
+          // Προσθήκη margin 10px για να σταματάει νωρίτερα πριν βγει εντελώς έξω
+          const SAFE_MARGIN = 10;
+          const isInBounds =
+            locationX >= -SAFE_MARGIN &&
+            locationX <= width + SAFE_MARGIN &&
+            locationY >= -SAFE_MARGIN &&
+            locationY <= CANVAS_HEIGHT + SAFE_MARGIN;
+
+          // Έλεγχος αν έχει βγει ΠΟΛΥ μακριά (στα UI elements)
+          const isTooFarOut =
+            locationX < -50 ||
+            locationX > width + 50 ||
+            locationY < -50 ||
+            locationY > CANVAS_HEIGHT + 50;
+
+          if (isTooFarOut) {
+            // Πολύ μακριά - τερμάτισε το path αμέσως
+            wasInBounds.current = false;
+            // Αποθήκευσε το path που έχουμε μέχρι τώρα
+            setCurrentPath((prevPath) => {
+              if (prevPath && prevPath.length > 10) {
+                setPaths((prev) => [
+                  ...prev,
+                  {
+                    d: prevPath,
+                    color: colorRef.current,
+                    width: widthRef.current,
+                  },
+                ]);
+              }
+              return "";
+            });
+          } else if (isInBounds) {
+            setCurrentPath((prev) => {
+              // Αν ήμασταν out of bounds και τώρα γυρίσαμε, κάνε Move αντί για Line
+              if (!wasInBounds.current) {
+                wasInBounds.current = true;
+                return `${prev} M${locationX},${locationY}`;
+              }
+              // Αλλιώς συνέχισε κανονικά τη γραμμή
+              return `${prev} L${locationX},${locationY}`;
+            });
+          } else {
+            // Out of bounds αλλά όχι πολύ μακριά - απλά μην προσθέσεις το σημείο
+            wasInBounds.current = false;
+          }
         } else {
           // ΜΕΤΑΚΙΝΗΣΗ (Framing) - ΟΜΑΛΗ ΕΚΔΟΣΗ
           // Υπολογίζουμε τη νέα θέση βασισμένοι στην παλιά + την κίνηση του δαχτύλου.
@@ -154,6 +217,32 @@ export default function ImageEditorModal({
           lastPan.current.y = (panY as any)._value;
         }
       },
+
+      // CRITICAL: Χειρισμός termination όταν το gesture ακυρώνεται
+      // (π.χ. όταν το δάχτυλο πάει σε scrollable content ή άλλα UI elements)
+      onPanResponderTerminate: () => {
+        if (toolRef.current === "pen") {
+          // Αποθήκευσε το path που υπάρχει μέχρι τώρα
+          setCurrentPath((prevPath) => {
+            if (prevPath && prevPath.length > 10) {
+              setPaths((prev) => [
+                ...prev,
+                {
+                  d: prevPath,
+                  color: colorRef.current,
+                  width: widthRef.current,
+                },
+              ]);
+            }
+            return "";
+          });
+          wasInBounds.current = true;
+        } else {
+          // Για move tool, απλά αποθήκευσε την τελική θέση
+          lastPan.current.x = (panX as any)._value;
+          lastPan.current.y = (panY as any)._value;
+        }
+      },
     }),
   ).current;
 
@@ -167,6 +256,7 @@ export default function ImageEditorModal({
     panX.setValue(0);
     panY.setValue(0);
     lastPan.current = { x: 0, y: 0 };
+    wasInBounds.current = true;
   };
 
   const handleZoomIn = () => setScale((s) => Math.min(s + 0.2, 3));
@@ -287,11 +377,13 @@ export default function ImageEditorModal({
             </Animated.View>
           </ViewShot>
 
-          <View style={styles.overlayGuide}>
-            <Text style={styles.guideText}>
-              {activeTool === "move" ? "Σύρετε για μετακίνηση" : "Σχεδιάστε"}
-            </Text>
-          </View>
+          {showHint && (
+            <View style={styles.overlayGuide}>
+              <Text style={styles.guideText}>
+                {activeTool === "move" ? "Σύρετε για μετακίνηση" : "Σχεδιάστε"}
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* --- TOOLS FOOTER --- */}
@@ -331,6 +423,7 @@ export default function ImageEditorModal({
             </View>
 
             <View style={styles.zoomControls}>
+              <Text style={styles.zoomHint}>Zoom/Crop</Text>
               <TouchableOpacity onPress={handleZoomOut} style={styles.zoomBtn}>
                 <Text style={styles.zoomText}>-</Text>
               </TouchableOpacity>
@@ -429,7 +522,13 @@ const styles = StyleSheet.create({
   modeBtn: { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 10 },
   modeBtnActive: { backgroundColor: "#3b82f6" },
 
-  zoomControls: { flexDirection: "row", gap: 10 },
+  zoomControls: { flexDirection: "row", gap: 10, alignItems: "center" },
+  zoomHint: {
+    color: "#999",
+    fontSize: 12,
+    fontWeight: "600",
+    marginRight: 8,
+  },
   zoomBtn: {
     width: 40,
     height: 40,

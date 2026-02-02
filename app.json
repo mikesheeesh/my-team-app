@@ -5,11 +5,11 @@
     "version": "1.0.0",
     "sdkVersion": "54.0.0",
     "orientation": "portrait",
-    "icon": "./assets/logo2.png",
+    "icon": "./assets/logo3.png",
     "userInterfaceStyle": "light",
     "scheme": "ergonwork",
     "splash": {
-      "image": "./assets/logo2.png",
+      "image": "./assets/logo3.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -25,7 +25,7 @@
       "package": "com.ergowork.app",
       "softwareKeyboardLayoutMode": "pan",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/logo2.png",
+        "foregroundImage": "./assets/logo3.png",
         "backgroundColor": "#ffffff"
       },
       "permissions": [
@@ -41,7 +41,7 @@
       ]
     },
     "web": {
-      "favicon": "./assets/logo2.png"
+      "favicon": "./assets/logo3.png"
     },
     "plugins": [
       [

@@ -824,6 +824,184 @@ if (!netState.isConnected) {
 
 ---
 
+## 🆕 Recently Implemented Features (v1.1.0)
+
+### 1. Project Search & Filter System
+**File:** `app/team/[id].tsx`
+
+#### Implementation Details:
+```typescript
+// State Management
+const [searchQuery, setSearchQuery] = useState("");
+const [statusFilter, setStatusFilter] = useState<"all" | "active" | "pending" | "completed">("all");
+const [filterModalVisible, setFilterModalVisible] = useState(false);
+
+// AsyncStorage Persistence (per team)
+const FILTER_CACHE_KEY = `team_filters_${teamId}`;
+```
+
+#### Features:
+- **Search Bar**: Real-time filtering by project title (case-insensitive)
+- **Status Filter**: Bottom Sheet Modal με 4 options (all, active, pending, completed)
+- **Persistence**: Filters saved to AsyncStorage and restored on mount
+- **Visual Indicators**: Blue badge dot when filters active
+- **UI Pattern**: Compact search bar + filter icon button (not always-visible buttons)
+
+#### Filter Pipeline (3-stage):
+```typescript
+1. Role-based filter (Users see only assigned projects)
+2. Status filter (if statusFilter !== "all")
+3. Search filter (if searchQuery.trim())
+```
+
+---
+
+### 2. 3-Stage Project Status System
+**File:** `app/project/[id].tsx`
+
+#### Status States:
+```typescript
+type ProjectStatus = "active" | "pending" | "completed";
+
+// Transition Logic:
+// - active: 0% tasks completed
+// - pending: 1-99% tasks completed
+// - completed: 100% tasks completed
+```
+
+#### Auto-Update Logic:
+```typescript
+useEffect(() => {
+  const completedCount = combinedTasks.filter(t => t.status === "completed").length;
+  const totalCount = combinedTasks.length;
+
+  let newStatus: ProjectStatus;
+  if (completedCount === totalCount) {
+    newStatus = "completed";
+  } else if (completedCount > 0) {
+    newStatus = "pending";
+  } else {
+    newStatus = "active";
+  }
+
+  if (newStatus !== projectStatus) {
+    setProjectStatus(newStatus);
+    updateDoc(projectRef, { status: newStatus });
+  }
+}, [combinedTasks]);
+```
+
+#### Visual Badges:
+- **Active**: 📋 Blue badge (#2563eb)
+- **Pending**: ⏳ Orange badge (#d97706)
+- **Completed**: ✅ Green badge (#16a34a)
+
+---
+
+### 3. Role Change Cleanup Logic
+**File:** `app/team/[id].tsx` → `changeUserRole()`
+
+#### Purpose:
+Όταν αλλάζει ο ρόλος ενός χρήστη, πρέπει να αφαιρείται από τα projects arrays, αλλά **ΟΧΙ** να προστίθεται αυτόματα στο νέο array (manual assignment only).
+
+#### Implementation:
+```typescript
+// After updating team role:
+const q = query(collection(db, "projects"), where("teamId", "==", teamId));
+const querySnapshot = await getDocs(q);
+
+const updatePromises = querySnapshot.docs.map((projectDoc) => {
+  // Case 1: User → Supervisor (remove from members[])
+  if (targetUser.role === "User" && newRole === "Supervisor") {
+    return updateDoc(projectDoc.ref, {
+      members: arrayRemove(targetUser.id),
+    });
+  }
+  // Case 2: Supervisor → User (remove from supervisors[])
+  else if (targetUser.role === "Supervisor" && newRole === "User") {
+    return updateDoc(projectDoc.ref, {
+      supervisors: arrayRemove(targetUser.id),
+    });
+  }
+  // Case 3: Supervisor → Admin (remove from supervisors[])
+  else if (targetUser.role === "Supervisor" && newRole === "Admin") {
+    return updateDoc(projectDoc.ref, {
+      supervisors: arrayRemove(targetUser.id),
+    });
+  }
+  // Case 4: Admin → Supervisor (no action - Admins never in arrays)
+  else {
+    return Promise.resolve();
+  }
+});
+
+await Promise.all(updatePromises);
+```
+
+#### Design Decision:
+- **NO auto-assignment**: Prevents unwanted project access
+- **Manual selection only**: Admins manually assign users via Project Settings modal
+- **Admins & Founders hidden**: Don't appear in assignment UI (automatic access)
+
+---
+
+### 4. Bottom Sheet Modal Pattern
+**File:** `app/team/[id].tsx`
+
+#### UI Pattern:
+```typescript
+// Filter Modal with Bottom Sheet
+<Modal visible={filterModalVisible} transparent animationType="slide">
+  <View style={styles.modalOverlay}>
+    <View style={styles.modalContent}>
+      {/* Radio button options with badges */}
+    </View>
+  </View>
+</Modal>
+```
+
+#### Styling:
+```typescript
+modalOverlay: {
+  flex: 1,
+  justifyContent: "flex-end",
+  backgroundColor: "rgba(0,0,0,0.4)",
+},
+modalContent: {
+  backgroundColor: "white",
+  borderTopLeftRadius: 20,
+  borderTopRightRadius: 20,
+  padding: 20,
+  maxHeight: "70%",
+}
+```
+
+---
+
+### 5. Key Technical Decisions
+
+#### AsyncStorage Keys Structure:
+```typescript
+// Filter persistence (per team)
+`team_filters_${teamId}` → { search: string, status: string }
+```
+
+#### Firestore Schema Updates:
+```typescript
+// projects collection
+{
+  status: "active" | "pending" | "completed",  // NEW: 3-stage status
+  // ... existing fields
+}
+```
+
+#### State Management:
+- **Search/Filter state**: Local useState (persisted to AsyncStorage)
+- **Project status**: Real-time Firestore listeners με optimistic UI updates
+- **Role cleanup**: Server-side batch updates (no local state)
+
+---
+
 ## 🎯 Priorities Matrix
 
 | Priority | Feature Type | Example |
@@ -835,8 +1013,8 @@ if (!netState.isConnected) {
 
 ---
 
-**Version:** 1.0.0
-**Last Updated:** Ιανουάριος 2026
+**Version:** 1.1.0
+**Last Updated:** Φεβρουάριος 2026
 **Maintainer:** Michael
 
 ---

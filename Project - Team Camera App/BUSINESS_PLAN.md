@@ -338,6 +338,109 @@ invites/{inviteId}
 - Real-time status tracking με useEffect
 - Firestore sync για project status changes
 
+### 5.12 Project Search & Filter (v1.1.0)
+**Αρχείο:** `app/team/[id].tsx`
+
+#### Features:
+- **Search Bar**: Real-time filtering by project title
+  - Always visible at top of screen
+  - Case-insensitive search
+  - Clear button (X icon) when text entered
+- **Status Filter**: Bottom Sheet Modal
+  - 4 options: All, Active, Pending, Completed
+  - Visual badges με χρωματική κωδικοποίηση
+  - Radio button selection
+- **Filter Persistence**: AsyncStorage per team
+  - Filters saved automatically on change
+  - Restored on app launch
+- **Visual Indicators**:
+  - Blue badge dot on filter icon when active
+  - Active filter button styling
+
+#### Filter Pipeline:
+```
+1. Role-based filter (Users see only assigned projects)
+   ↓
+2. Status filter (if statusFilter !== "all")
+   ↓
+3. Search filter (if searchQuery.trim())
+```
+
+#### UX Benefits:
+- Instant project discovery σε μεγάλες ομάδες
+- Quick status overview
+- Persistent filters = faster workflow
+
+### 5.13 3-Stage Project Status (v1.1.0)
+**Αρχείο:** `app/project/[id].tsx`
+
+#### Status States:
+| Status | Icon | Condition | Badge Color |
+|--------|------|-----------|-------------|
+| **active** | 📋 | 0% tasks completed | Blue (#2563eb) |
+| **pending** | ⏳ | 1-99% tasks completed | Orange (#d97706) |
+| **completed** | ✅ | 100% tasks completed | Green (#16a34a) |
+
+#### Auto-Transition Logic:
+- **Active → Pending**: Όταν ολοκληρωθεί το 1ο task
+- **Pending → Completed**: Όταν ολοκληρωθεί το τελευταίο task
+- **Completed → Pending**: Όταν task γίνει pending (photo delete)
+- **Pending → Active**: Όταν όλα τα completed tasks γίνουν pending
+
+#### Implementation:
+- Real-time calculation με `useEffect` on task changes
+- Firestore automatic sync
+- Cache update για offline consistency
+- Visual feedback με status badges
+
+#### Business Value:
+- Clear project progress visibility
+- Automatic workflow tracking
+- No manual status updates needed
+- Better team coordination
+
+### 5.14 Role Change Cleanup (v1.1.0)
+**Αρχείο:** `app/team/[id].tsx` → `changeUserRole()`
+
+#### Functionality:
+Όταν αλλάζει ο ρόλος ενός χρήστη, αυτόματα αφαιρείται από project arrays:
+
+#### Cleanup Rules:
+| Role Change | Action | Result |
+|-------------|--------|--------|
+| User → Supervisor | Remove from `members[]` | Manual re-assignment needed |
+| Supervisor → User | Remove from `supervisors[]` | Manual re-assignment needed |
+| Supervisor → Admin | Remove from `supervisors[]` | Admin has automatic access |
+| Admin → Supervisor | No action | Admins never in arrays |
+
+#### Design Philosophy:
+- **No Auto-Assignment**: Prevents unwanted access
+- **Manual Control**: Admins explicitly assign users to projects
+- **Granular Permissions**: Per-project assignment
+- **Hierarchy Respect**:
+  - Admins & Founders: Automatic access (not in arrays)
+  - Supervisors & Users: Manual per-project assignment
+
+#### Technical Implementation:
+```typescript
+// Batch update all team projects
+const q = query(collection(db, "projects"), where("teamId", "==", teamId));
+const querySnapshot = await getDocs(q);
+
+// Remove user from appropriate array based on role change
+updatePromises.map(projectDoc => {
+  if (oldRole === "User") return updateDoc({ members: arrayRemove(userId) });
+  if (oldRole === "Supervisor") return updateDoc({ supervisors: arrayRemove(userId) });
+  // ... etc
+});
+```
+
+#### Benefits:
+- Clean project membership lists
+- Clear audit trail of assignments
+- Prevents permission escalation bugs
+- Supports dynamic team restructuring
+
 ---
 
 ## 6. BUSINESS MODEL
@@ -377,6 +480,9 @@ invites/{inviteId}
 - [x] Location tracking
 - [x] Auto-complete projects
 - [x] Web support
+- [x] Project search & filter (v1.1.0)
+- [x] 3-stage project status (v1.1.0)
+- [x] Role change cleanup logic (v1.1.0)
 
 ### Phase 2 - Enhanced Features
 - [ ] Push notifications
@@ -469,6 +575,6 @@ invites/{inviteId}
 
 **Repository**: `/home/administrator/projects/my-team-app`
 
-**Version**: 1.0.0
+**Version**: 1.1.0
 
-**Last Updated**: Ιανουάριος 2026
+**Last Updated**: Φεβρουάριος 2026
