@@ -14,6 +14,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -69,6 +70,13 @@ export default function TeamProjectsScreen() {
   const [teamLogo, setTeamLogo] = useState<string | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
+
+  // --- SEARCH & FILTER STATE ---
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "active" | "pending" | "completed"
+  >("all");
+  const [filterModalVisible, setFilterModalVisible] = useState(false);
 
   // --- NAVIGATION LOCK (500ms) ---
   const [isNavigating, setIsNavigating] = useState(false);
@@ -209,6 +217,44 @@ export default function TeamProjectsScreen() {
 
     return () => unsubscribeAuth();
   }, [teamId]);
+
+  // 1.5. LOAD/SAVE FILTERS FROM ASYNCSTORAGE
+  const FILTER_CACHE_KEY = `team_filters_${teamId}`;
+
+  useEffect(() => {
+    // Load saved filters on mount
+    const loadFilters = async () => {
+      try {
+        const saved = await AsyncStorage.getItem(FILTER_CACHE_KEY);
+        if (saved) {
+          const { search, status } = JSON.parse(saved);
+          if (search !== undefined) setSearchQuery(search);
+          if (status !== undefined) setStatusFilter(status);
+        }
+      } catch (e) {
+        console.log("Failed to load filters:", e);
+      }
+    };
+    loadFilters();
+  }, [teamId]);
+
+  useEffect(() => {
+    // Save filters whenever they change
+    const saveFilters = async () => {
+      try {
+        await AsyncStorage.setItem(
+          FILTER_CACHE_KEY,
+          JSON.stringify({
+            search: searchQuery,
+            status: statusFilter,
+          }),
+        );
+      } catch (e) {
+        console.log("Failed to save filters:", e);
+      }
+    };
+    saveFilters();
+  }, [searchQuery, statusFilter, teamId]);
 
   // 2. LIVE PROJECT LISTENER (REAL-TIME UPDATES FOR COUNTS & STATUS)
   useEffect(() => {
@@ -409,11 +455,46 @@ export default function TeamProjectsScreen() {
       ),
     );
 
-    // Απλή ενημέρωση του ρόλου στο Team Doc
+    // Ενημέρωση του ρόλου στο Team Doc
     try {
       await updateDoc(doc(db, "teams", teamId), {
         [`roles.${targetUser.id}`]: newRole,
       });
+
+      // Cleanup: Αφαίρεση από projects όταν αλλάζει ρόλος
+      // ΔΕΝ προσθέτουμε αυτόματα στο νέο array, μόνο αφαιρούμε από το παλιό
+      const q = query(
+        collection(db, "projects"),
+        where("teamId", "==", teamId),
+      );
+      const querySnapshot = await getDocs(q);
+
+      const updatePromises = querySnapshot.docs.map((projectDoc) => {
+        // Case 1: User → Supervisor → αφαίρεση από members[]
+        if (targetUser.role === "User" && newRole === "Supervisor") {
+          return updateDoc(projectDoc.ref, {
+            members: arrayRemove(targetUser.id),
+          });
+        }
+        // Case 2: Supervisor → User → αφαίρεση από supervisors[]
+        else if (targetUser.role === "Supervisor" && newRole === "User") {
+          return updateDoc(projectDoc.ref, {
+            supervisors: arrayRemove(targetUser.id),
+          });
+        }
+        // Case 3: Supervisor → Admin → αφαίρεση από supervisors[]
+        else if (targetUser.role === "Supervisor" && newRole === "Admin") {
+          return updateDoc(projectDoc.ref, {
+            supervisors: arrayRemove(targetUser.id),
+          });
+        }
+        // Case 4: Admin → Supervisor → τίποτα (οι Admins δεν ήταν σε projects)
+        else {
+          return Promise.resolve();
+        }
+      });
+
+      await Promise.all(updatePromises);
     } catch (error) {
       console.error("Role update failed:", error);
       Alert.alert("Σφάλμα", "Η αλλαγή ρόλου απέτυχε.");
@@ -610,15 +691,36 @@ export default function TeamProjectsScreen() {
     setProjectSettingsVisible(false);
   };
 
+  // SEARCH & FILTER LOGIC
   const visibleGroups = groups
     .map((g) => {
-      if (myRole !== "User") return g;
-      const userProjects = g.projects.filter(
-        (p) =>
-          p.members.includes(currentUserId) ||
-          p.supervisors.includes(currentUserId),
-      );
-      return { ...g, projects: userProjects };
+      // 1. Filter by role (existing logic)
+      let roleFilteredProjects = g.projects;
+      if (myRole === "User") {
+        roleFilteredProjects = g.projects.filter(
+          (p) =>
+            p.members.includes(currentUserId) ||
+            p.supervisors.includes(currentUserId),
+        );
+      }
+
+      // 2. Filter by status
+      let statusFilteredProjects = roleFilteredProjects;
+      if (statusFilter !== "all") {
+        statusFilteredProjects = roleFilteredProjects.filter(
+          (p) => p.status === statusFilter,
+        );
+      }
+
+      // 3. Filter by search query (project title only - Option 1)
+      let searchFilteredProjects = statusFilteredProjects;
+      if (searchQuery.trim()) {
+        searchFilteredProjects = statusFilteredProjects.filter((p) =>
+          p.title.toLowerCase().includes(searchQuery.toLowerCase()),
+        );
+      }
+
+      return { ...g, projects: searchFilteredProjects };
     })
     .filter((g) => myRole !== "User" || g.projects.length > 0);
 
@@ -664,6 +766,50 @@ export default function TeamProjectsScreen() {
             <Ionicons name="settings-outline" size={24} color="#333" />
           </TouchableOpacity>
         )}
+      </View>
+
+      {/* SEARCH & FILTER BAR - COMPACT VERSION */}
+      <View style={styles.filterContainer}>
+        <View style={styles.searchBar}>
+          <Ionicons
+            name="search"
+            size={18}
+            color="#94a3b8"
+            style={{ marginRight: 8 }}
+          />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Αναζήτηση projects..."
+            placeholderTextColor="#94a3b8"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery("")}>
+              <Ionicons name="close-circle" size={18} color="#94a3b8" />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Filter Icon Button */}
+        <TouchableOpacity
+          style={[
+            styles.filterIconBtn,
+            statusFilter !== "all" && styles.filterIconBtnActive,
+          ]}
+          onPress={() => setFilterModalVisible(true)}
+        >
+          <Ionicons
+            name="options-outline"
+            size={20}
+            color={statusFilter !== "all" ? "#2563eb" : "#64748b"}
+          />
+          {statusFilter !== "all" && (
+            <View style={styles.filterBadge}>
+              <View style={styles.filterBadgeDot} />
+            </View>
+          )}
+        </TouchableOpacity>
       </View>
 
       {/* CONTENT */}
@@ -1116,6 +1262,154 @@ export default function TeamProjectsScreen() {
         </SafeAreaView>
       </Modal>
 
+      {/* FILTER MODAL - BOTTOM SHEET */}
+      <Modal
+        visible={filterModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setFilterModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View
+            style={[styles.modalContent, { paddingBottom: insets.bottom + 20 }]}
+          >
+            <View style={styles.modalHeaderRow}>
+              <Text style={styles.modalHeader}>Φίλτρα</Text>
+              <TouchableOpacity onPress={() => setFilterModalVisible(false)}>
+                <Ionicons name="close" size={24} color="#999" />
+              </TouchableOpacity>
+            </View>
+
+            <Text
+              style={{
+                fontSize: 14,
+                color: "#64748b",
+                marginBottom: 16,
+                fontWeight: "600",
+              }}
+            >
+              ΚΑΤΑΣΤΑΣΗ PROJECT
+            </Text>
+
+            {/* Filter Options */}
+            <TouchableOpacity
+              style={[
+                styles.filterOption,
+                statusFilter === "all" && styles.filterOptionActive,
+              ]}
+              onPress={() => {
+                setStatusFilter("all");
+                setFilterModalVisible(false);
+              }}
+            >
+              <Ionicons
+                name={statusFilter === "all" ? "radio-button-on" : "radio-button-off"}
+                size={24}
+                color={statusFilter === "all" ? "#2563eb" : "#cbd5e1"}
+              />
+              <Text
+                style={[
+                  styles.filterOptionText,
+                  statusFilter === "all" && styles.filterOptionTextActive,
+                ]}
+              >
+                Όλα
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.filterOption,
+                statusFilter === "active" && styles.filterOptionActive,
+              ]}
+              onPress={() => {
+                setStatusFilter("active");
+                setFilterModalVisible(false);
+              }}
+            >
+              <Ionicons
+                name={statusFilter === "active" ? "radio-button-on" : "radio-button-off"}
+                size={24}
+                color={statusFilter === "active" ? "#2563eb" : "#cbd5e1"}
+              />
+              <Text
+                style={[
+                  styles.filterOptionText,
+                  statusFilter === "active" && styles.filterOptionTextActive,
+                ]}
+              >
+                Ενεργά
+              </Text>
+              <View style={[styles.statusBadge, { backgroundColor: "#dbeafe" }]}>
+                <Text style={{ color: "#2563eb", fontSize: 10, fontWeight: "700" }}>
+                  ACTIVE
+                </Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.filterOption,
+                statusFilter === "pending" && styles.filterOptionActive,
+              ]}
+              onPress={() => {
+                setStatusFilter("pending");
+                setFilterModalVisible(false);
+              }}
+            >
+              <Ionicons
+                name={statusFilter === "pending" ? "radio-button-on" : "radio-button-off"}
+                size={24}
+                color={statusFilter === "pending" ? "#2563eb" : "#cbd5e1"}
+              />
+              <Text
+                style={[
+                  styles.filterOptionText,
+                  statusFilter === "pending" && styles.filterOptionTextActive,
+                ]}
+              >
+                Εκκρεμή
+              </Text>
+              <View style={[styles.statusBadge, { backgroundColor: "#fef3c7" }]}>
+                <Text style={{ color: "#d97706", fontSize: 10, fontWeight: "700" }}>
+                  PENDING
+                </Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.filterOption,
+                statusFilter === "completed" && styles.filterOptionActive,
+              ]}
+              onPress={() => {
+                setStatusFilter("completed");
+                setFilterModalVisible(false);
+              }}
+            >
+              <Ionicons
+                name={statusFilter === "completed" ? "radio-button-on" : "radio-button-off"}
+                size={24}
+                color={statusFilter === "completed" ? "#2563eb" : "#cbd5e1"}
+              />
+              <Text
+                style={[
+                  styles.filterOptionText,
+                  statusFilter === "completed" && styles.filterOptionTextActive,
+                ]}
+              >
+                Ολοκληρωμένα
+              </Text>
+              <View style={[styles.statusBadge, { backgroundColor: "#dcfce7" }]}>
+                <Text style={{ color: "#16a34a", fontSize: 10, fontWeight: "700" }}>
+                  DONE
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       <InputModal
         visible={inputVisible}
         onClose={() => setInputVisible(false)}
@@ -1161,6 +1455,84 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 16, fontWeight: "bold", color: "#111827" },
   headerSubtitle: { color: "#666", fontSize: 10 },
   content: { padding: 20 },
+
+  // SEARCH & FILTER STYLES
+  filterContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "white",
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e7eb",
+  },
+  searchBar: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#f8fafc",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 15,
+    color: "#1e293b",
+  },
+  filterIconBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: "#f8fafc",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    position: "relative",
+  },
+  filterIconBtnActive: {
+    backgroundColor: "#eff6ff",
+    borderColor: "#bfdbfe",
+  },
+  filterBadge: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+  },
+  filterBadgeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#2563eb",
+  },
+  filterOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+    gap: 12,
+  },
+  filterOptionActive: {
+    backgroundColor: "#f8fafc",
+  },
+  filterOptionText: {
+    flex: 1,
+    fontSize: 16,
+    color: "#334155",
+    fontWeight: "500",
+  },
+  filterOptionTextActive: {
+    color: "#2563eb",
+    fontWeight: "700",
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
 
   // GROUPS & PROJECTS UI
   groupContainer: { marginBottom: 30 },

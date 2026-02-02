@@ -209,9 +209,9 @@ export default function ProjectDetailsScreen() {
   const [cloudTasks, setCloudTasks] = useState<Task[]>([]);
   const [localTasks, setLocalTasks] = useState<Task[]>([]);
   const [projectName, setProjectName] = useState("");
-  const [projectStatus, setProjectStatus] = useState<"active" | "completed">(
-    "active",
-  );
+  const [projectStatus, setProjectStatus] = useState<
+    "active" | "pending" | "completed"
+  >("active");
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
 
@@ -319,23 +319,37 @@ export default function ProjectDetailsScreen() {
 
   // --- AUTOMATIC STATUS ONLY ---
   // Ελέγχουμε αν άλλαξε κάτι στα tasks και ενημερώνουμε το status ΑΥΤΟΜΑΤΑ
+  // NEW LOGIC: active → pending → completed
   useEffect(() => {
-    if (combinedTasks.length > 0) {
-      // Έλεγχος: Είναι ΟΛΑ τα tasks ολοκληρωμένα;
-      const allDone = combinedTasks.every((t) => t.status === "completed");
+    if (combinedTasks.length === 0) return;
 
-      // Αν είναι όλα done και το status δεν είναι ήδη completed, ενημέρωσε
-      if (allDone && projectStatus !== "completed") {
-        updateProjectStatus("completed");
-      }
-      // Αν ΔΕΝ είναι όλα done αλλά το status είναι completed, γύρνα το σε active
-      else if (!allDone && projectStatus === "completed") {
-        updateProjectStatus("active");
-      }
+    const completedCount = combinedTasks.filter(
+      (t) => t.status === "completed",
+    ).length;
+    const totalCount = combinedTasks.length;
+
+    let newStatus: "active" | "pending" | "completed";
+
+    if (completedCount === totalCount) {
+      // Όλα τα tasks ολοκληρώθηκαν
+      newStatus = "completed";
+    } else if (completedCount > 0) {
+      // Κάποια tasks ολοκληρώθηκαν (αλλά όχι όλα)
+      newStatus = "pending";
+    } else {
+      // Κανένα task δεν ολοκληρώθηκε
+      newStatus = "active";
+    }
+
+    // Ενημέρωση μόνο αν άλλαξε
+    if (newStatus !== projectStatus) {
+      updateProjectStatus(newStatus);
     }
   }, [combinedTasks]); // Τρέχει όποτε αλλάξει κάτι στα tasks
 
-  const updateProjectStatus = async (newStatus: "active" | "completed") => {
+  const updateProjectStatus = async (
+    newStatus: "active" | "pending" | "completed",
+  ) => {
     setProjectStatus(newStatus); // Ενημέρωση τοπικά για άμεση απόκριση
 
     const net = await Network.getNetworkStateAsync();

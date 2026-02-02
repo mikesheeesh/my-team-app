@@ -1,33 +1,37 @@
-# Dependencies
+# Dependency directories
 node_modules/
+bower_components/
+env/
+venv/
+.env/
+__pycache__/
 
-# Expo & Web Builds
-.expo/
+# Build outputs
 dist/
-web-build/
+build/
+out/
+.next/
+.nuxt/
 
-# Android/iOS builds
-android/
-ios/
-
-# Assets (εικόνες, γραμματοσειρές - δεν χρειάζεται να τις διαβάζει ως κώδικα)
-assets/
-*.png
-*.jpg
-*.jpeg
-*.svg
-*.ttf
-*.otf
-
-# Git & Cache
-.git/
-.cache/
-
-# Firebase & Logs
-.firebase/
+# Logs and databases
 *.log
-firebase-debug.log
+*.sqlite
+logs/
 
-# Environment variables (για ασφάλεια)
-.env
-.env.local
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Large media and assets
+*.mp4
+*.zip
+*.tar.gz
+*.pdf
+assets/large_images/
+
+# Sensitive info (security)
+.env*
+*.pem
+*.key
