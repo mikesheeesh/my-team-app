@@ -55,14 +55,24 @@ export default function JoinTeamScreen() {
     return () => unsubscribe();
   }, []);
 
-  // 2. ΑΥΤΟΜΑΤΗ ΣΥΜΠΛΗΡΩΣΗ ΑΠΟ LINK
+  // 2. ΑΥΤΟΜΑΤΗ ΣΥΜΠΛΗΡΩΣΗ ΚΑΙ AUTO-JOIN ΑΠΟ LINK
   useEffect(() => {
     if (inviteCode) {
-      setCode(String(inviteCode).toUpperCase());
+      const codeStr = String(inviteCode).toUpperCase();
+      setCode(codeStr);
+      // Auto-join when code comes from URL
+      if (!checkingAuth && codeStr.length === 6) {
+        setTimeout(() => handleJoin(), 500);
+      }
     } else if (paramCode) {
-      setCode(String(paramCode).toUpperCase());
+      const codeStr = String(paramCode).toUpperCase();
+      setCode(codeStr);
+      // Auto-join when code comes from URL
+      if (!checkingAuth && codeStr.length === 6) {
+        setTimeout(() => handleJoin(), 500);
+      }
     }
-  }, [inviteCode, paramCode]);
+  }, [inviteCode, paramCode, checkingAuth]);
 
   const handleJoin = async () => {
     Keyboard.dismiss();

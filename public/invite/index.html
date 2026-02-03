@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Πρόσκληση - Ergon Work Management</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .container {
+      background: white;
+      border-radius: 24px;
+      padding: 40px 30px;
+      max-width: 400px;
+      width: 100%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      text-align: center;
+    }
+    .logo {
+      width: 80px;
+      height: 80px;
+      margin: 0 auto 20px;
+      background: #2563eb;
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    h1 {
+      font-size: 24px;
+      color: #111827;
+      margin-bottom: 10px;
+    }
+    .team-name {
+      font-size: 18px;
+      color: #6b7280;
+      margin-bottom: 30px;
+    }
+    .status {
+      padding: 12px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+    .status.opening {
+      background: #eff6ff;
+      color: #1e40af;
+    }
+    .status.error {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    .btn {
+      display: inline-block;
+      padding: 16px 32px;
+      border-radius: 12px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 16px;
+      cursor: pointer;
+      border: none;
+      width: 100%;
+      margin-bottom: 12px;
+    }
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+    }
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #374151;
+    }
+    .spinner {
+      border: 3px solid #f3f4f6;
+      border-top: 3px solid #2563eb;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 20px auto;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .footer {
+      margin-top: 30px;
+      font-size: 12px;
+      color: #9ca3af;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">
+      <img src="/logo.png" alt="Ergon Work Management" />
+    </div>
+    <h1>Πρόσκληση στην ομάδα</h1>
+    <p class="team-name" id="teamName">Φόρτωση...</p>
+
+    <div id="status" class="status opening">
+      <div class="spinner"></div>
+      Άνοιγμα εφαρμογής...
+    </div>
+
+    <div id="actions" style="display: none;">
+      <a href="#" id="openAppBtn" class="btn btn-primary">Άνοιγμα Εφαρμογής</a>
+      <a href="https://expo.dev/artifacts/eas/....apk" class="btn btn-secondary">Κατέβασε την Εφαρμογή</a>
+    </div>
+
+    <p class="footer">Ergon Work Management</p>
+  </div>
+
+  <script>
+    // Extract invite code from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const inviteCode = urlParams.get('code');
+    const teamName = urlParams.get('team') || 'την ομάδα';
+
+    document.getElementById('teamName').textContent = decodeURIComponent(teamName);
+
+    if (!inviteCode) {
+      document.getElementById('status').className = 'status error';
+      document.getElementById('status').innerHTML = '❌ Μη έγκυρος σύνδεσμος πρόσκλησης';
+      document.getElementById('actions').style.display = 'block';
+    } else {
+      // Construct deep link
+      const deepLink = `ergonwork://join?inviteCode=${inviteCode}`;
+
+      // Try to open app
+      function tryOpenApp() {
+        window.location.href = deepLink;
+
+        // If app doesn't open within 2 seconds, show download button
+        setTimeout(() => {
+          document.getElementById('status').style.display = 'none';
+          document.getElementById('actions').style.display = 'block';
+        }, 2000);
+      }
+
+      // Auto-open on mobile
+      if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+        tryOpenApp();
+      } else {
+        // Desktop - show download button immediately
+        document.getElementById('status').className = 'status opening';
+        document.getElementById('status').innerHTML = '📱 Άνοιξε αυτόν τον σύνδεσμο από κινητό';
+        document.getElementById('actions').style.display = 'block';
+      }
+
+      // Manual open button
+      document.getElementById('openAppBtn').href = deepLink;
+      document.getElementById('openAppBtn').onclick = (e) => {
+        e.preventDefault();
+        tryOpenApp();
+      };
+    }
+  </script>
+</body>
+</html>

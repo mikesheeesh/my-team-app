@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(copy \"assets\\\\logo3.png\" \"public\\\\invite\\\\logo.png\")"
+    ]
+  }
+}

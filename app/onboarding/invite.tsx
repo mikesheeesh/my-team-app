@@ -1,7 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
 import NetInfo from "@react-native-community/netinfo";
-import Constants from "expo-constants";
-import * as Linking from "expo-linking";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
@@ -82,28 +80,21 @@ export default function InviteMembersScreen() {
         status: "active",
       });
 
-      const isExpoGo = Constants.appOwnership === "expo";
-      const scheme = isExpoGo ? "exp" : "ergonwork";
+      // Generate web landing page URL (clickable in all messaging apps)
+      const teamNameStr = Array.isArray(teamName) ? teamName[0] : teamName || 'Ομάδα';
+      const webLink = `https://ergon-work-management.vercel.app/join?code=${shortCode}&team=${encodeURIComponent(teamNameStr)}`;
 
-      const deepLink = Linking.createURL("join", {
-        scheme: scheme,
-        queryParams: { inviteCode: shortCode },
-      });
-
-      console.log("Created Link:", deepLink);
-
-      const downloadLink = "https://expo.dev/artifacts/eas/....apk";
+      console.log("Created Web Link:", webLink);
 
       const message = `👋 Πρόσκληση για την ομάδα "${teamName}"
 
-1️⃣ Κατέβασε το App (αν δεν το έχεις):
-${downloadLink}
-
-2️⃣ Πάτα για είσοδο:
-${deepLink}
+🔗 Πάτα για είσοδο:
+${webLink}
 
 🔑 Κωδικός: ${shortCode}
-(Λήγει σε 2 λεπτά)`;
+(Λήγει σε 2 λεπτά)
+
+Αν δεν έχεις εγκατεστημένη την εφαρμογή, ο σύνδεσμος θα σε οδηγήσει στο download.`;
 
       await Share.share({
         message: message,
