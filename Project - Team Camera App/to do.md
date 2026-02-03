@@ -56,6 +56,22 @@
   - Badge δείχνει αριθμό βίντεο (π.χ. "3 videos")
   - Πλήρης ενημέρωση: SyncContext, PDF generation, UI rendering
 
+- [x] **Clickable Invite Links με Web Landing Page (v2.0)**
+  Web-based invite system με clickable https:// links
+  **Λεπτομέρειες:**
+  - Web landing page hosted on Vercel (free tier)
+  - Clickable links σε όλα τα messaging apps (WhatsApp, Viber, Messenger, Email)
+  - Auto-join functionality (zero manual code entry)
+  - Smart device detection (mobile vs desktop)
+  - Auto-redirect σε app μέσω deep linking
+  - Download fallback για χρήστες χωρίς εγκατεστημένη app
+  - Branded landing page με team logo και όνομα
+  - Professional UX με gradient background, spinner animations
+  - EAS build integration για APK download: https://expo.dev/artifacts/eas/4bXP8oAFwjZMK61hxRLpgx.apk
+  - Vercel deployment με rewrites configuration
+  - ~3 second end-to-end join workflow
+  - 100% free hosting (Vercel free tier: 100GB/month)
+
 ---
 
 ## 🚧 Pending Features
@@ -95,12 +111,12 @@
 
 | Κατηγορία | Completed | Pending | Total |
 |-----------|-----------|---------|-------|
-| Core Features | 8 | 0 | 8 |
+| Core Features | 9 | 0 | 9 |
 | New Features | 0 | 2 | 2 |
 | Rejected | 1 | 0 | 1 |
-| **ΣΥΝΟΛΟ** | **8** | **2** | **10** |
+| **ΣΥΝΟΛΟ** | **9** | **2** | **11** |
 
-**Progress:** 80% ολοκληρωμένο
+**Progress:** 81.8% ολοκληρωμένο
 
 ---
 
@@ -125,6 +141,13 @@
   - No preview modal - καλύτερο UX
   - Auto-refresh gallery με useEffect
   - GPS για κάθε βίντεο ξεχωριστά
+- **Clickable Invite Links (v2.0):**
+  - Web landing page: https://ergon-work-management.vercel.app
+  - Clickable https:// links αντί για custom scheme (ergonwork://)
+  - Auto-join με zero manual code entry
+  - Hosted on Vercel free tier (100GB bandwidth/month)
+  - Download button με real EAS build URL
+  - Professional branded UX με app logo
 
 ---
 

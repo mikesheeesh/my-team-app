@@ -5,20 +5,22 @@
 2. [Team Creation Flow](#2-team-creation-flow)
 3. [Invite System Flow](#3-invite-system-flow)
 4. [Join Team Flow](#4-join-team-flow)
-5. [Project Management Flow](#5-project-management-flow)
-6. [Task Management Flow](#6-task-management-flow)
-7. [Photo Task Flow](#7-photo-task-flow)
-8. [Video Task Flow](#8-video-task-flow)
-9. [Image Editor Flow](#9-image-editor-flow)
-10. [Task Edit & Delete Flow](#10-task-edit--delete-flow)
-11. [Media Sharing Flow](#11-media-sharing-flow)
-12. [Offline Sync Flow](#12-offline-sync-flow)
-13. [Auto-Complete Project Flow](#13-auto-complete-project-flow)
-14. [PDF Generation Flow](#14-pdf-generation-flow)
-15. [User Role Management Flow](#15-user-role-management-flow)
-16. [Project Search & Filter Flow](#16-project-search--filter-flow)
-17. [3-Stage Project Status Flow](#17-3-stage-project-status-flow)
-18. [Role Change Cleanup Flow](#18-role-change-cleanup-flow)
+5. [Web Landing Page Flow](#5-web-landing-page-flow-v20)
+6. [Project Management Flow](#6-project-management-flow)
+7. [Task Management Flow](#7-task-management-flow)
+8. [Photo Task Flow](#8-photo-task-flow)
+9. [Video Task Flow](#9-video-task-flow)
+10. [Image Editor Flow](#10-image-editor-flow)
+11. [Task Edit & Delete Flow](#11-task-edit--delete-flow)
+12. [Media Sharing Flow](#12-media-sharing-flow)
+13. [Offline Sync Flow](#13-offline-sync-flow)
+14. [Auto-Complete Project Flow](#14-auto-complete-project-flow)
+15. [PDF Generation Flow](#15-pdf-generation-flow)
+16. [User Role Management Flow](#16-user-role-management-flow)
+17. [Project Search & Filter Flow](#17-project-search--filter-flow)
+18. [3-Stage Project Status Flow](#18-3-stage-project-status-flow)
+19. [Role Change Cleanup Flow](#19-role-change-cleanup-flow)
+20. [Firebase Storage Migration Flow](#20-firebase-storage-migration-flow-v20)
 
 ---
 
@@ -165,7 +167,7 @@ teams/abc123
 
 ---
 
-## 3. INVITE SYSTEM FLOW
+## 3. INVITE SYSTEM FLOW (v2.0 - Web Landing Page)
 
 ### Αρχείο: `app/onboarding/invite.tsx`
 
@@ -200,43 +202,76 @@ teams/abc123
     └── status: "active"
   })
 
-ΒΗΜΑ 6: Generate Deep Link
-├── scheme = isExpoGo ? "exp" : "ergonwork"
-└── deepLink = Linking.createURL("join", {
-    ├── scheme: scheme
-    └── queryParams: { inviteCode: shortCode }
-  })
+ΒΗΜΑ 6: Generate Web Landing Page URL (v2.0)
+├── teamNameStr = Array.isArray(teamName) ? teamName[0] : teamName || 'Ομάδα'
+└── webLink = `https://ergon-work-management.vercel.app/join?code=${shortCode}&team=${encodeURIComponent(teamNameStr)}`
 
-ΒΗΜΑ 7: Share Message
+ΒΗΜΑ 7: Share Message με Clickable Link
 ├── Message includes:
-│   ├── App download link
-│   ├── Deep link
-│   └── 6-digit code
+│   ├── Web landing page URL (clickable https://)
+│   ├── 6-digit code
+│   └── Expiration notice (2 λεπτά)
 └── Share.share({ message, title })
 ```
 
-**Generated Deep Link Example:**
+**Generated Web Link Example:**
 ```
-ergonwork://join?inviteCode=ABC123
+https://ergon-work-management.vercel.app/join?code=ABC123&team=Omega%20Constructions
 ```
 
-**Share Message Example:**
+**Share Message Example (v2.0):**
 ```
 👋 Πρόσκληση για την ομάδα "Omega Constructions"
 
-1️⃣ Κατέβασε το App:
-https://expo.dev/artifacts/...
-
-2️⃣ Πάτα για είσοδο:
-ergonwork://join?inviteCode=ABC123
+🔗 Πάτα για είσοδο:
+https://ergon-work-management.vercel.app/join?code=ABC123&team=Omega%20Constructions
 
 🔑 Κωδικός: ABC123
 (Λήγει σε 2 λεπτά)
+
+Αν δεν έχεις εγκατεστημένη την εφαρμογή, ο σύνδεσμος θα σε οδηγήσει στο download.
+```
+
+### Web Landing Page Flow (v2.0)
+
+**Αρχείο:** `public/invite/index.html`
+
+```
+ΒΗΜΑ 1: Landing Page Opens
+├── Extract URL parameters:
+│   ├── code = urlParams.get("code")
+│   └── teamName = urlParams.get("team")
+└── Display team name: decodeURIComponent(teamName)
+
+ΒΗΜΑ 2: Validate Invite Code
+├── ΑΝ !inviteCode:
+│   ├── Show error status
+│   └── Display "Μη έγκυρος σύνδεσμος πρόσκλησης"
+└── ΑΛΛΙΩΣ συνέχεια
+
+ΒΗΜΑ 3: Device Detection
+├── userAgent check: /Android|iPhone|iPad|iPod/i
+├── ΑΝ mobile:
+│   └── tryOpenApp() → Auto-redirect
+└── ΑΝ desktop:
+    ├── Show "Άνοιξε από κινητό" message
+    └── Display action buttons
+
+ΒΗΜΑ 4: App Redirect (Mobile)
+├── Construct deep link:
+│   └── `ergonwork://join?inviteCode=${inviteCode}`
+├── window.location.href = deepLink
+└── setTimeout(2000) → Show fallback buttons
+
+ΒΗΜΑ 5: Fallback Actions
+├── "Άνοιγμα Εφαρμογής" button → Manual deep link trigger
+└── "Κατέβασε την Εφαρμογή" button → EAS build download
+    └── https://expo.dev/artifacts/eas/4bXP8oAFwjZMK61hxRLpgx.apk
 ```
 
 ---
 
-## 4. JOIN TEAM FLOW
+## 4. JOIN TEAM FLOW (v2.0 - Auto-Join)
 
 ### Αρχείο: `app/join.tsx`
 
@@ -248,12 +283,15 @@ ergonwork://join?inviteCode=ABC123
 │   └── router.replace("/")
 └── ΑΛΛΙΩΣ setCheckingAuth(false)
 
-ΒΗΜΑ 2: Auto-fill from Deep Link
+ΒΗΜΑ 2: Auto-fill from Deep Link + Auto-Join (v2.0)
 ├── ΑΝ inviteCode ή paramCode:
-│   └── setCode(inviteCode.toUpperCase())
+│   ├── codeStr = String(inviteCode).toUpperCase()
+│   ├── setCode(codeStr)
+│   └── ΑΝ !checkingAuth && codeStr.length === 6:
+│       └── setTimeout(() => handleJoin(), 500)  // AUTO-JOIN!
 └── ΑΛΛΙΩΣ manual input
 
-ΒΗΜΑ 3: Network Check
+ΒΗΜΑ 3: Network Check (στο handleJoin)
 ├── NetInfo.fetch()
 └── ΑΝ !isConnected → Alert "Offline"
 
@@ -284,18 +322,36 @@ ergonwork://join?inviteCode=ABC123
 │   └── router.replace("/dashboard")
 └── ΑΛΛΙΩΣ συνέχεια
 
-ΒΗΜΑ 8: Add User to Team
+ΒΗΜΑ 8: Add User to Team με Assigned Role
 └── updateDoc(teamRef, {
     ├── memberIds: arrayUnion(userId)
-    └── roles.${userId}: inviteData.role
+    └── roles.${userId}: inviteData.role  // Role από invite
   })
 
-ΒΗΜΑ 9: Cleanup Invite
+ΒΗΜΑ 9: Cleanup Invite (One-time Use)
 └── deleteDoc(inviteDoc.ref)
 
 ΒΗΜΑ 10: Success
 ├── Alert "Καλωσήρθατε στην ομάδα X ως Y"
 └── router.replace("/dashboard")
+```
+
+**Complete User Journey (v2.0):**
+```
+[User receives WhatsApp message με clickable https:// link]
+        ↓
+[User πατάει link → Landing page opens]
+        ↓
+[Landing page detects mobile → Auto-redirect σε app]
+        ↓
+[App opens → join.tsx receives inviteCode parameter]
+        ↓
+[Auto-join triggers → User joins team αυτόματα]
+        ↓
+[Success message → Redirect to dashboard]
+
+ΣΥΝΟΛΙΚΟΣ ΧΡΟΝΟΣ: ~3 δευτερόλεπτα
+ΧΡΗΣΤΗΣ: Zero manual actions (εκτός από το tap του link)
 ```
 
 **State Diagram:**
@@ -323,7 +379,172 @@ ergonwork://join?inviteCode=ABC123
 
 ---
 
-## 5. PROJECT MANAGEMENT FLOW
+## 5. WEB LANDING PAGE FLOW (v2.0)
+
+### Deployment: Vercel (Free Tier)
+
+**URL:** https://ergon-work-management.vercel.app
+
+### 5.1 Αρχεία
+```
+public/invite/
+├── index.html      # Landing page με auto-redirect logic
+├── logo.png        # App logo (copied from assets/logo3.png)
+└── vercel.json     # Routing configuration
+```
+
+### 5.2 Landing Page Load Flow
+```
+ΒΗΜΑ 1: URL Parse
+├── User clicks: https://ergon-work-management.vercel.app/join?code=ABC123&team=TeamName
+├── JavaScript extracts parameters:
+│   ├── const inviteCode = urlParams.get("code")
+│   └── const teamName = urlParams.get("team") || "την ομάδα"
+└── Display team name: decodeURIComponent(teamName)
+
+ΒΗΜΑ 2: Code Validation
+├── ΑΝ !inviteCode:
+│   ├── status.className = "status error"
+│   ├── status.innerHTML = "❌ Μη έγκυρος σύνδεσμος πρόσκλησης"
+│   └── Show action buttons (no deep link)
+└── ΑΛΛΙΩΣ συνέχεια
+
+ΒΗΜΑ 3: Construct Deep Link
+└── const deepLink = `ergonwork://join?inviteCode=${inviteCode}`
+
+ΒΗΜΑ 4: Device Detection
+├── Check user agent: /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+├── ΑΝ mobile device:
+│   └── tryOpenApp() → Auto-redirect
+└── ΑΝ desktop:
+    ├── status.innerHTML = "📱 Άνοιξε αυτόν τον σύνδεσμο από κινητό"
+    └── Show action buttons immediately
+
+ΒΗΜΑ 5: Auto-Redirect (Mobile Only)
+```javascript
+function tryOpenApp() {
+  window.location.href = deepLink;
+
+  // If app doesn't open within 2 seconds, show download button
+  setTimeout(() => {
+    document.getElementById("status").style.display = "none";
+    document.getElementById("actions").style.display = "block";
+  }, 2000);
+}
+```
+
+ΒΗΜΑ 6: Fallback Buttons
+├── "Άνοιγμα Εφαρμογής" button:
+│   ├── href = deepLink
+│   └── onclick → tryOpenApp()
+└── "Κατέβασε την Εφαρμογή" button:
+    └── href = https://expo.dev/artifacts/eas/4bXP8oAFwjZMK61hxRLpgx.apk
+```
+
+### 5.3 Vercel Configuration (`vercel.json`)
+```json
+{
+  "rewrites": [
+    {
+      "source": "/join",
+      "destination": "/index.html"
+    }
+  ]
+}
+```
+
+**Rewrites Logic:**
+- `/join?code=ABC` → serves `index.html` (preserves query params)
+- Without rewrites → `/join` would return 404
+
+### 5.4 Deployment Flow
+```
+ΒΗΜΑ 1: Install Vercel CLI
+└── npm install -g vercel
+
+ΒΗΜΑ 2: Login
+└── vercel login
+
+ΒΗΜΑ 3: Deploy
+└── vercel --prod --cwd public/invite --yes
+
+ΒΗΜΑ 4: Output
+├── Production URL: https://ergon-work-management.vercel.app
+└── Inspect URL: https://vercel.com/myteamapps-projects/ergon-work-management/...
+```
+
+### 5.5 Cost Analysis
+```
+Vercel Free Tier:
+├── Bandwidth: 100GB/month
+├── Builds: Unlimited
+├── Deployments: Unlimited
+├── Custom domains: Yes (optional)
+└── COST: $0/month
+```
+
+### 5.6 User Experience Metrics
+```
+SCENARIO A: App Installed (Mobile)
+─────────────────────────────────────
+1. User clicks link → 0.5s
+2. Landing page loads → 0.8s
+3. Auto-redirect triggers → 0.1s
+4. App opens → 0.5s
+5. Auto-join completes → 1.0s
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TOTAL: ~3 seconds
+USER ACTIONS: 1 tap
+
+SCENARIO B: App NOT Installed (Mobile)
+───────────────────────────────────────
+1. User clicks link → 0.5s
+2. Landing page loads → 0.8s
+3. Redirect fails (2s timeout) → 2.0s
+4. Download button appears → 0.1s
+5. User taps download → 0.2s
+6. APK downloads → 5-10s
+7. User installs app → 15-30s
+8. User returns to link → 1s
+9. Repeat Scenario A → 3s
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TOTAL: ~30-50 seconds
+USER ACTIONS: 3-4 taps
+
+SCENARIO C: Desktop
+───────────────────
+1. User opens link → 1s
+2. Landing page shows "Open from mobile" → 0.5s
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TOTAL: ~1.5 seconds
+USER ACTIONS: User needs to switch to mobile device
+```
+
+### 5.7 Advantages Over Custom Scheme Links
+```
+❌ OLD (ergonwork://join?inviteCode=ABC123)
+───────────────────────────────────────────────
+- Not clickable in WhatsApp/Viber/Messenger
+- Shows as plain text (user must copy/paste code)
+- No download option if app not installed
+- Poor UX (manual code entry)
+- Desktop users have no fallback
+
+✅ NEW (https://ergon-work-management.vercel.app/join?code=ABC123)
+───────────────────────────────────────────────────────────────────
+- Clickable blue link in ALL messaging apps
+- One-tap workflow
+- Auto-join (no manual code entry)
+- Download fallback for new users
+- Desktop-friendly messaging
+- Professional branded experience
+- Analytics-ready (can add tracking)
+- SEO-friendly (search engines can index)
+```
+
+---
+
+## 6. PROJECT MANAGEMENT FLOW
 
 ### Αρχείο: `app/team/[id].tsx`
 

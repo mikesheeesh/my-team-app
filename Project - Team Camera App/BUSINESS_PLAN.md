@@ -258,8 +258,11 @@ invites/{inviteId}
 - Δημιουργία 6-ψήφιου κωδικού πρόσκλησης
 - Επιλογή ρόλου νέου μέλους
 - 2 λεπτά expiration time
+- **Web Landing Page**: Clickable https:// links για όλα τα messaging apps
 - Deep linking support (ergonwork://join?inviteCode=XXXXXX)
+- Auto-join functionality (αυτόματη είσοδος χωρίς manual code entry)
 - One-time use (διαγράφεται μετά τη χρήση)
+- Download link για χρήστες χωρίς εγκατεστημένη εφαρμογή
 
 ### 5.4 Project Management
 - Οργάνωση σε Groups
@@ -441,6 +444,85 @@ updatePromises.map(projectDoc => {
 - Prevents permission escalation bugs
 - Supports dynamic team restructuring
 
+### 5.15 Clickable Invite Links με Web Landing Page (v2.0)
+**Αρχεία:** `public/invite/index.html`, `app/onboarding/invite.tsx`, `app/join.tsx`
+
+#### Problem Solved:
+Custom URL schemes (`ergonwork://`) δεν εμφανίζονται ως μπλε clickable links σε messaging apps (WhatsApp, Viber, Messenger, Email).
+
+#### Solution:
+Web landing page hosted on Vercel που:
+- Λειτουργεί ως clickable https:// link
+- Auto-redirect στην εφαρμογή μέσω deep link
+- Fallback download button για χρήστες χωρίς εγκατεστημένη app
+
+#### Architecture:
+```
+User clicks: https://ergon-work-management.vercel.app/join?code=ABC123&team=TeamName
+    ↓
+Landing page loads (web)
+    ↓
+JavaScript detects mobile/desktop
+    ↓
+Mobile: Auto-redirect → ergonwork://join?inviteCode=ABC123
+    ↓
+If app installed: Opens app → Auto-join team
+If app NOT installed: Shows download button
+```
+
+#### Features:
+- **Clickable Links**: Https:// URLs εμφανίζονται μπλε σε όλα τα messaging apps
+- **Auto-Join**: Χρήστες μπαίνουν στην ομάδα αυτόματα χωρίς manual code entry
+- **Smart Detection**: Auto-detects mobile vs desktop, app installed or not
+- **Branded Landing Page**: Custom logo, team name display, professional styling
+- **Download Integration**: EAS build download link για νέους χρήστες
+- **Free Hosting**: Vercel free tier (100GB bandwidth/month)
+
+#### Technical Implementation:
+
+**Invite Generation** (`app/onboarding/invite.tsx`):
+```typescript
+// Web URL instead of custom scheme
+const webLink = `https://ergon-work-management.vercel.app/join?code=${shortCode}&team=${encodeURIComponent(teamName)}`;
+
+const message = `👋 Πρόσκληση για την ομάδα "${teamName}"
+
+🔗 Πάτα για είσοδο:
+${webLink}
+
+🔑 Κωδικός: ${shortCode}
+(Λήγει σε 2 λεπτά)`;
+```
+
+**Auto-Join Logic** (`app/join.tsx`):
+```typescript
+useEffect(() => {
+  if (inviteCode && !checkingAuth && inviteCode.length === 6) {
+    setTimeout(() => handleJoin(), 500);
+  }
+}, [inviteCode, checkingAuth]);
+```
+
+**Landing Page** (`public/invite/index.html`):
+- Mobile detection με user-agent check
+- Auto-redirect με `window.location.href = deepLink`
+- 2-second fallback για download button
+- Team name display από URL parameters
+
+#### Benefits:
+- ✅ Works in all messaging apps (WhatsApp, Viber, Messenger, Email, SMS)
+- ✅ One-tap join workflow (no manual code entry)
+- ✅ Professional user experience με branded landing page
+- ✅ Graceful fallback για χρήστες χωρίς app
+- ✅ Zero cost (Vercel free tier)
+- ✅ No backend needed (static HTML + JavaScript)
+
+#### Deployment:
+- Platform: Vercel
+- URL: https://ergon-work-management.vercel.app
+- Deploy Command: `vercel --prod --cwd public/invite --yes`
+- Configuration: `public/invite/vercel.json` με rewrites for `/join` route
+
 ---
 
 ## 6. BUSINESS MODEL
@@ -483,6 +565,9 @@ updatePromises.map(projectDoc => {
 - [x] Project search & filter (v1.1.0)
 - [x] 3-stage project status (v1.1.0)
 - [x] Role change cleanup logic (v1.1.0)
+- [x] Clickable invite links με web landing page (v2.0)
+- [x] Auto-join functionality (v2.0)
+- [x] Firebase Storage migration (v2.0)
 
 ### Phase 2 - Enhanced Features
 - [ ] Push notifications
