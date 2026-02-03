@@ -32,14 +32,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // FIREBASE
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, onSnapshot, updateDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, updateDoc } from "firebase/firestore";
 import { auth, db } from "../../firebaseConfig";
 
 // STORAGE UTILITIES
 import {
+  deleteMediaFromStorage,
   uploadImageToStorage,
   uploadVideoToStorage,
-  deleteMediaFromStorage,
   generateMediaId,
 } from "../../utils/storageUtils";
 
@@ -67,7 +67,8 @@ type VideoTask = {
   description?: string;
   type: "video";
   status: "pending" | "completed";
-  value: string;
+  videos: string[];
+  videoLocations: GeoPoint[];
   isLocal?: boolean;
 };
 
@@ -92,6 +93,21 @@ type GeneralTask = {
 };
 
 type Task = PhotoTask | VideoTask | MeasurementTask | GeneralTask;
+
+// Backward compatibility helper for old VideoTask format
+function normalizeVideoTask(task: any): Task {
+  if (task.type === "video") {
+    // Old format: value + videoLocation → New format: videos[] + videoLocations[]
+    if ("value" in task && !("videos" in task)) {
+      return {
+        ...task,
+        videos: task.value ? [task.value] : [],
+        videoLocations: task.videoLocation ? [task.videoLocation] : [],
+      } as VideoTask;
+    }
+  }
+  return task as Task;
+}
 
 const OFFLINE_QUEUE_KEY = "offline_tasks_queue_";
 const PROJECT_CACHE_KEY_PREFIX = "cached_project_tasks_";
@@ -170,7 +186,7 @@ const TaskItem = ({ item, onPress, onLongPress, isSyncing }: any) => {
               <Ionicons name="camera-outline" size={24} color="#cbd5e1" />
             )
           ) : item.type === "video" ? (
-            item.value && item.value.length > 0 ? (
+            item.videos && item.videos.length > 0 ? (
               <View style={styles.thumbnailBox}>
                 <View
                   style={[
@@ -185,7 +201,7 @@ const TaskItem = ({ item, onPress, onLongPress, isSyncing }: any) => {
                   <Ionicons name="play" size={20} color="white" />
                 </View>
                 <View style={styles.badge}>
-                  <Text style={styles.badgeText}>1</Text>
+                  <Text style={styles.badgeText}>{item.videos.length}</Text>
                 </View>
               </View>
             ) : (
@@ -209,7 +225,7 @@ export default function ProjectDetailsScreen() {
   const { id } = useLocalSearchParams();
   const projectId = id as string;
   const insets = useSafeAreaInsets();
-  const { isSyncing, syncNow } = useSync();
+  const { isSyncing, syncNow, justSyncedProjectId } = useSync();
 
   const CACHE_KEY = PROJECT_CACHE_KEY_PREFIX + projectId;
   const QUEUE_KEY = OFFLINE_QUEUE_KEY + projectId;
@@ -277,13 +293,13 @@ export default function ProjectDetailsScreen() {
         const cached = await AsyncStorage.getItem(CACHE_KEY);
         if (cached) {
           const d = JSON.parse(cached);
-          setCloudTasks(d.tasks || []);
+          setCloudTasks((d.tasks || []).map(normalizeVideoTask));
           setProjectName(d.name || "");
           setProjectStatus(d.status || "active");
           setTeamId(d.teamId || "");
         }
         const local = await AsyncStorage.getItem(QUEUE_KEY);
-        if (local) setLocalTasks(JSON.parse(local));
+        if (local) setLocalTasks(JSON.parse(local).map(normalizeVideoTask));
       } catch (e) {
       } finally {
         setLoading(false);
@@ -300,7 +316,7 @@ export default function ProjectDetailsScreen() {
         return onSnapshot(doc(db, "projects", projectId), (snap) => {
           if (snap.exists()) {
             const data = snap.data();
-            const fetched = data.tasks || [];
+            const fetched = (data.tasks || []).map(normalizeVideoTask);
             setCloudTasks(fetched);
             setProjectName(data.title || "Project");
             setProjectStatus(data.status || "active");
@@ -321,11 +337,21 @@ export default function ProjectDetailsScreen() {
     return () => unsub && unsub();
   }, [projectId]);
 
+  // --- SYNC COMPLETION LISTENER ---
+  useEffect(() => {
+    if (justSyncedProjectId === projectId) {
+      // Sync completed for this project - clear local queue
+      console.log("✅ Sync completed for this project - clearing local queue");
+      setLocalTasks([]);
+      AsyncStorage.removeItem(QUEUE_KEY);
+    }
+  }, [justSyncedProjectId, projectId]);
+
   // --- MERGE LISTS ---
   const combinedTasks = useMemo(() => {
     const map = new Map<string, Task>();
-    cloudTasks.forEach((t) => map.set(t.id, t));
-    localTasks.forEach((t) => map.set(t.id, t));
+    cloudTasks.forEach((t) => map.set(t.id, normalizeVideoTask(t)));
+    localTasks.forEach((t) => map.set(t.id, normalizeVideoTask(t)));
     return Array.from(map.values()).filter((t) => t && t.id);
   }, [cloudTasks, localTasks]);
 
@@ -358,6 +384,28 @@ export default function ProjectDetailsScreen() {
       updateProjectStatus(newStatus);
     }
   }, [combinedTasks]); // Τρέχει όποτε αλλάξει κάτι στα tasks
+
+  // --- AUTO-REFRESH GALLERY ---
+  useEffect(() => {
+    if (activeTaskForGallery) {
+      const updatedTask = combinedTasks.find(t => t.id === activeTaskForGallery.id);
+      if (updatedTask) {
+        setActiveTaskForGallery(updatedTask);
+
+        // If currently viewing deleted media, reset view
+        if (selectedMediaForView) {
+          const isPhotoStillThere = updatedTask.type === "photo" &&
+            updatedTask.images.includes(selectedMediaForView);
+          const isVideoStillThere = updatedTask.type === "video" &&
+            updatedTask.videos.includes(selectedMediaForView);
+
+          if (!isPhotoStillThere && !isVideoStillThere) {
+            setSelectedMediaForView(null);
+          }
+        }
+      }
+    }
+  }, [combinedTasks]);
 
   const updateProjectStatus = async (
     newStatus: "active" | "pending" | "completed",
@@ -397,9 +445,15 @@ export default function ProjectDetailsScreen() {
         if (localStatus === cloudStatus && localImgCount === cloudImgCount) {
           return false;
         }
+      } else if (localT.type === "video" && cloudT.type === "video") {
+        const localVidCount = localT.videos.length;
+        const cloudVidCount = cloudT.videos.length;
+        if (localStatus === cloudStatus && localVidCount === cloudVidCount) {
+          return false;
+        }
       } else if (
-        (localT.type === "video" || localT.type === "measurement" || localT.type === "general") &&
-        (cloudT.type === "video" || cloudT.type === "measurement" || cloudT.type === "general")
+        (localT.type === "measurement" || localT.type === "general") &&
+        (cloudT.type === "measurement" || cloudT.type === "general")
       ) {
         const localVal = localT.value;
         const cloudVal = cloudT.value;
@@ -419,21 +473,91 @@ export default function ProjectDetailsScreen() {
 
   // --- ACTIONS ---
   const saveTaskLocal = async (task: Task) => {
-    const taskWithFlag = { ...task, isLocal: true };
-    setLocalTasks((prev) => {
-      const newLocalMap = new Map(prev.map((t) => [t.id, t]));
-      newLocalMap.set(taskWithFlag.id, taskWithFlag);
-      const newLocalList = Array.from(newLocalMap.values());
-      AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(newLocalList));
-      return newLocalList;
-    });
-
-    if (activeTaskForGallery && activeTaskForGallery.id === task.id)
-      setActiveTaskForGallery(taskWithFlag);
-
+    // Check WiFi first
     const net = await Network.getNetworkStateAsync();
-    if (net.isConnected) {
-      syncNow().catch((e) => console.log("Sync skipped/failed"));
+    const hasWiFi = net.isConnected && net.type === Network.NetworkStateType.WIFI;
+
+    if (hasWiFi && teamId) {
+      // WiFi available → Upload directly to Firestore/Storage
+      console.log("📡 WiFi detected - Uploading directly to cloud...");
+      try {
+        let finalTask: any = { ...task };
+
+        // Upload media to Storage if file:// URI exists
+        if (task.type === "photo" && task.images?.length > 0) {
+          const uploadedImages: string[] = [];
+          for (const imgUri of task.images) {
+            if (imgUri.startsWith("file://")) {
+              const mediaId = generateMediaId();
+              const storageUrl = await uploadImageToStorage(imgUri, teamId, projectId, task.id, mediaId);
+              uploadedImages.push(storageUrl);
+            } else {
+              uploadedImages.push(imgUri);
+            }
+          }
+          finalTask.images = uploadedImages;
+        } else if (task.type === "video" && task.videos?.length > 0) {
+          const uploadedVideos: string[] = [];
+          for (const videoUri of task.videos) {
+            if (videoUri.startsWith("file://")) {
+              const mediaId = generateMediaId();
+              const storageUrl = await uploadVideoToStorage(videoUri, teamId, projectId, task.id, mediaId);
+              uploadedVideos.push(storageUrl);
+            } else {
+              uploadedVideos.push(videoUri);
+            }
+          }
+          finalTask.videos = uploadedVideos;
+        }
+
+        // Remove isLocal flag
+        const { isLocal, ...cleanTask } = finalTask;
+
+        // Update Firestore directly
+        const projectRef = doc(db, "projects", projectId);
+        const projectSnap = await getDoc(projectRef);
+        if (projectSnap.exists()) {
+          const currentTasks = projectSnap.data().tasks || [];
+          const existingIndex = currentTasks.findIndex((t: any) => t.id === cleanTask.id);
+          if (existingIndex !== -1) {
+            currentTasks[existingIndex] = cleanTask;
+          } else {
+            currentTasks.push(cleanTask);
+          }
+          await updateDoc(projectRef, { tasks: currentTasks });
+          console.log("✅ Uploaded directly to Firestore");
+
+          // Update local cloudTasks state immediately for UI refresh
+          setCloudTasks(currentTasks);
+        }
+      } catch (error) {
+        console.error("❌ Direct upload failed:", error);
+        // Fallback to local save
+        const taskWithFlag = { ...task, isLocal: true };
+        setLocalTasks((prev) => {
+          const newLocalMap = new Map(prev.map((t) => [t.id, t]));
+          newLocalMap.set(taskWithFlag.id, taskWithFlag);
+          const newLocalList = Array.from(newLocalMap.values());
+          AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(newLocalList));
+          return newLocalList;
+        });
+        if (activeTaskForGallery && activeTaskForGallery.id === task.id)
+          setActiveTaskForGallery(taskWithFlag);
+      }
+    } else {
+      // No WiFi → Save locally
+      console.log("💾 No WiFi - Saving locally...");
+      const taskWithFlag = { ...task, isLocal: true };
+      setLocalTasks((prev) => {
+        const newLocalMap = new Map(prev.map((t) => [t.id, t]));
+        newLocalMap.set(taskWithFlag.id, taskWithFlag);
+        const newLocalList = Array.from(newLocalMap.values());
+        AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(newLocalList));
+        return newLocalList;
+      });
+
+      if (activeTaskForGallery && activeTaskForGallery.id === task.id)
+        setActiveTaskForGallery(taskWithFlag);
     }
   };
 
@@ -472,7 +596,8 @@ export default function ProjectDetailsScreen() {
       taskToSave = {
         ...baseTask,
         type: "video",
-        value: existingTask?.type === "video" ? existingTask.value : "",
+        videos: existingTask?.type === "video" ? existingTask.videos : [],
+        videoLocations: existingTask?.type === "video" ? existingTask.videoLocations : [],
       };
     } else if (newTaskType === "measurement") {
       const existingTask = editingTaskId ? combinedTasks.find((t) => t.id === editingTaskId) : null;
@@ -550,22 +675,20 @@ export default function ProjectDetailsScreen() {
   // --- CAMERA LOGIC ---
   const launchCamera = async (task: Task) => {
     try {
-      // 1. Get Location
-      let gpsLoc: GeoPoint | undefined;
-      try {
-        const loc = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        gpsLoc = { lat: loc.coords.latitude, lng: loc.coords.longitude };
-      } catch (e) {
-        console.log("GPS Failed");
-      }
+      // 1. Start GPS fetch in background (non-blocking)
+      const gpsPromise = Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      }).catch((e) => {
+        console.log("GPS Failed:", e);
+        return null;
+      });
 
+      // 2. Launch camera immediately (don't wait for GPS)
       if (task.type === "video") {
         const r = await ImagePicker.launchCameraAsync({
           mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-          videoMaxDuration: 4,
-          videoQuality: ImagePicker.UIImagePickerControllerQualityType.High, // 1080p quality
+          videoMaxDuration: 3, // 3 seconds max for smaller file size
+          videoQuality: 0, // 0 = Low quality (native value, works on Android too)
         });
 
         if (!r.canceled && r.assets[0].uri) {
@@ -573,26 +696,26 @@ export default function ProjectDetailsScreen() {
           try {
             const videoUri = r.assets[0].uri;
 
-            // Validate teamId before upload
-            if (!teamId) {
-              Alert.alert("Σφάλμα", "Δεν βρέθηκε η ομάδα του project.");
-              setProcessing(false);
-              return;
-            }
+            console.log("🎥 Video captured (OFFLINE-FIRST)");
+            console.log("  - Video file:// URI:", videoUri);
 
-            // Upload to Firebase Storage
-            const mediaId = generateMediaId();
-            const storageUrl = await uploadVideoToStorage(
-              videoUri,
-              teamId,
-              projectId,
+            // Wait for GPS to complete
+            const gpsResult = await gpsPromise;
+            const gpsLoc = gpsResult ? { lat: gpsResult.coords.latitude, lng: gpsResult.coords.longitude } : undefined;
+
+            // OFFLINE-FIRST: Save file:// URI directly to AsyncStorage
+            // SyncContext will upload to Storage when online
+            console.log("💾 Saving file:// URI to AsyncStorage...");
+            await addMediaToTask(
               task.id,
-              mediaId
+              videoUri, // Save local file:// URI, NOT Storage URL
+              gpsLoc
             );
 
-            // Save Storage URL to Firestore
-            await addMediaToTask(task.id, storageUrl, gpsLoc);
+            console.log("✓ Video saved successfully (offline-first)");
+            console.log("  - Will upload to Storage when online via SyncContext");
           } catch (e: any) {
+            console.error("❌ Video save error:", e);
             Alert.alert("Σφάλμα", e.message || "Απέτυχε η αποθήκευση του βίντεο.");
           } finally {
             setProcessing(false);
@@ -606,6 +729,10 @@ export default function ProjectDetailsScreen() {
         });
 
         if (!r.canceled && r.assets[0].uri) {
+          // Wait for GPS to complete
+          const gpsResult = await gpsPromise;
+          const gpsLoc = gpsResult ? { lat: gpsResult.coords.latitude, lng: gpsResult.coords.longitude } : undefined;
+
           // To Drawing Editor
           setTaskForEditing(task);
           setTempImageUri(r.assets[0].uri);
@@ -624,10 +751,8 @@ export default function ProjectDetailsScreen() {
     setProcessing(true);
 
     try {
-      console.log("📸 Starting image save process...");
+      console.log("📸 Starting image save process (OFFLINE-FIRST)...");
       console.log("  - Edited URI:", editedUri);
-      console.log("  - Team ID:", teamId);
-      console.log("  - Project ID:", projectId);
 
       // Compress with 70% quality, NO RESIZE (full camera resolution)
       const m = await ImageManipulator.manipulateAsync(
@@ -639,8 +764,8 @@ export default function ProjectDetailsScreen() {
         },
       );
 
-      console.log("✓ Image manipulated successfully");
-      console.log("  - Compressed URI:", m.uri);
+      console.log("✓ Image compressed successfully");
+      console.log("  - Compressed file:// URI:", m.uri);
 
       if (!m.uri) {
         throw new Error("Η επεξεργασία εικόνας δεν παρήγαγε URI");
@@ -650,35 +775,20 @@ export default function ProjectDetailsScreen() {
         throw new Error("Δεν βρέθηκε το task για επεξεργασία");
       }
 
-      if (!teamId) {
-        throw new Error("Δεν βρέθηκε η ομάδα του project");
-      }
-
-      console.log("📤 Uploading to Firebase Storage...");
-      const mediaId = generateMediaId();
-      const storageUrl = await uploadImageToStorage(
-        m.uri,
-        teamId,
-        projectId,
-        taskForEditing.id,
-        mediaId
-      );
-
-      console.log("✓ Upload complete!");
-      console.log("  - Storage URL:", storageUrl);
-
-      // Save Storage URL (not base64) to task
+      // OFFLINE-FIRST: Save file:// URI directly to AsyncStorage
+      // SyncContext will upload to Storage when online
+      console.log("💾 Saving file:// URI to AsyncStorage...");
       await addMediaToTask(
         taskForEditing.id,
-        storageUrl,
+        m.uri, // Save local file:// URI, NOT Storage URL
         tempGpsLoc,
       );
 
-      console.log("✓ Image saved successfully to task");
+      console.log("✓ Image saved successfully (offline-first)");
+      console.log("  - Will upload to Storage when online via SyncContext");
     } catch (e: any) {
       console.error("❌ Image save error:", e);
       console.error("  - Error message:", e.message);
-      console.error("  - Error stack:", e.stack);
       Alert.alert(
         "Σφάλμα",
         e.message || "Απέτυχε η αποθήκευση της επεξεργασμένης εικόνας."
@@ -710,9 +820,14 @@ export default function ProjectDetailsScreen() {
         status: "completed",
       });
     } else if (t.type === "video") {
+      const vids = [...t.videos, uri];
+      const newLoc = location || { lat: 0, lng: 0 };
+      const locs = [...t.videoLocations, newLoc];
+
       await saveTaskLocal({
         ...t,
-        value: uri,
+        videos: vids,
+        videoLocations: locs,
         status: "completed",
       });
     }
@@ -721,18 +836,25 @@ export default function ProjectDetailsScreen() {
   const removeMediaFromTask = async (uri: string) => {
     if (!activeTaskForGallery) return;
 
-    // DELETE FROM STORAGE FIRST (if it's a Storage URL)
-    if (uri && uri.startsWith("https://firebasestorage.googleapis.com")) {
+    // DELETE FROM STORAGE (only if WiFi available and it's a Storage URL)
+    const net = await Network.getNetworkStateAsync();
+    const hasWiFi = net.isConnected && net.type === Network.NetworkStateType.WIFI;
+
+    if (uri && uri.startsWith("https://firebasestorage.googleapis.com") && hasWiFi) {
       try {
         await deleteMediaFromStorage(uri);
         console.log("✓ Media deleted from Storage");
       } catch (error) {
         console.error("Failed to delete from Storage:", error);
-        // Continue anyway - remove from Firestore even if Storage delete fails
+        // Continue anyway - remove from task even if Storage delete fails
       }
+    } else if (uri && uri.startsWith("https://firebasestorage.googleapis.com") && !hasWiFi) {
+      console.log("💾 No WiFi - Media marked for deletion (will delete when online)");
+      // Task will be saved locally with updated images/value
+      // SyncContext will handle deletion when WiFi available
     }
 
-    // THEN REMOVE FROM FIRESTORE
+    // REMOVE FROM TASK (works offline)
     if (activeTaskForGallery.type === "photo") {
       const idx = activeTaskForGallery.images.findIndex((i: string) => i === uri);
       if (idx !== -1) {
@@ -752,12 +874,21 @@ export default function ProjectDetailsScreen() {
         });
       }
     } else if (activeTaskForGallery.type === "video") {
-      setSelectedMediaForView(null);
-      await saveTaskLocal({
-        ...activeTaskForGallery,
-        value: "",
-        status: "pending",
-      });
+      const idx = activeTaskForGallery.videos.findIndex((v: string) => v === uri);
+      if (idx !== -1) {
+        const newVideos = [...activeTaskForGallery.videos];
+        const newLocs = [...activeTaskForGallery.videoLocations];
+        newVideos.splice(idx, 1);
+        newLocs.splice(idx, 1);
+
+        setSelectedMediaForView(null);
+        await saveTaskLocal({
+          ...activeTaskForGallery,
+          videos: newVideos,
+          videoLocations: newLocs,
+          status: newVideos.length > 0 ? "completed" : "pending",
+        });
+      }
     }
   };
 
@@ -765,7 +896,7 @@ export default function ProjectDetailsScreen() {
     setInputModalVisible(false);
     if (currentTaskId && inputValue) {
       const t = combinedTasks.find((x) => x.id === currentTaskId);
-      if (t && (t.type === "measurement" || t.type === "general" || t.type === "video")) {
+      if (t && (t.type === "measurement" || t.type === "general")) {
         await saveTaskLocal({ ...t, value: inputValue, status: "completed" });
       }
     }
@@ -774,7 +905,7 @@ export default function ProjectDetailsScreen() {
     setInputModalVisible(false);
     if (currentTaskId) {
       const t = combinedTasks.find((x) => x.id === currentTaskId);
-      if (t && (t.type === "measurement" || t.type === "general" || t.type === "video")) {
+      if (t && (t.type === "measurement" || t.type === "general")) {
         await saveTaskLocal({ ...t, value: "", status: "pending" });
       }
     }
@@ -809,10 +940,24 @@ export default function ProjectDetailsScreen() {
           );
         }
       }
+    } else if (activeTaskForGallery.type === "video") {
+      const idx = activeTaskForGallery.videos.indexOf(selectedMediaForView);
+      if (idx !== -1 && activeTaskForGallery.videoLocations[idx]) {
+        const loc = activeTaskForGallery.videoLocations[idx];
+        if (loc.lat !== 0 && loc.lng !== 0) {
+          const url = `https://www.google.com/maps/search/?api=1&query=${loc.lat},${loc.lng}`;
+          Linking.openURL(url);
+        } else {
+          Alert.alert(
+            "Πληροφορία",
+            "Δεν έχει καταγραφεί τοποθεσία για αυτό το βίντεο.",
+          );
+        }
+      }
     } else {
       Alert.alert(
         "Πληροφορία",
-        "Η τοποθεσία είναι διαθέσιμη μόνο για φωτογραφίες.",
+        "Η τοποθεσία είναι διαθέσιμη μόνο για φωτογραφίες και βίντεο.",
       );
     }
   };
@@ -820,6 +965,13 @@ export default function ProjectDetailsScreen() {
   const handleShare = async (uri: string) => {
     if (!(await Sharing.isAvailableAsync())) return;
     try {
+      // Handle local file:// URIs (offline-first)
+      if (uri.startsWith("file://")) {
+        console.log("📤 Sharing local file:", uri);
+        await Sharing.shareAsync(uri);
+        return;
+      }
+
       // Handle Storage URLs (download first)
       if (uri.startsWith("https://firebasestorage")) {
         await Sharing.shareAsync(uri, {
@@ -879,9 +1031,9 @@ export default function ProjectDetailsScreen() {
         let valueDisplay = '<span style="color: #94a3b8;">-</span>';
 
         if (task.type === "video") {
-          const hasVideo = task.value && task.value.length > 0;
-          valueDisplay = hasVideo
-            ? `<div class="media-box video"><span class="icon">🎥</span> Βίντεο Καταγράφηκε</div>`
+          const count = task.videos.length;
+          valueDisplay = count > 0
+            ? `<div class="media-box video"><span class="icon">🎥</span> ${count} ${count === 1 ? 'Βίντεο' : 'Βίντεο'}</div>`
             : `<span style="color: #cbd5e1;">Χωρίς Βίντεο</span>`;
         } else if (task.type === "photo") {
           const count = task.images.length;
@@ -889,7 +1041,7 @@ export default function ProjectDetailsScreen() {
             count > 0
               ? `<div class="media-box photo"><span class="icon">📷</span> ${count} Φωτογραφίες</div>`
               : `<span style="color: #cbd5e1;">Χωρίς Φωτογραφίες</span>`;
-        } else if (task.value) {
+        } else if ((task.type === "measurement" || task.type === "general") && task.value) {
           valueDisplay = `<div class="value-box">${task.value}</div>`;
         }
 
@@ -1247,7 +1399,7 @@ export default function ProjectDetailsScreen() {
               if (t.type === "photo" || t.type === "video") {
                 setActiveTaskForGallery(t);
                 setGalleryModalVisible(true);
-              } else {
+              } else if (t.type === "measurement" || t.type === "general") {
                 setCurrentTaskId(t.id);
                 setCurrentTaskType(t.type);
                 setInputValue(t.value || "");
@@ -1519,7 +1671,7 @@ export default function ProjectDetailsScreen() {
                 ...(activeTaskForGallery?.type === "photo" || activeTaskForGallery?.type === "video"
                   ? activeTaskForGallery.type === "photo"
                     ? activeTaskForGallery.images
-                    : activeTaskForGallery.value ? [activeTaskForGallery.value] : []
+                    : activeTaskForGallery.videos || []
                   : []),
                 "ADD"
               ]}
@@ -1592,11 +1744,13 @@ export default function ProjectDetailsScreen() {
         onRequestClose={() => setSelectedMediaForView(null)}
       >
         <View style={styles.modalBackground}>
-          {selectedMediaForView?.startsWith("data:video") ? (
+          {/* Show Video component for video tasks (file://, data:video, Storage URLs) */}
+          {(selectedMediaForView?.startsWith("data:video") ||
+            activeTaskForGallery?.type === "video") ? (
             <Video
               ref={videoRef}
               style={styles.fullImage}
-              source={{ uri: selectedMediaForView }}
+              source={{ uri: selectedMediaForView || "" }}
               useNativeControls
               resizeMode={ResizeMode.CONTAIN}
               isLooping
@@ -1615,7 +1769,16 @@ export default function ProjectDetailsScreen() {
           >
             <Ionicons name="arrow-back" size={30} color="white" />
           </TouchableOpacity>
-          <View style={styles.toolBar}>
+          <View
+            style={[
+              styles.toolBar,
+              // Move toolbar higher for videos to align with video controls bar
+              (selectedMediaForView?.startsWith("data:video") ||
+                activeTaskForGallery?.type === "video") && {
+                bottom: 100,
+              },
+            ]}
+          >
             <TouchableOpacity
               style={styles.toolBtn}
               onPress={openMediaLocation}

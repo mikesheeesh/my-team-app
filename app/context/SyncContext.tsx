@@ -168,11 +168,54 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
             }
           }
 
-          // Value -> Firebase Storage (for photos/videos)
-          if (task.value) {
+          // Videos -> Firebase Storage (for video arrays)
+          let processedVideos: string[] = [];
+          if (task.type === "video" && (task as any).videos) {
+            const videoTask = task as any;
+            for (const videoUri of videoTask.videos) {
+              if (!videoUri) continue;
+
+              try {
+                if (videoUri.startsWith("file://")) {
+                  const mediaId = generateMediaId();
+                  const storageUrl = await uploadVideoToStorage(
+                    videoUri,
+                    teamId,
+                    projectId,
+                    task.id,
+                    mediaId
+                  );
+                  processedVideos.push(storageUrl);
+                  console.log("✓ Uploaded local video to Storage");
+                } else if (videoUri.startsWith("https://firebasestorage")) {
+                  processedVideos.push(videoUri);
+                } else if (videoUri.startsWith("data:video")) {
+                  const mediaId = generateMediaId();
+                  const storageUrl = await uploadBase64ToStorage(
+                    videoUri,
+                    teamId,
+                    projectId,
+                    task.id,
+                    mediaId,
+                    "video"
+                  );
+                  processedVideos.push(storageUrl);
+                  console.log("✓ Migrated base64 video to Storage");
+                } else {
+                  processedVideos.push(videoUri);
+                }
+              } catch (error) {
+                console.error("Video upload error:", error);
+                processedVideos.push(videoUri);
+              }
+            }
+          }
+
+          // Value -> Firebase Storage (for measurement/general only, not video)
+          if (task.value && task.type !== "video") {
             try {
               if (task.value.startsWith("file://")) {
-                // Local file → Upload to Storage
+                // Local file → Upload to Storage (photos only, for backward compat)
                 const mediaId = generateMediaId();
                 if (task.type === "photo") {
                   finalValue = await uploadImageToStorage(
@@ -183,46 +226,52 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
                     mediaId
                   );
                   console.log("✓ Uploaded local photo to Storage");
-                } else if (task.type === "video") {
-                  finalValue = await uploadVideoToStorage(
-                    task.value,
-                    teamId,
-                    projectId,
-                    task.id,
-                    mediaId
-                  );
-                  console.log("✓ Uploaded local video to Storage");
+                } else {
+                  // measurement/general: keep as-is
+                  finalValue = task.value;
                 }
-              } else if (task.value.startsWith("data:image") || task.value.startsWith("data:video")) {
+              } else if (task.value.startsWith("data:image")) {
                 // Base64 data → Migrate to Storage
                 const mediaId = generateMediaId();
-                const mediaType = task.type === "photo" ? "image" : "video";
                 finalValue = await uploadBase64ToStorage(
                   task.value,
                   teamId,
                   projectId,
                   task.id,
                   mediaId,
-                  mediaType
+                  "image"
                 );
-                console.log(`✓ Migrated base64 ${mediaType} to Storage`);
+                console.log("✓ Migrated base64 image to Storage");
+              } else {
+                // Already Storage URL or text value → Keep as-is
+                finalValue = task.value;
               }
-              // else: Already Storage URL or text value → Keep as-is
             } catch (e) {
               console.error("Failed to process task value:", e);
               // Keep original value on error
+              finalValue = task.value;
             }
           }
 
           const { isLocal, ...cleanTask } = task;
-          const taskReady = {
+          const taskReady: any = {
             ...cleanTask,
-            value: finalValue,
             images:
               processedImages.length > 0
                 ? processedImages
                 : cleanTask.images || [],
           };
+
+          // Add videos for video tasks
+          if (task.type === "video") {
+            taskReady.videos = processedVideos.length > 0 ? processedVideos : (cleanTask as any).videos || [];
+            taskReady.videoLocations = (cleanTask as any).videoLocations || [];
+            // Remove old value field from video tasks
+            delete taskReady.value;
+          } else {
+            // For measurement/general tasks, keep value
+            taskReady.value = finalValue;
+          }
 
           const existingIndex = currentCloudList.findIndex(
             (t: any) => t.id === taskReady.id,
