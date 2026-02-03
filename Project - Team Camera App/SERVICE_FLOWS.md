@@ -557,13 +557,12 @@ ergonwork://join?inviteCode=ABC123
 
 ## 7. PHOTO TASK FLOW
 
-### 7.1 Launch Camera Flow
+### 7.1 Launch Camera Flow (v2.0 - Firebase Storage)
 ```
-ΒΗΜΑ 1: Request Permission
+ΒΗΜΑ 1: Request Permission & Capture
 └── ImagePicker.launchCameraAsync({
-    ├── quality: 0.5
-    ├── base64: true
-    └── allowsEditing: true        // NEW: Native crop
+    ├── quality: 0.8
+    └── mediaTypes: Images
   })
 
 ΒΗΜΑ 2: Check Result
@@ -578,26 +577,44 @@ ergonwork://join?inviteCode=ABC123
 ├── location = { lat: coords.latitude, lng: coords.longitude }
 └── ΑΝ error → location = { lat: 0, lng: 0 }
 
-ΒΗΜΑ 4: Compress Image
-└── ImageManipulator.manipulateAsync(uri,
-    [{ resize: { width: 800 } }],
+ΒΗΜΑ 4: Open Image Editor
+├── setTaskForEditing(task)
+├── setTempImageUri(uri)
+├── setTempGpsLoc(location)
+└── setEditorVisible(true)
+
+ΒΗΜΑ 5: User Edits → Save Button
+
+ΒΗΜΑ 6: Compress Image (v2.0)
+└── ImageManipulator.manipulateAsync(editedUri,
+    [], // NO RESIZE - Full camera resolution
     {
-      ├── compress: 0.4
-      ├── format: JPEG
-      └── base64: true
+      ├── compress: 0.7    // 70% quality
+      └── format: JPEG
     }
   )
 
-ΒΗΜΑ 5: Convert to Base64 URI
-└── base64Img = `data:image/jpeg;base64,${m.base64}`
+ΒΗΜΑ 7: Upload to Firebase Storage (v2.0)
+├── Validate teamId exists
+├── generateMediaId() → unique ID
+└── uploadImageToStorage(
+    ├── imageUri: m.uri
+    ├── teamId: project.teamId
+    ├── projectId: projectId
+    ├── taskId: task.id
+    └── mediaId: mediaId
+  ) → storageUrl
 
-ΒΗΜΑ 6: Add to Task με Location
+ΒΗΜΑ 8: Add Storage URL to Task
 └── saveTaskLocal({
     ...task,
-    ├── images: [...task.images, base64Img]
-    ├── imageLocations: [...(task.imageLocations || []), location]  // NEW
+    ├── images: [...task.images, storageUrl]  // Storage URL, not base64!
+    ├── imageLocations: [...task.imageLocations, location]
     └── status: "completed"
   })
+
+ΒΗΜΑ 9: Sync to Cloud (if online)
+└── SyncContext.syncNow() → Upload to Firestore
 ```
 
 ### 7.2 Gallery View Flow
@@ -645,34 +662,39 @@ ergonwork://join?inviteCode=ABC123
 
 ### Αρχείο: `app/project/[id].tsx`
 
-### 8.1 Launch Video Capture Flow
+### 8.1 Launch Video Capture Flow (v2.0 - Firebase Storage)
 ```
-ΒΗΜΑ 1: Request Permission
+ΒΗΜΑ 1: Request Permission & Capture
 └── ImagePicker.launchCameraAsync({
     ├── mediaTypes: ImagePicker.MediaTypeOptions.Videos
-    ├── quality: 0.5
-    ├── videoMaxDuration: 4         // 4 seconds max
-    └── base64: true
+    ├── videoQuality: UIImagePickerControllerQualityType.High  // 1080p
+    └── videoMaxDuration: 4         // 4 seconds max
   })
 
 ΒΗΜΑ 2: Check Result
 ├── ΑΝ canceled → return
-└── ΑΛΛΙΩΣ uri = result.assets[0].uri
+└── ΑΛΛΙΩΣ videoUri = result.assets[0].uri
 
-ΒΗΜΑ 3: Validate Video Size
-├── fileInfo = await FileSystem.getInfoAsync(uri)
-├── sizeInKB = fileInfo.size / 1024
-├── ΑΝ sizeInKB > 900:
-│   └── Alert "Βίντεο πολύ μεγάλο (max ~1MB)"
+ΒΗΜΑ 3: Get GPS Location
+├── getCurrentPositionAsync()
+└── location = { lat, lng } (ή {0,0} αν error)
+
+ΒΗΜΑ 4: Validate TeamId
+├── ΑΝ !teamId:
+│   └── Alert "Δεν βρέθηκε η ομάδα του project"
 └── ΑΛΛΙΩΣ συνέχεια
 
-ΒΗΜΑ 4: Convert to Base64
-├── base64Data = await FileSystem.readAsStringAsync(uri, {
-│     encoding: FileSystem.EncodingType.Base64
-│   })
-└── base64Video = `data:video/mp4;base64,${base64Data}`
+ΒΗΜΑ 5: Upload to Firebase Storage (v2.0)
+├── generateMediaId() → unique ID
+└── uploadVideoToStorage(
+    ├── videoUri: videoUri
+    ├── teamId: project.teamId
+    ├── projectId: projectId
+    ├── taskId: task.id
+    └── mediaId: mediaId
+  ) → storageUrl
 
-ΒΗΜΑ 5: Add to Task
+ΒΗΜΑ 6: Add Storage URL to Task
 └── saveTaskLocal({
     ...task,
     ├── value: base64Video
@@ -982,16 +1004,36 @@ FOR each queueKey:
 │   ├── AsyncStorage.removeItem(key)
 │   └── continue
 │
-└── Merge local into cloud
+└── Merge local into cloud (v2.0 - Firebase Storage)
+    │
+    ├── Get teamId από project document
+    │   ΑΝ !teamId → Skip project
+    │
     FOR each task in localList:
     │
-    ├── Process Images (file:// → base64)
+    ├── Process Images (v2.0)
     │   FOR each imgUri:
     │   ├── ΑΝ imgUri.startsWith("file://"):
-    │   │   └── base64Data = await FileSystem.readAsStringAsync(imgUri, {encoding: "base64"})
-    │   └── ΑΛΛΙΩΣ keep original
+    │   │   ├── Generate mediaId
+    │   │   ├── uploadImageToStorage(...) → storageUrl
+    │   │   └── processedImages.push(storageUrl)
+    │   │
+    │   ├── ΑΛΛΙΩΣ ΑΝ imgUri.startsWith("data:image"):
+    │   │   ├── uploadBase64ToStorage(...) → storageUrl  // Migration
+    │   │   └── processedImages.push(storageUrl)
+    │   │
+    │   └── ΑΛΛΙΩΣ ΑΝ imgUri.startsWith("https://firebasestorage"):
+    │       └── processedImages.push(imgUri)  // Already migrated
     │
-    ├── Process Value (file:// → base64)
+    ├── Process Value (v2.0)
+    │   ΑΝ value.startsWith("file://"):
+    │   ├── ΑΝ type === "photo":
+    │   │   └── uploadImageToStorage(...) → storageUrl
+    │   ├── ΑΝ type === "video":
+    │   │   └── uploadVideoToStorage(...) → storageUrl
+    │   │
+    │   ΑΛΛΙΩΣ ΑΝ value.startsWith("data:image") ή "data:video":
+    │   └── uploadBase64ToStorage(...) → storageUrl  // Migration
     │
     ├── Clean task (remove isLocal flag)
     │
@@ -1717,10 +1759,127 @@ Firestore
 └── invites/{inviteId}
 ```
 
+### Firebase Storage (v2.0)
+```
+Storage
+└── teams/
+    └── {teamId}/
+        └── projects/
+            └── {projectId}/
+                └── tasks/
+                    └── {taskId}/
+                        ├── {mediaId}.jpg  (photos)
+                        └── {mediaId}.mp4  (videos)
+```
+
+---
+
+## 19. FIREBASE STORAGE MIGRATION FLOW (v2.0)
+
+### Αρχείο: `scripts/migrateToStorage.ts`
+
+### 19.1 Migration Process
+```
+ΒΗΜΑ 1: Fetch All Projects
+├── getDocs(collection(db, "projects"))
+└── stats.projectsTotal = snapshot.size
+
+ΒΗΜΑ 2: For Each Project
+├── Get projectId και projectData
+├── Get teamId από project document
+│   ΑΝ !teamId → Skip project
+│
+└── Get tasks array
+
+ΒΗΜΑ 3: For Each Task
+FOR each task in tasks:
+│
+├── Migrate task.value (if base64)
+│   ΑΝ value.startsWith("data:image"):
+│   ├── Generate mediaId
+│   ├── uploadBase64ToStorage(value, teamId, projectId, taskId, mediaId, "image")
+│   ├── storageUrl = result
+│   └── task.value = storageUrl
+│   │
+│   ΑΝ value.startsWith("data:video"):
+│   └── Similar process για video
+│
+├── Migrate task.images[] (if contains base64)
+│   FOR each imgUri in task.images:
+│   ΑΝ imgUri.startsWith("data:image"):
+│   ├── uploadBase64ToStorage(...)
+│   └── Replace με storageUrl
+│   │
+│   ΑΝ imgUri.startsWith("https://firebasestorage"):
+│   └── stats.imagesSkipped++ (already migrated)
+│
+└── ΑΝ changes made → taskChanged = true
+
+ΒΗΜΑ 4: Update Firestore
+ΑΝ projectChanged:
+├── updateDoc(projectRef, { tasks: migratedTasks })
+└── stats.projectsProcessed++
+
+ΒΗΜΑ 5: Print Statistics
+├── Projects: Total, Processed, Skipped
+├── Tasks: Total, Processed
+├── Images: Total, Migrated, Skipped, Failed
+├── Videos: Total, Migrated, Skipped, Failed
+└── Errors: List of error messages
+```
+
+### 19.2 Run Migration
+```bash
+# Install dependencies (if needed)
+npm install --save-dev ts-node @types/node
+
+# Run migration
+npm run migrate
+```
+
+### 19.3 Expected Output
+```
+🚀 Firebase Storage Migration Started
+=====================================
+
+📥 Fetching all projects from Firestore...
+✅ Found 15 projects
+
+🔄 Processing project: abc123xyz (42 tasks)
+✅ Project abc123xyz: Updated successfully
+
+...
+
+🎉 Migration Complete!
+======================
+
+📊 Statistics:
+─────────────────────────────────────
+Projects Total:      15
+  ✅ Processed:      12
+  ⏭️  Skipped:        3
+
+Tasks Total:         128
+  ✅ Processed:      95
+
+Images Total:        342
+  ✅ Migrated:       280
+  ⏭️  Already Stored: 50
+  ❌ Failed:         12
+
+Videos Total:        45
+  ✅ Migrated:       42
+  ⏭️  Already Stored: 3
+  ❌ Failed:         0
+─────────────────────────────────────
+
+📈 Success Rate: 97.2%
+```
+
 ---
 
 **Repository**: `/home/administrator/projects/my-team-app`
 
-**Version**: 1.1.0
+**Version**: 2.0.0
 
 **Last Updated**: Φεβρουάριος 2026
