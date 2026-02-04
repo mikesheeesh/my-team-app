@@ -1,6 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
 import NetInfo from "@react-native-community/netinfo";
-import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import React, { useState } from "react";
@@ -21,13 +20,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "../../firebaseConfig";
 
-// Configure Google Sign-In
-GoogleSignin.configure({
-  webClientId:
-    "1066934665062-58dao455r4etr1ublg2tthmrj89c8a1j.apps.googleusercontent.com", // TODO: Replace with your Web Client ID from Firebase Console
-  offlineAccess: false,
-});
-
 export default function CreateTeamScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -39,26 +31,6 @@ export default function CreateTeamScreen() {
 
   const handleCreateGmail = async () => {
     await WebBrowser.openBrowserAsync("https://accounts.google.com/signup");
-  };
-
-  const handleSelectGmail = async () => {
-    try {
-      await GoogleSignin.hasPlayServices();
-      const userInfo = await GoogleSignin.signIn();
-
-      // Set the selected Gmail
-      if (userInfo.data?.user?.email) {
-        setTeamEmail(userInfo.data.user.email);
-      }
-    } catch (error: any) {
-      console.log("Google Sign-In error:", error);
-      if (error.code !== "SIGN_IN_CANCELLED") {
-        Alert.alert(
-          "Σφάλμα",
-          "Δεν ήταν δυνατή η επιλογή Gmail. Παρακαλώ δοκιμάστε ξανά.",
-        );
-      }
-    }
   };
 
   const handleCreateTeam = async () => {
@@ -76,11 +48,11 @@ export default function CreateTeamScreen() {
     if (teamType.trim().length === 0)
       return Alert.alert("Προσοχή", "Δώστε το αντικείμενο εργασιών.");
 
-    // ΝΕΟΣ ΕΛΕΓΧΟΣ: ΥΠΟΧΡΕΩΤΙΚΟ GMAIL
+    // Έλεγχος email
     if (teamEmail.trim().length === 0)
-      return Alert.alert("Προσοχή", "Το Gmail ομάδας είναι υποχρεωτικό.");
+      return Alert.alert("Προσοχή", "Το email ομάδας είναι υποχρεωτικό.");
     if (!teamEmail.includes("@"))
-      return Alert.alert("Προσοχή", "Εισάγετε ένα έγκυρο Gmail.");
+      return Alert.alert("Προσοχή", "Εισάγετε ένα έγκυρο email.");
 
     const user = auth.currentUser;
     if (!user)
@@ -154,37 +126,39 @@ export default function CreateTeamScreen() {
 
           <View style={styles.card}>
             <View style={styles.cardHeader}>
-              <Ionicons name="logo-google" size={20} color="#2563eb" />
-              <Text style={styles.cardTitle}>Gmail Ομάδας (Υποχρεωτικό)</Text>
+              <Ionicons name="mail" size={20} color="#2563eb" />
+              <Text style={styles.cardTitle}>Email Ομάδας (Υποχρεωτικό)</Text>
             </View>
             <Text style={styles.helperText}>
-              Επιλέξτε ένα Gmail από τους λογαριασμούς σας ή δημιουργήστε νέο.
+              Εισάγετε ένα email επικοινωνίας για την ομάδα σας.
             </Text>
 
-            <TouchableOpacity
-              style={[styles.primaryButton, { marginBottom: 12 }]}
-              onPress={handleSelectGmail}
-            >
-              <Ionicons name="logo-google" size={18} color="white" />
-              <Text style={styles.primaryButtonText}>
-                Επιλογή από Gmail Λογαριασμούς
-              </Text>
-            </TouchableOpacity>
+            <TextInput
+              style={[styles.input, { marginBottom: 12 }]}
+              placeholder="π.χ. info@company.com"
+              placeholderTextColor="#9ca3af"
+              value={teamEmail}
+              onChangeText={setTeamEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
 
             <TouchableOpacity
               style={styles.outlineButton}
               onPress={handleCreateGmail}
             >
+              <Ionicons name="logo-google" size={16} color="#374151" />
               <Text style={styles.outlineButtonText}>
                 Δημιουργία νέου Gmail
               </Text>
               <Ionicons name="open-outline" size={16} color="#374151" />
             </TouchableOpacity>
 
-            {teamEmail.length > 0 && (
+            {teamEmail.length > 0 && teamEmail.includes("@") && (
               <>
                 <Text style={[styles.label, { marginTop: 15 }]}>
-                  Επιλεγμένο Gmail
+                  Επιλεγμένο Email
                 </Text>
                 <View style={styles.selectedEmailBox}>
                   <Ionicons name="checkmark-circle" size={20} color="#10b981" />
@@ -293,26 +267,6 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     fontSize: 13,
     lineHeight: 20,
-  },
-  primaryButton: {
-    backgroundColor: "#2563eb",
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    shadowColor: "#2563eb",
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 4,
-  },
-  primaryButtonText: {
-    color: "white",
-    fontWeight: "700",
-    fontSize: 15,
   },
   outlineButton: {
     backgroundColor: "white",

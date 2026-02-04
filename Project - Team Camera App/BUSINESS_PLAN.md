@@ -316,6 +316,9 @@ invites/{inviteId}
 - Smooth gesture handling με PanResponder
 - ViewShot integration για image capture
 - Real-time SVG path rendering
+- **v2.1:** Strict boundary checking (15px edge margin)
+- **v2.1:** Αποτροπή line jumps/flicks όταν δάχτυλο βγαίνει εκτός canvas
+- **v2.1:** Wild value detection για UI element transitions
 
 ### 5.9 Location Services
 - GPS coordinates attached to images
@@ -680,10 +683,12 @@ useEffect(() => {
 - Storage path: `teams/{teamId}/projects/{projectId}/tasks/{taskId}/{mediaId}.jpg`
 
 **Videos:**
-- Resolution: Up to 1080p (High quality)
+- Resolution: 720p HD (v2.1 optimized)
+- Bitrate: 2.5 Mbps
 - Duration: 4 seconds max
 - Format: MP4
-- Average size: 2-4MB
+- Compression: react-native-compressor (manual mode)
+- Average size: 2-3MB (μετά συμπίεση)
 - Storage path: `teams/{teamId}/projects/{projectId}/tasks/{taskId}/{mediaId}.mp4`
 
 #### Storage Rules
@@ -709,6 +714,6 @@ useEffect(() => {
 
 **Repository**: `/home/administrator/projects/my-team-app`
 
-**Version**: 2.0.0
+**Version**: 2.1.0
 
 **Last Updated**: Φεβρουάριος 2026

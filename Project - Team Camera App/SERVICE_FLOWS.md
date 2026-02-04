@@ -883,39 +883,48 @@ USER ACTIONS: User needs to switch to mobile device
 
 ### Αρχείο: `app/project/[id].tsx`
 
-### 8.1 Launch Video Capture Flow (v2.0 - Firebase Storage)
+### 8.1 Launch Video Capture Flow (v2.1 - με Compression)
 ```
 ΒΗΜΑ 1: Request Permission & Capture
 └── ImagePicker.launchCameraAsync({
     ├── mediaTypes: ImagePicker.MediaTypeOptions.Videos
-    ├── videoQuality: UIImagePickerControllerQualityType.High  // 1080p
-    └── videoMaxDuration: 4         // 4 seconds max
+    ├── videoQuality: 0              // Low quality (θα συμπιεστεί μετά)
+    └── videoMaxDuration: 4          // 4 seconds max
   })
 
 ΒΗΜΑ 2: Check Result
 ├── ΑΝ canceled → return
 └── ΑΛΛΙΩΣ videoUri = result.assets[0].uri
 
-ΒΗΜΑ 3: Get GPS Location
+ΒΗΜΑ 3: Compress Video (v2.1 - NEW)
+├── compressVideo(videoUri, onProgress)
+├── Settings:
+│   ├── compressionMethod: "manual"
+│   ├── maxSize: 720              // 720p HD
+│   └── bitrate: 2500000          // 2.5 Mbps
+├── Returns: { uri: compressedUri, compressionRatio }
+└── Logs: Original MB → Compressed MB (~70% μείωση)
+
+ΒΗΜΑ 4: Get GPS Location (παράλληλα με compression)
 ├── getCurrentPositionAsync()
 └── location = { lat, lng } (ή {0,0} αν error)
 
-ΒΗΜΑ 4: Validate TeamId
+ΒΗΜΑ 5: Validate TeamId
 ├── ΑΝ !teamId:
 │   └── Alert "Δεν βρέθηκε η ομάδα του project"
 └── ΑΛΛΙΩΣ συνέχεια
 
-ΒΗΜΑ 5: Upload to Firebase Storage (v2.0)
+ΒΗΜΑ 6: Upload to Firebase Storage (v2.0)
 ├── generateMediaId() → unique ID
 └── uploadVideoToStorage(
-    ├── videoUri: videoUri
+    ├── videoUri: compressedUri   // v2.1: συμπιεσμένο
     ├── teamId: project.teamId
     ├── projectId: projectId
     ├── taskId: task.id
     └── mediaId: mediaId
   ) → storageUrl
 
-ΒΗΜΑ 6: Add Storage URL to Task
+ΒΗΜΑ 7: Add Storage URL to Task
 └── saveTaskLocal({
     ...task,
     ├── value: base64Video
@@ -974,19 +983,34 @@ USER ACTIONS: User needs to switch to mobile device
 ├── User επιλέγει χρώμα (red, yellow, green, blue, white, black)
 └── User επιλέγει πάχος (3px, 6px, 10px)
 
-ΒΗΜΑ 3: Draw on Canvas
+ΒΗΜΑ 3: Draw on Canvas (v2.1 - με boundary checking)
 ├── PanResponder tracks touch gestures
+├── On Grant:
+│   ├── Έλεγχος αν touch είναι εντός ορίων (15px edge margin)
+│   ├── ΑΝ inBounds: setCurrentPath(`M${x},${y}`)
+│   └── ΑΛΛΙΩΣ: αγνόησε (wasInBounds = false)
 ├── On Move:
-│   ├── path += `L${x},${y} `
-│   └── Update SVG path
+│   ├── Strict boundary check (minX, maxX, minY, maxY)
+│   ├── Wild value detection (>2000 ή <-20)
+│   ├── ΑΝ wildValue: return (αγνόησε)
+│   ├── ΑΝ outOfBounds: wasInBounds = false; return
+│   ├── ΑΝ wasInBounds === false && τώρα inBounds:
+│   │   └── path += `M${x},${y}` (νέο segment)
+│   └── ΑΛΛΙΩΣ: path += `L${x},${y}` (συνέχεια)
 └── On Release:
-    ├── Complete path
-    └── Add to paths array
+    ├── ΑΝ path.includes("L"): Add to paths array
+    └── ΑΛΛΙΩΣ: discard (μόνο point, όχι γραμμή)
 
 ΒΗΜΑ 4: Undo
 ├── User πατάει Undo
 └── paths.pop() → Remove last stroke
 ```
+
+**Boundary Fixes (v2.1):**
+- Strict 15px edge margin αποτρέπει drawing κοντά στα UI elements
+- Wild value detection για περιπτώσεις που το δάχτυλο πάει στο footer/header
+- Αποτρέπει line jumps/flicks όταν βγαίνει εκτός canvas
+- Paths χωρίς "L" (μόνο point) απορρίπτονται
 
 ### 9.3 Pan/Zoom Flow
 ```
@@ -2101,6 +2125,6 @@ Videos Total:        45
 
 **Repository**: `/home/administrator/projects/my-team-app`
 
-**Version**: 2.0.0
+**Version**: 2.1.0
 
 **Last Updated**: Φεβρουάριος 2026

@@ -11,6 +11,7 @@
 - [x] **Edit φωτογραφίες με σχέδιο, zoom κλπ.**
   Advanced Image Editor με drawing/annotation tools
   Pan & zoom capabilities (1x-3x), 6 colors, 3 stroke widths
+  **v2.1:** Boundary fixes για αποφυγή line jumps/flicks όταν το δάχτυλο βγαίνει εκτός canvas
 
 - [x] **Web View**
   Full web support με react-native-web
@@ -37,7 +38,7 @@
   Base64 → Firebase Storage URLs για photos/videos
   **Λεπτομέρειες:**
   - Photos: 70% compression, full camera resolution
-  - Videos: 1080p (High quality), 4 seconds max
+  - Videos: 720p HD, 2.5Mbps bitrate, 4 seconds max (react-native-compressor)
   - Team-isolated paths: `teams/{teamId}/projects/{projectId}/tasks/{taskId}/{mediaId}.{ext}`
   - Storage URLs στο Firestore (~100 bytes vs 500KB+ base64)
   - Offline sync με automatic upload όταν επιστρέφει Internet
@@ -148,8 +149,18 @@
   - Hosted on Vercel free tier (100GB bandwidth/month)
   - Download button με real EAS build URL
   - Professional branded UX με app logo
+- **Video Compression (v2.1):**
+  - react-native-compressor library
+  - Manual mode: 720p HD, 2.5Mbps bitrate
+  - ~70% μείωση μεγέθους με καλή ποιότητα
+  - Αυτόματη συμπίεση πριν το upload
+- **Image Editor Boundaries (v2.1):**
+  - Strict boundary checking (15px margin)
+  - Αποτρέπει line jumps όταν το δάχτυλο βγαίνει εκτός canvas
+  - Αποτρέπει flicks προς header/footer areas
+  - Wild value detection για UI element transitions
 
 ---
 
 **Last Updated:** Φεβρουάριος 2026
-**Version:** 2.0.0
+**Version:** 2.1.0

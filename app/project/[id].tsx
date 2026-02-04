@@ -43,6 +43,9 @@ import {
   generateMediaId,
 } from "../../utils/storageUtils";
 
+// VIDEO COMPRESSION
+import { compressVideo } from "../../utils/videoCompressor";
+
 import ImageEditorModal from "../components/ImageEditorModal";
 import InputModal from "../components/InputModal";
 import { useSync } from "../context/SyncContext";
@@ -251,6 +254,7 @@ export default function ProjectDetailsScreen() {
   const [tempImageUri, setTempImageUri] = useState<string | null>(null);
   const [tempGpsLoc, setTempGpsLoc] = useState<GeoPoint | undefined>(undefined);
   const [taskForEditing, setTaskForEditing] = useState<Task | null>(null);
+  const [reEditingIndex, setReEditingIndex] = useState<number | null>(null); // For re-editing existing photos
 
   const [selectedTaskForOptions, setSelectedTaskForOptions] =
     useState<Task | null>(null);
@@ -687,7 +691,7 @@ export default function ProjectDetailsScreen() {
       if (task.type === "video") {
         const r = await ImagePicker.launchCameraAsync({
           mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-          videoMaxDuration: 3, // 3 seconds max for smaller file size
+          videoMaxDuration: 4, // 4 seconds max (can be longer now that we compress)
           videoQuality: 0, // 0 = Low quality (native value, works on Android too)
         });
 
@@ -696,27 +700,36 @@ export default function ProjectDetailsScreen() {
           try {
             const videoUri = r.assets[0].uri;
 
-            console.log("🎥 Video captured (OFFLINE-FIRST)");
-            console.log("  - Video file:// URI:", videoUri);
+            console.log("🎥 Video captured, starting compression...");
+
+            // COMPRESS VIDEO (WhatsApp-style compression)
+            const { uri: compressedUri, compressionRatio } = await compressVideo(
+              videoUri,
+              (progress) => {
+                console.log(`  Compressing: ${Math.round(progress * 100)}%`);
+              }
+            );
+
+            console.log(`✓ Video compressed (${compressionRatio.toFixed(0)}% smaller)`);
 
             // Wait for GPS to complete
             const gpsResult = await gpsPromise;
             const gpsLoc = gpsResult ? { lat: gpsResult.coords.latitude, lng: gpsResult.coords.longitude } : undefined;
 
-            // OFFLINE-FIRST: Save file:// URI directly to AsyncStorage
+            // OFFLINE-FIRST: Save COMPRESSED file:// URI to AsyncStorage
             // SyncContext will upload to Storage when online
-            console.log("💾 Saving file:// URI to AsyncStorage...");
+            console.log("💾 Saving compressed video to AsyncStorage...");
             await addMediaToTask(
               task.id,
-              videoUri, // Save local file:// URI, NOT Storage URL
+              compressedUri, // Save COMPRESSED local file:// URI
               gpsLoc
             );
 
-            console.log("✓ Video saved successfully (offline-first)");
+            console.log("✓ Compressed video saved successfully (offline-first)");
             console.log("  - Will upload to Storage when online via SyncContext");
           } catch (e: any) {
-            console.error("❌ Video save error:", e);
-            Alert.alert("Σφάλμα", e.message || "Απέτυχε η αποθήκευση του βίντεο.");
+            console.error("❌ Video compression/save error:", e);
+            Alert.alert("Σφάλμα", e.message || "Απέτυχε η συμπίεση του βίντεο.");
           } finally {
             setProcessing(false);
           }
@@ -753,6 +766,7 @@ export default function ProjectDetailsScreen() {
     try {
       console.log("📸 Starting image save process (OFFLINE-FIRST)...");
       console.log("  - Edited URI:", editedUri);
+      console.log("  - Re-editing index:", reEditingIndex);
 
       // Compress with 70% quality, NO RESIZE (full camera resolution)
       const m = await ImageManipulator.manipulateAsync(
@@ -775,16 +789,23 @@ export default function ProjectDetailsScreen() {
         throw new Error("Δεν βρέθηκε το task για επεξεργασία");
       }
 
-      // OFFLINE-FIRST: Save file:// URI directly to AsyncStorage
-      // SyncContext will upload to Storage when online
-      console.log("💾 Saving file:// URI to AsyncStorage...");
-      await addMediaToTask(
-        taskForEditing.id,
-        m.uri, // Save local file:// URI, NOT Storage URL
-        tempGpsLoc,
-      );
+      // Check if we're re-editing an existing photo
+      if (reEditingIndex !== null && taskForEditing.type === "photo") {
+        // REPLACE existing image at index
+        console.log("🔄 Replacing image at index:", reEditingIndex);
+        await replaceMediaInTask(taskForEditing.id, reEditingIndex, m.uri);
+        console.log("✓ Image replaced successfully");
+      } else {
+        // ADD new image (original behavior)
+        console.log("💾 Saving file:// URI to AsyncStorage...");
+        await addMediaToTask(
+          taskForEditing.id,
+          m.uri, // Save local file:// URI, NOT Storage URL
+          tempGpsLoc,
+        );
+        console.log("✓ Image saved successfully (offline-first)");
+      }
 
-      console.log("✓ Image saved successfully (offline-first)");
       console.log("  - Will upload to Storage when online via SyncContext");
     } catch (e: any) {
       console.error("❌ Image save error:", e);
@@ -797,6 +818,7 @@ export default function ProjectDetailsScreen() {
       setProcessing(false);
       setTempImageUri(null);
       setTaskForEditing(null);
+      setReEditingIndex(null); // Reset re-edit mode
     }
   };
 
@@ -831,6 +853,43 @@ export default function ProjectDetailsScreen() {
         status: "completed",
       });
     }
+  };
+
+  // Replace an existing image at a specific index (for re-editing)
+  const replaceMediaInTask = async (
+    tid: string,
+    index: number,
+    newUri: string,
+  ) => {
+    const t = combinedTasks.find((x) => x.id === tid);
+    if (!t || t.type !== "photo") return;
+
+    const newImages = [...t.images];
+    const oldUri = newImages[index];
+
+    // Delete old image from Storage if it's a Storage URL
+    if (oldUri && oldUri.startsWith("https://firebasestorage.googleapis.com")) {
+      const net = await Network.getNetworkStateAsync();
+      const hasWiFi = net.isConnected && net.type === Network.NetworkStateType.WIFI;
+      if (hasWiFi) {
+        try {
+          await deleteMediaFromStorage(oldUri);
+          console.log("✓ Old image deleted from Storage");
+        } catch (error) {
+          console.error("Failed to delete old image from Storage:", error);
+        }
+      }
+    }
+
+    // Replace the image at the index
+    newImages[index] = newUri;
+
+    await saveTaskLocal({
+      ...t,
+      images: newImages,
+      // Keep the same location for the replaced image
+      status: "completed",
+    });
   };
 
   const removeMediaFromTask = async (uri: string) => {
@@ -890,6 +949,24 @@ export default function ProjectDetailsScreen() {
         });
       }
     }
+  };
+
+  // Open the editor to re-edit an existing photo
+  const handleOpenReEdit = () => {
+    if (!selectedMediaForView || !activeTaskForGallery) return;
+    if (activeTaskForGallery.type !== "photo") return;
+
+    // Find the index of the selected media in the task
+    const task = activeTaskForGallery as PhotoTask;
+    const index = task.images.indexOf(selectedMediaForView);
+    if (index === -1) return;
+
+    // Set up for re-editing
+    setReEditingIndex(index);
+    setTempImageUri(selectedMediaForView);
+    setTaskForEditing(activeTaskForGallery);
+    setSelectedMediaForView(null); // Close the viewer
+    setEditorVisible(true);
   };
 
   const handleSaveInput = async () => {
@@ -1788,6 +1865,18 @@ export default function ProjectDetailsScreen() {
                 Χάρτης
               </Text>
             </TouchableOpacity>
+            {/* Edit button - only for photos, not videos */}
+            {activeTaskForGallery?.type === "photo" && Platform.OS !== "web" && (
+              <TouchableOpacity
+                style={styles.toolBtn}
+                onPress={handleOpenReEdit}
+              >
+                <Ionicons name="brush" size={24} color="#10b981" />
+                <Text style={[styles.toolText, { color: "#10b981" }]}>
+                  Σχεδίαση
+                </Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={styles.toolBtn}
               onPress={() => confirmDeleteMedia()}

@@ -58,14 +58,9 @@
           "isAccessMediaLocationEnabled": true
         }
       ],
-      [
-        "@react-native-google-signin/google-signin",
-        {
-          "iosUrlScheme": "com.googleusercontent.apps.1066934665062-REVERSE_CLIENT_ID"
-        }
-      ],
       "expo-router",
-      "expo-font"
+      "expo-font",
+      "react-native-compressor"
     ],
     "extra": {
       "router": {},

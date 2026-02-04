@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,6 +20,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // FIREBASE
 import { onAuthStateChanged } from "firebase/auth";
+
+// Key for storing pending invite code
+const PENDING_INVITE_KEY = "@pending_invite_code";
 import {
   arrayUnion,
   collection,
@@ -41,19 +45,37 @@ export default function JoinTeamScreen() {
   const [loading, setLoading] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
+  // Ref για να αποφύγουμε επαναλαμβανόμενα redirects
+  const hasRedirected = useRef(false);
+
   // 1. ΕΛΕΓΧΟΣ ΑΝ ΕΙΝΑΙ ΣΥΝΔΕΔΕΜΕΝΟΣ
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!user) {
-        Alert.alert("Προσοχή", "Πρέπει να συνδεθείτε πρώτα.", [
-          { text: "OK", onPress: () => router.replace("/") },
-        ]);
+        // Αποφυγή loop: redirect μόνο μία φορά
+        if (!hasRedirected.current) {
+          hasRedirected.current = true;
+
+          // Αποθήκευση του invite code για μετά το login
+          const pendingCode = inviteCode || paramCode;
+          if (pendingCode) {
+            await AsyncStorage.setItem(PENDING_INVITE_KEY, String(pendingCode).toUpperCase());
+            console.log("📝 Saved pending invite code:", pendingCode);
+          }
+
+          // Redirect στο sign-in χωρίς alert (για αποφυγή loop)
+          Alert.alert("Προσοχή", "Πρέπει να συνδεθείτε πρώτα για να μπείτε στην ομάδα.", [
+            { text: "OK", onPress: () => router.replace("/") },
+          ]);
+        }
       } else {
+        // Ο χρήστης είναι συνδεδεμένος
+        hasRedirected.current = false;
         setCheckingAuth(false);
       }
     });
     return () => unsubscribe();
-  }, []);
+  }, [inviteCode, paramCode]);
 
   // 2. ΑΥΤΟΜΑΤΗ ΣΥΜΠΛΗΡΩΣΗ ΚΑΙ AUTO-JOIN ΑΠΟ LINK
   useEffect(() => {
