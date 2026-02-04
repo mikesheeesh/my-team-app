@@ -1040,25 +1040,45 @@ export default function ProjectDetailsScreen() {
   };
 
   const handleShare = async (uri: string) => {
-    if (!(await Sharing.isAvailableAsync())) return;
+    if (!(await Sharing.isAvailableAsync())) {
+      Alert.alert("Σφάλμα", "Η κοινοποίηση δεν είναι διαθέσιμη σε αυτή τη συσκευή.");
+      return;
+    }
+
+    if (!uri) {
+      Alert.alert("Σφάλμα", "Δεν υπάρχει αρχείο για κοινοποίηση.");
+      return;
+    }
+
     try {
+      console.log("📤 Sharing URI:", uri.substring(0, 100));
+
       // Handle local file:// URIs (offline-first)
       if (uri.startsWith("file://")) {
-        console.log("📤 Sharing local file:", uri);
+        console.log("📤 Sharing local file");
         await Sharing.shareAsync(uri);
         return;
       }
 
-      // Handle Storage URLs (download first)
-      if (uri.startsWith("https://firebasestorage")) {
+      // Handle Firebase Storage URLs (https://firebasestorage.googleapis.com/...)
+      if (uri.includes("firebasestorage.googleapis.com")) {
+        console.log("📤 Sharing Firebase Storage URL");
         await Sharing.shareAsync(uri, {
           UTI: uri.includes(".mp4") ? "public.movie" : "public.image",
         });
         return;
       }
 
+      // Handle any other https:// URLs
+      if (uri.startsWith("https://")) {
+        console.log("📤 Sharing remote URL");
+        await Sharing.shareAsync(uri);
+        return;
+      }
+
       // Handle base64 data URIs (legacy)
       if (uri.startsWith("data:")) {
+        console.log("📤 Sharing base64 data");
         const isVideo = uri.startsWith("data:video");
         const ext = isVideo ? ".mp4" : ".jpg";
         const base64Data = uri.split("base64,")[1];
@@ -1071,7 +1091,12 @@ export default function ProjectDetailsScreen() {
           encoding: FileSystem.EncodingType.Base64,
         });
         await Sharing.shareAsync(filename);
+        return;
       }
+
+      // Fallback - unknown format
+      console.warn("📤 Unknown URI format:", uri.substring(0, 50));
+      Alert.alert("Σφάλμα", "Μη υποστηριζόμενη μορφή αρχείου.");
     } catch (error) {
       console.error("Share error:", error);
       Alert.alert("Σφάλμα", "Δεν ήταν δυνατή η κοινοποίηση.");
