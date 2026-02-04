@@ -1060,19 +1060,24 @@ export default function ProjectDetailsScreen() {
         return;
       }
 
-      // Handle Firebase Storage URLs (https://firebasestorage.googleapis.com/...)
-      if (uri.includes("firebasestorage.googleapis.com")) {
-        console.log("📤 Sharing Firebase Storage URL");
-        await Sharing.shareAsync(uri, {
-          UTI: uri.includes(".mp4") ? "public.movie" : "public.image",
-        });
-        return;
-      }
-
-      // Handle any other https:// URLs
+      // Handle remote URLs (Firebase Storage, etc.) - MUST download first on Android
       if (uri.startsWith("https://")) {
-        console.log("📤 Sharing remote URL");
-        await Sharing.shareAsync(uri);
+        console.log("📤 Downloading remote file for sharing...");
+        const isVideo = uri.includes(".mp4") || uri.includes("video");
+        const ext = isVideo ? ".mp4" : ".jpg";
+        const tempFile = FileSystem.cacheDirectory + `share_temp_${Date.now()}${ext}`;
+
+        const downloadResult = await FileSystem.downloadAsync(uri, tempFile);
+
+        if (downloadResult.status === 200) {
+          console.log("📤 Downloaded, now sharing:", tempFile);
+          await Sharing.shareAsync(downloadResult.uri, {
+            mimeType: isVideo ? "video/mp4" : "image/jpeg",
+          });
+        } else {
+          console.error("📤 Download failed:", downloadResult.status);
+          Alert.alert("Σφάλμα", "Αποτυχία λήψης αρχείου για κοινοποίηση.");
+        }
         return;
       }
 
