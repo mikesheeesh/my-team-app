@@ -11,7 +11,10 @@
       "Bash(xargs cat:*)",
       "Bash(vercel login:*)",
       "Bash(vercel whoami:*)",
-      "Bash(vercel --prod:*)"
+      "Bash(vercel --prod:*)",
+      "Bash(node -e:*)",
+      "Bash(npx expo prebuild --clean)",
+      "Bash(npx expo run:android)"
     ]
   }
 }
