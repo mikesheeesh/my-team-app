@@ -95,6 +95,9 @@
   - Backward compatibility: Migration για παλιό queue format
   - updateDoc failure handling: Increment retry count αν αποτύχει το Firestore update
   - Invalid URI cleanup: Αφαίρεση invalid `file://` URIs από tasks
+  - **v2.1.3.1:** Abort flag για instant stop όταν πέφτει το WiFi mid-sync
+  - **v2.1.3.1:** Re-sync mechanism: Αυτόματο retry μετά 3 sec αν υπάρχουν items στο queue
+  - **v2.1.3.1:** Network check πριν από κάθε Firebase operation
 
 ---
 
@@ -204,6 +207,10 @@
   - Per-task removal αντί για all-or-nothing cleanup
   - updateDoc wrapped σε try-catch με retry increment
   - Invalid `file://` URIs δεν κρατούνται στα processed arrays
+  - **v2.1.3.1:** `shouldAbortRef` flag για instant abort όταν πέφτει WiFi
+  - **v2.1.3.1:** Network listener θέτει abort flag κατά τη διάρκεια sync
+  - **v2.1.3.1:** Re-sync check στο finally (3 sec delay)
+  - **v2.1.3.1:** `isWiFiConnected()` check πριν getDoc/updateDoc
 
 ---
 

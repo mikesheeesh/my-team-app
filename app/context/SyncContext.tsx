@@ -38,6 +38,16 @@ const validateFileExists = async (uri: string): Promise<boolean> => {
   }
 };
 
+// Check if we still have WiFi connectivity
+const isWiFiConnected = async (): Promise<boolean> => {
+  try {
+    const state = await NetInfo.fetch();
+    return state.isConnected === true && state.type === NetInfoStateType.wifi;
+  } catch {
+    return false;
+  }
+};
+
 type SyncContextType = {
   isSyncing: boolean;
   syncNow: () => Promise<void>;
@@ -60,26 +70,32 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
 
   const isSyncingRef = useRef(false);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const shouldAbortRef = useRef(false); // Flag to abort sync when network drops
 
   const setSyncState = (status: boolean) => {
     setIsSyncing(status);
     isSyncingRef.current = status;
+    if (!status) {
+      shouldAbortRef.current = false; // Reset abort flag when sync ends
+    }
   };
 
   // 1. LISTENER (Αυτόματος συγχρονισμός ΜΟΝΟ σε WiFi)
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
-      // ΔΙΟΡΘΩΣΗ 2: Χρήση NetInfoStateType.wifi (μικρά γράμματα)
-      if (
-        state.isConnected &&
-        state.type === NetInfoStateType.wifi &&
-        !isSyncingRef.current
-      ) {
+      const hasWiFi = state.isConnected && state.type === NetInfoStateType.wifi;
+
+      if (hasWiFi && !isSyncingRef.current) {
+        // WiFi connected and not syncing → start sync after delay
         if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
 
         syncTimeoutRef.current = setTimeout(() => {
           performGlobalSync();
         }, 1000);
+      } else if (!hasWiFi && isSyncingRef.current) {
+        // WiFi dropped while syncing → set abort flag
+        console.log("⚠️ WiFi dropped during sync, setting abort flag");
+        shouldAbortRef.current = true;
       }
     });
 
@@ -92,7 +108,16 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
   // 2. Η ΚΥΡΙΑ ΛΟΓΙΚΗ ΤΟΥ SYNC (Εσωτερική συνάρτηση)
   const performGlobalSync = async () => {
     if (isSyncingRef.current) return;
+
+    // Pre-check: Make sure we have WiFi before starting
+    const hasWiFi = await isWiFiConnected();
+    if (!hasWiFi) {
+      console.log("⏸️ No WiFi, skipping sync");
+      return;
+    }
+
     setSyncState(true);
+    shouldAbortRef.current = false;
 
     try {
       const keys = await AsyncStorage.getAllKeys();
@@ -106,6 +131,12 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
       console.log("⚡ Instant Sync Started...");
 
       for (const key of queueKeys) {
+        // Check if we should abort (WiFi dropped)
+        if (shouldAbortRef.current) {
+          console.log("🛑 Sync aborted - WiFi dropped");
+          break;
+        }
+
         const projectId = key.replace(OFFLINE_QUEUE_PREFIX, "");
         const json = await AsyncStorage.getItem(key);
         if (!json) continue;
@@ -120,6 +151,12 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
         let localList: QueuedTask[] = rawList.map((item: any) =>
           item.task ? item : { task: item, retryCount: 0 }
         );
+
+        // Check connectivity before Firestore operation
+        if (shouldAbortRef.current || !(await isWiFiConnected())) {
+          console.log("🛑 Sync aborted before getDoc - no WiFi");
+          break;
+        }
 
         const projectRef = doc(db, "projects", projectId);
         const projectSnap = await getDoc(projectRef);
@@ -144,6 +181,12 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
         const syncedTaskIds: string[] = [];
 
         for (const queuedItem of localList) {
+          // Check if we should abort before processing each task
+          if (shouldAbortRef.current) {
+            console.log("🛑 Sync aborted mid-task - WiFi dropped");
+            break;
+          }
+
           const task = queuedItem.task;
           let taskFailed = false;
           let finalValue = task.value;
@@ -355,6 +398,14 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
         }
 
         if (changesMade) {
+          // Check connectivity before Firestore update
+          if (shouldAbortRef.current || !(await isWiFiConnected())) {
+            console.log("🛑 Sync aborted before updateDoc - no WiFi");
+            // Save current state to retry later
+            await AsyncStorage.setItem(key, JSON.stringify(localList));
+            break;
+          }
+
           const safeList = JSON.parse(
             JSON.stringify(currentCloudList, (k, v) =>
               v === undefined ? null : v,
@@ -418,6 +469,39 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
     } finally {
       // 4. ΚΑΜΙΑ ΚΑΘΥΣΤΕΡΗΣΗ - ΚΛΕΙΣΙΜΟ SPINNER ΑΜΕΣΩΣ
       setSyncState(false);
+
+      // 5. RE-SYNC CHECK: Αν υπάρχουν ακόμα items στο queue και έχουμε WiFi, retry μετά από λίγο
+      setTimeout(async () => {
+        try {
+          const hasWiFi = await isWiFiConnected();
+          if (!hasWiFi || isSyncingRef.current) return;
+
+          const keys = await AsyncStorage.getAllKeys();
+          const queueKeys = keys.filter((k) => k.startsWith(OFFLINE_QUEUE_PREFIX));
+
+          if (queueKeys.length > 0) {
+            // Check if any queue actually has items
+            let hasItems = false;
+            for (const k of queueKeys) {
+              const val = await AsyncStorage.getItem(k);
+              if (val) {
+                const arr = JSON.parse(val);
+                if (Array.isArray(arr) && arr.length > 0) {
+                  hasItems = true;
+                  break;
+                }
+              }
+            }
+
+            if (hasItems) {
+              console.log("🔄 Re-sync: Found remaining items in queue, retrying...");
+              performGlobalSync();
+            }
+          }
+        } catch (e) {
+          console.log("Re-sync check error:", e);
+        }
+      }, 3000); // Wait 3 seconds before checking for re-sync
     }
   };
 
