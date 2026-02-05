@@ -85,6 +85,17 @@
   - Print-friendly: Βελτιστοποιημένο για εκτύπωση με page breaks
   - Professional styling: Gradients, shadows, modern typography
 
+- [x] **Sync Queue Stuck Bug Fix (v2.1.3)**
+  Fix race condition που έκανε τα tasks να "κολλάνε" στο sync queue
+  **Λεπτομέρειες:**
+  - File validation: Έλεγχος αν το `file://` URI υπάρχει πριν το upload
+  - Retry counter: Max 3 προσπάθειες, μετά αφαίρεση από queue
+  - Per-task queue management: Διαγραφή κάθε task ξεχωριστά μετά το sync
+  - QueuedTask format: Νέο format με `{ task, retryCount }` για tracking
+  - Backward compatibility: Migration για παλιό queue format
+  - updateDoc failure handling: Increment retry count αν αποτύχει το Firestore update
+  - Invalid URI cleanup: Αφαίρεση invalid `file://` URIs από tasks
+
 ---
 
 ## 🚧 Pending Features
@@ -124,12 +135,12 @@
 
 | Κατηγορία | Completed | Pending | Total |
 |-----------|-----------|---------|-------|
-| Core Features | 10 | 0 | 10 |
+| Core Features | 11 | 0 | 11 |
 | New Features | 0 | 2 | 2 |
 | Rejected | 1 | 0 | 1 |
-| **ΣΥΝΟΛΟ** | **10** | **2** | **12** |
+| **ΣΥΝΟΛΟ** | **11** | **2** | **13** |
 
-**Progress:** 83.3% ολοκληρωμένο
+**Progress:** 84.6% ολοκληρωμένο
 
 ---
 
@@ -185,8 +196,16 @@
 - **User Name Offline Cache (v2.1.2):**
   - Cached user name με AsyncStorage
   - Εμφανίζεται το πραγματικό όνομα offline αντί για "Χρήστης"
+- **Sync Queue Stuck Fix (v2.1.3):**
+  - Race condition: Network drop mid-sync → queue never removed
+  - File validation με `FileSystem.getInfoAsync()` πριν το upload
+  - QueuedTask format: `{ task: any, retryCount: number }`
+  - MAX_SYNC_RETRIES = 3, μετά αφαίρεση από queue
+  - Per-task removal αντί για all-or-nothing cleanup
+  - updateDoc wrapped σε try-catch με retry increment
+  - Invalid `file://` URIs δεν κρατούνται στα processed arrays
 
 ---
 
 **Last Updated:** Φεβρουάριος 2026
-**Version:** 2.1.2
+**Version:** 2.1.3

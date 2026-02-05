@@ -20,6 +20,23 @@ import {
 } from "../../utils/storageUtils";
 
 const OFFLINE_QUEUE_PREFIX = "offline_tasks_queue_";
+const MAX_SYNC_RETRIES = 3;
+
+interface QueuedTask {
+  task: any;
+  retryCount: number;
+}
+
+// Validate if a local file:// URI still exists
+const validateFileExists = async (uri: string): Promise<boolean> => {
+  if (!uri || !uri.startsWith("file://")) return true;
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    return info.exists;
+  } catch {
+    return false;
+  }
+};
 
 type SyncContextType = {
   isSyncing: boolean;
@@ -93,11 +110,16 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
         const json = await AsyncStorage.getItem(key);
         if (!json) continue;
 
-        const localList = JSON.parse(json);
-        if (localList.length === 0) {
+        const rawList = JSON.parse(json);
+        if (rawList.length === 0) {
           await AsyncStorage.removeItem(key);
           continue;
         }
+
+        // Migrate old format (Task[]) to new format (QueuedTask[]) for backward compat
+        let localList: QueuedTask[] = rawList.map((item: any) =>
+          item.task ? item : { task: item, retryCount: 0 }
+        );
 
         const projectRef = doc(db, "projects", projectId);
         const projectSnap = await getDoc(projectRef);
@@ -118,7 +140,12 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
           continue;
         }
 
-        for (const task of localList) {
+        // Track successfully synced tasks for removal
+        const syncedTaskIds: string[] = [];
+
+        for (const queuedItem of localList) {
+          const task = queuedItem.task;
+          let taskFailed = false;
           let finalValue = task.value;
           let processedImages: string[] = [];
 
@@ -129,6 +156,13 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
 
               try {
                 if (imgUri.startsWith("file://")) {
+                  // Validate file exists before upload
+                  const fileExists = await validateFileExists(imgUri);
+                  if (!fileExists) {
+                    console.warn("⚠️ Image file not found, skipping:", imgUri);
+                    taskFailed = true; // Mark task as having issues
+                    continue; // Skip this image
+                  }
                   // Local file → Upload to Storage
                   const mediaId = generateMediaId();
                   const storageUrl = await uploadImageToStorage(
@@ -162,8 +196,11 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
                 }
               } catch (e) {
                 console.error("Failed to process image:", e);
-                // Keep original URI on error
-                processedImages.push(imgUri);
+                taskFailed = true;
+                // Don't keep invalid file:// URIs - they'll never work
+                if (!imgUri.startsWith("file://")) {
+                  processedImages.push(imgUri);
+                }
               }
             }
           }
@@ -177,6 +214,13 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
 
               try {
                 if (videoUri.startsWith("file://")) {
+                  // Validate file exists before upload
+                  const fileExists = await validateFileExists(videoUri);
+                  if (!fileExists) {
+                    console.warn("⚠️ Video file not found, skipping:", videoUri);
+                    taskFailed = true;
+                    continue;
+                  }
                   const mediaId = generateMediaId();
                   const storageUrl = await uploadVideoToStorage(
                     videoUri,
@@ -206,7 +250,11 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
                 }
               } catch (error) {
                 console.error("Video upload error:", error);
-                processedVideos.push(videoUri);
+                taskFailed = true;
+                // Don't keep invalid file:// URIs
+                if (!videoUri.startsWith("file://")) {
+                  processedVideos.push(videoUri);
+                }
               }
             }
           }
@@ -215,20 +263,28 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
           if (task.value && task.type !== "video") {
             try {
               if (task.value.startsWith("file://")) {
-                // Local file → Upload to Storage (photos only, for backward compat)
-                const mediaId = generateMediaId();
-                if (task.type === "photo") {
-                  finalValue = await uploadImageToStorage(
-                    task.value,
-                    teamId,
-                    projectId,
-                    task.id,
-                    mediaId
-                  );
-                  console.log("✓ Uploaded local photo to Storage");
+                // Validate file exists before upload
+                const fileExists = await validateFileExists(task.value);
+                if (!fileExists) {
+                  console.warn("⚠️ Task value file not found:", task.value);
+                  taskFailed = true;
+                  finalValue = ""; // Clear invalid file reference
                 } else {
-                  // measurement/general: keep as-is
-                  finalValue = task.value;
+                  // Local file → Upload to Storage (photos only, for backward compat)
+                  const mediaId = generateMediaId();
+                  if (task.type === "photo") {
+                    finalValue = await uploadImageToStorage(
+                      task.value,
+                      teamId,
+                      projectId,
+                      task.id,
+                      mediaId
+                    );
+                    console.log("✓ Uploaded local photo to Storage");
+                  } else {
+                    // measurement/general: keep as-is
+                    finalValue = task.value;
+                  }
                 }
               } else if (task.value.startsWith("data:image")) {
                 // Base64 data → Migrate to Storage
@@ -248,8 +304,13 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
               }
             } catch (e) {
               console.error("Failed to process task value:", e);
-              // Keep original value on error
-              finalValue = task.value;
+              taskFailed = true;
+              // Don't keep invalid file:// URIs
+              if (!task.value.startsWith("file://")) {
+                finalValue = task.value;
+              } else {
+                finalValue = "";
+              }
             }
           }
 
@@ -282,6 +343,15 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
             currentCloudList.push(taskReady);
           }
           changesMade = true;
+
+          // Track this task as successfully synced (if no failures)
+          if (!taskFailed) {
+            syncedTaskIds.push(task.id);
+          } else {
+            // Increment retry counter for failed tasks
+            queuedItem.retryCount++;
+            console.log(`⚠️ Task ${task.id} failed, retry count: ${queuedItem.retryCount}`);
+          }
         }
 
         if (changesMade) {
@@ -292,17 +362,55 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
           );
 
           // 1. ΑΝΕΒΑΣΜΑ
-          await updateDoc(projectRef, { tasks: safeList });
-          console.log(`✅ Uploaded: ${projectId}`);
+          try {
+            await updateDoc(projectRef, { tasks: safeList });
+            console.log(`✅ Uploaded: ${projectId}`);
 
-          // 2. ΕΝΗΜΕΡΩΣΗ UI (ΑΜΕΣΩΣ!)
-          setJustSyncedProjectId(projectId);
+            // 2. ΕΝΗΜΕΡΩΣΗ UI (ΑΜΕΣΩΣ!)
+            setJustSyncedProjectId(projectId);
 
-          // 3. CLEANUP (Μετά την ενημέρωση UI για ταχύτητα)
-          await AsyncStorage.removeItem(key);
+            // 3. CLEANUP - Remove only successfully synced tasks
+            // Also remove tasks that exceeded max retries
+            const remainingTasks = localList.filter((item) => {
+              const taskId = item.task.id;
 
-          // Καθαρισμός του σήματος μετά από λίγο
-          setTimeout(() => setJustSyncedProjectId(null), 2000);
+              // Remove if successfully synced
+              if (syncedTaskIds.includes(taskId)) {
+                return false;
+              }
+
+              // Remove if max retries exceeded
+              if (item.retryCount >= MAX_SYNC_RETRIES) {
+                console.error(`❌ Task ${taskId} exceeded max retries (${MAX_SYNC_RETRIES}), removing from queue`);
+                return false;
+              }
+
+              // Keep for retry
+              return true;
+            });
+
+            if (remainingTasks.length > 0) {
+              // Save updated queue with retry counts
+              await AsyncStorage.setItem(key, JSON.stringify(remainingTasks));
+              console.log(`⏳ ${remainingTasks.length} tasks remaining in queue for retry`);
+            } else {
+              // All tasks synced, remove queue
+              await AsyncStorage.removeItem(key);
+            }
+
+            // Καθαρισμός του σήματος μετά από λίγο
+            setTimeout(() => setJustSyncedProjectId(null), 2000);
+          } catch (updateError) {
+            console.error(`❌ updateDoc failed for ${projectId}:`, updateError);
+            // Increment retry count for all tasks that were being synced
+            for (const item of localList) {
+              if (syncedTaskIds.includes(item.task.id)) {
+                item.retryCount++;
+              }
+            }
+            // Save updated retry counts
+            await AsyncStorage.setItem(key, JSON.stringify(localList));
+          }
         }
       }
     } catch (error) {
