@@ -81,6 +81,8 @@ export default function ImageEditorModal({
 
   // Track if last drawing point was in bounds to prevent jump lines
   const wasInBounds = useRef(true);
+  // Track last valid drawing position to detect jumps
+  const lastValidPos = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
     colorRef.current = selectedColor;
@@ -117,11 +119,21 @@ export default function ImageEditorModal({
       onPanResponderTerminationRequest: () => true,
 
       onPanResponderGrant: (evt) => {
-        const { locationX, locationY } = evt.nativeEvent;
+        const { locationX, locationY, pageY } = evt.nativeEvent;
         if (toolRef.current === "pen") {
           // Έλεγχος αν το αρχικό touch είναι μέσα στα όρια
           const EDGE_MARGIN = 15;
+          // Header είναι ~100px, footer ξεκινά στο CANVAS_HEIGHT + ~100
+          const HEADER_HEIGHT = 100;
+          const footerStartY = HEADER_HEIGHT + CANVAS_HEIGHT;
+
+          // Χρήση pageY για απόλυτο έλεγχο θέσης στην οθόνη
+          const isInFooterArea = pageY > footerStartY;
+          const isInHeaderArea = pageY < HEADER_HEIGHT;
+
           const isInBounds =
+            !isInFooterArea &&
+            !isInHeaderArea &&
             locationX >= EDGE_MARGIN &&
             locationX <= width - EDGE_MARGIN &&
             locationY >= EDGE_MARGIN &&
@@ -129,6 +141,7 @@ export default function ImageEditorModal({
 
           if (isInBounds) {
             setCurrentPath(`M${locationX},${locationY}`);
+            lastValidPos.current = { x: locationX, y: locationY };
             wasInBounds.current = true;
           } else {
             // Αν ξεκίνησε εκτός, μην κάνεις τίποτα
@@ -139,14 +152,26 @@ export default function ImageEditorModal({
       },
 
       onPanResponderMove: (evt, gestureState) => {
-        const { locationX, locationY } = evt.nativeEvent;
+        const { locationX, locationY, pageY } = evt.nativeEvent;
 
         if (toolRef.current === "pen") {
           // ΖΩΓΡΑΦΙΣΜΑ - ΑΥΣΤΗΡΟΣ ΕΛΕΓΧΟΣ ΟΡΙΩΝ
-          // Margin από τα άκρα για να σταματάει πριν βγει στα UI elements
           const EDGE_MARGIN = 15;
+          const HEADER_HEIGHT = 100;
+          const footerStartY = HEADER_HEIGHT + CANVAS_HEIGHT;
 
-          // Strict bounds - μόνο μέσα στο canvas area
+          // ΠΡΩΤΑ: Έλεγχος με pageY (απόλυτη θέση στην οθόνη)
+          // Αν το δάχτυλο είναι στο footer ή header, ΑΓΝΟΗΣΕ ΤΕΛΕΙΩΣ
+          const isInFooterArea = pageY > footerStartY - 20; // 20px buffer
+          const isInHeaderArea = pageY < HEADER_HEIGHT - 20;
+
+          if (isInFooterArea || isInHeaderArea) {
+            // Το δάχτυλο είναι σε UI area - σταμάτα και μην κάνεις τίποτα
+            wasInBounds.current = false;
+            return;
+          }
+
+          // Strict bounds check με locationX/Y
           const minX = EDGE_MARGIN;
           const maxX = width - EDGE_MARGIN;
           const minY = EDGE_MARGIN;
@@ -158,33 +183,40 @@ export default function ImageEditorModal({
             locationY >= minY &&
             locationY <= maxY;
 
-          // Έλεγχος για ΠΟΛΥ μεγάλες τιμές που δείχνουν ότι το δάχτυλο
-          // πήγε σε άλλο UI element (footer, header)
+          // Έλεγχος για wild values ή μεγάλα jumps
           const isWildValue =
             locationX < -20 ||
             locationX > width + 20 ||
             locationY < -20 ||
-            locationY > CANVAS_HEIGHT + 100 ||
+            locationY > CANVAS_HEIGHT + 50 ||
             Math.abs(locationX) > 2000 ||
             Math.abs(locationY) > 2000;
 
-          if (isWildValue) {
-            // Εντελώς εκτός - αγνόησε και σταμάτα
+          // Έλεγχος για JUMP: αν η νέα θέση είναι πολύ μακριά από την τελευταία έγκυρη
+          const distanceFromLast = Math.sqrt(
+            Math.pow(locationX - lastValidPos.current.x, 2) +
+            Math.pow(locationY - lastValidPos.current.y, 2)
+          );
+          const isJump = wasInBounds.current && distanceFromLast > 150; // >150px = jump
+
+          if (isWildValue || isJump) {
+            // Wild value ή jump - αγνόησε
             wasInBounds.current = false;
             return;
           }
 
           if (!isInBounds) {
-            // Εκτός ορίων αλλά κοντά - απλά σταμάτα να σχεδιάζεις
+            // Εκτός ορίων - σταμάτα να σχεδιάζεις
             wasInBounds.current = false;
             return;
           }
 
           // Μέσα στα όρια - σχεδίασε
-          // CRITICAL: Ελέγχουμε ΠΡΩΤΑ αν ήμασταν εκτός και ΜΕΤΑ κάνουμε update
-          // Αυτό αποτρέπει το race condition με το async state update
           const needsNewSegment = !wasInBounds.current;
-          wasInBounds.current = true; // Set BEFORE the state update
+          wasInBounds.current = true;
+
+          // Ενημέρωση τελευταίας έγκυρης θέσης
+          lastValidPos.current = { x: locationX, y: locationY };
 
           setCurrentPath((prev) => {
             if (needsNewSegment) {
@@ -277,6 +309,7 @@ export default function ImageEditorModal({
     panY.setValue(0);
     lastPan.current = { x: 0, y: 0 };
     wasInBounds.current = true;
+    lastValidPos.current = { x: 0, y: 0 };
   };
 
   const handleZoomIn = () => setScale((s) => Math.min(s + 0.2, 3));

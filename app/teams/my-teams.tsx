@@ -34,6 +34,7 @@ interface Team {
 }
 
 const TEAMS_CACHE_KEY = "cached_my_teams";
+const USER_NAME_CACHE_KEY = "cached_user_name";
 const OFFLINE_QUEUE_PREFIX = "offline_tasks_queue_";
 
 const getRoleStyle = (role: Role) => {
@@ -169,12 +170,18 @@ export default function MyTeamsScreen() {
   useEffect(() => {
     const initLoad = async () => {
       try {
+        // Load cached teams
         const cached = await AsyncStorage.getItem(TEAMS_CACHE_KEY);
         if (cached) {
           const parsed = JSON.parse(cached);
           if (Array.isArray(parsed) && parsed.length > 0) {
             setTeams(parsed);
           }
+        }
+        // Load cached user name
+        const cachedName = await AsyncStorage.getItem(USER_NAME_CACHE_KEY);
+        if (cachedName) {
+          setUserName(cachedName);
         }
       } catch (e) {
         console.log("Cache load error:", e);
@@ -190,7 +197,12 @@ export default function MyTeamsScreen() {
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (user) {
         onSnapshot(doc(db, "users", user.uid), (snap) => {
-          if (snap.exists()) setUserName(snap.data().fullname || "Χρήστης");
+          if (snap.exists()) {
+            const name = snap.data().fullname || "Χρήστης";
+            setUserName(name);
+            // Cache the user name for offline use
+            AsyncStorage.setItem(USER_NAME_CACHE_KEY, name);
+          }
         });
 
         const q = query(
