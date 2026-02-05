@@ -129,7 +129,7 @@ export default function ImageEditorModal({
 
           // Χρήση pageY για απόλυτο έλεγχο θέσης στην οθόνη
           const isInFooterArea = pageY > footerStartY;
-          const isInHeaderArea = pageY < HEADER_HEIGHT;
+          const isInHeaderArea = pageY < HEADER_HEIGHT + 20; // +20 buffer μέσα στο canvas
 
           const isInBounds =
             !isInFooterArea &&
@@ -162,8 +162,8 @@ export default function ImageEditorModal({
 
           // ΠΡΩΤΑ: Έλεγχος με pageY (απόλυτη θέση στην οθόνη)
           // Αν το δάχτυλο είναι στο footer ή header, ΑΓΝΟΗΣΕ ΤΕΛΕΙΩΣ
-          const isInFooterArea = pageY > footerStartY - 20; // 20px buffer
-          const isInHeaderArea = pageY < HEADER_HEIGHT - 20;
+          const isInFooterArea = pageY > footerStartY - 20; // 20px buffer ΠΡΙΝ τον footer
+          const isInHeaderArea = pageY < HEADER_HEIGHT + 20; // 20px buffer ΜΕΤΑ τον header
 
           if (isInFooterArea || isInHeaderArea) {
             // Το δάχτυλο είναι σε UI area - σταμάτα και μην κάνεις τίποτα

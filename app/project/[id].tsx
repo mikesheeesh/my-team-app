@@ -62,6 +62,7 @@ type PhotoTask = {
   images: string[];
   imageLocations: GeoPoint[];
   isLocal?: boolean;
+  completedAt?: number; // Unix timestamp when task was completed
 };
 
 type VideoTask = {
@@ -73,6 +74,7 @@ type VideoTask = {
   videos: string[];
   videoLocations: GeoPoint[];
   isLocal?: boolean;
+  completedAt?: number; // Unix timestamp when task was completed
 };
 
 type MeasurementTask = {
@@ -83,6 +85,7 @@ type MeasurementTask = {
   status: "pending" | "completed";
   value: string;
   isLocal?: boolean;
+  completedAt?: number; // Unix timestamp when task was completed
 };
 
 type GeneralTask = {
@@ -93,6 +96,7 @@ type GeneralTask = {
   status: "pending" | "completed";
   value: string;
   isLocal?: boolean;
+  completedAt?: number; // Unix timestamp when task was completed
 };
 
 type Task = PhotoTask | VideoTask | MeasurementTask | GeneralTask;
@@ -477,6 +481,16 @@ export default function ProjectDetailsScreen() {
 
   // --- ACTIONS ---
   const saveTaskLocal = async (task: Task) => {
+    // Auto-add completedAt timestamp when task becomes completed
+    let taskToSave = { ...task };
+    if (task.status === "completed" && !task.completedAt) {
+      taskToSave = { ...task, completedAt: Date.now() };
+    } else if (task.status === "pending") {
+      // Remove completedAt if task goes back to pending
+      const { completedAt, ...rest } = taskToSave as any;
+      taskToSave = rest as Task;
+    }
+
     // Check WiFi first
     const net = await Network.getNetworkStateAsync();
     const hasWiFi = net.isConnected && net.type === Network.NetworkStateType.WIFI;
@@ -485,27 +499,27 @@ export default function ProjectDetailsScreen() {
       // WiFi available → Upload directly to Firestore/Storage
       console.log("📡 WiFi detected - Uploading directly to cloud...");
       try {
-        let finalTask: any = { ...task };
+        let finalTask: any = { ...taskToSave };
 
         // Upload media to Storage if file:// URI exists
-        if (task.type === "photo" && task.images?.length > 0) {
+        if (taskToSave.type === "photo" && taskToSave.images?.length > 0) {
           const uploadedImages: string[] = [];
-          for (const imgUri of task.images) {
+          for (const imgUri of taskToSave.images) {
             if (imgUri.startsWith("file://")) {
               const mediaId = generateMediaId();
-              const storageUrl = await uploadImageToStorage(imgUri, teamId, projectId, task.id, mediaId);
+              const storageUrl = await uploadImageToStorage(imgUri, teamId, projectId, taskToSave.id, mediaId);
               uploadedImages.push(storageUrl);
             } else {
               uploadedImages.push(imgUri);
             }
           }
           finalTask.images = uploadedImages;
-        } else if (task.type === "video" && task.videos?.length > 0) {
+        } else if (taskToSave.type === "video" && taskToSave.videos?.length > 0) {
           const uploadedVideos: string[] = [];
-          for (const videoUri of task.videos) {
+          for (const videoUri of taskToSave.videos) {
             if (videoUri.startsWith("file://")) {
               const mediaId = generateMediaId();
-              const storageUrl = await uploadVideoToStorage(videoUri, teamId, projectId, task.id, mediaId);
+              const storageUrl = await uploadVideoToStorage(videoUri, teamId, projectId, taskToSave.id, mediaId);
               uploadedVideos.push(storageUrl);
             } else {
               uploadedVideos.push(videoUri);
@@ -537,7 +551,7 @@ export default function ProjectDetailsScreen() {
       } catch (error) {
         console.error("❌ Direct upload failed:", error);
         // Fallback to local save
-        const taskWithFlag = { ...task, isLocal: true };
+        const taskWithFlag = { ...taskToSave, isLocal: true };
         setLocalTasks((prev) => {
           const newLocalMap = new Map(prev.map((t) => [t.id, t]));
           newLocalMap.set(taskWithFlag.id, taskWithFlag);
@@ -545,13 +559,13 @@ export default function ProjectDetailsScreen() {
           AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(newLocalList));
           return newLocalList;
         });
-        if (activeTaskForGallery && activeTaskForGallery.id === task.id)
+        if (activeTaskForGallery && activeTaskForGallery.id === taskToSave.id)
           setActiveTaskForGallery(taskWithFlag);
       }
     } else {
       // No WiFi → Save locally
       console.log("💾 No WiFi - Saving locally...");
-      const taskWithFlag = { ...task, isLocal: true };
+      const taskWithFlag = { ...taskToSave, isLocal: true };
       setLocalTasks((prev) => {
         const newLocalMap = new Map(prev.map((t) => [t.id, t]));
         newLocalMap.set(taskWithFlag.id, taskWithFlag);
@@ -560,7 +574,7 @@ export default function ProjectDetailsScreen() {
         return newLocalList;
       });
 
-      if (activeTaskForGallery && activeTaskForGallery.id === task.id)
+      if (activeTaskForGallery && activeTaskForGallery.id === taskToSave.id)
         setActiveTaskForGallery(taskWithFlag);
     }
   };
@@ -1124,33 +1138,39 @@ export default function ProjectDetailsScreen() {
         day: "numeric",
       });
 
-      let rowsHTML = "";
+      // Helper function to format completion date
+      const formatCompletedDate = (timestamp?: number) => {
+        if (!timestamp) return null;
+        return new Date(timestamp).toLocaleDateString("el-GR", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      };
+
+      // Helper function to generate GPS link
+      const generateGpsLink = (loc: GeoPoint) => {
+        if (!loc || loc.lat === 0 || loc.lng === 0) return null;
+        return `https://www.google.com/maps?q=${loc.lat},${loc.lng}`;
+      };
+
+      let tasksHTML = "";
 
       combinedTasks.forEach((task, index) => {
         const isDone = task.status === "completed";
 
         // Status Badge Logic
         const statusBadge = isDone
-          ? `<span class="badge badge-success">ΟΛΟΚΛΗΡΩΘΗΚΕ</span>`
+          ? `<span class="badge badge-success">✓ ΟΛΟΚΛΗΡΩΘΗΚΕ</span>`
           : `<span class="badge badge-pending">ΕΚΚΡΕΜΕΙ</span>`;
 
-        // Result / Value Logic
-        let valueDisplay = '<span style="color: #94a3b8;">-</span>';
-
-        if (task.type === "video") {
-          const count = task.videos.length;
-          valueDisplay = count > 0
-            ? `<div class="media-box video"><span class="icon">🎥</span> ${count} ${count === 1 ? 'Βίντεο' : 'Βίντεο'}</div>`
-            : `<span style="color: #cbd5e1;">Χωρίς Βίντεο</span>`;
-        } else if (task.type === "photo") {
-          const count = task.images.length;
-          valueDisplay =
-            count > 0
-              ? `<div class="media-box photo"><span class="icon">📷</span> ${count} Φωτογραφίες</div>`
-              : `<span style="color: #cbd5e1;">Χωρίς Φωτογραφίες</span>`;
-        } else if ((task.type === "measurement" || task.type === "general") && task.value) {
-          valueDisplay = `<div class="value-box">${task.value}</div>`;
-        }
+        // Completion Date
+        const completedDateStr = formatCompletedDate(task.completedAt);
+        const dateHTML = completedDateStr
+          ? `<div class="completed-date">📅 ${completedDateStr}</div>`
+          : "";
 
         // Description Logic
         const descHTML = task.description
@@ -1159,20 +1179,89 @@ export default function ProjectDetailsScreen() {
 
         // Icon selection based on type
         let typeIcon = "📝";
-        if (task.type === "photo") typeIcon = "📷";
-        if (task.type === "video") typeIcon = "🎥";
-        if (task.type === "measurement") typeIcon = "📏";
+        let typeLabel = "Κείμενο";
+        if (task.type === "photo") { typeIcon = "📷"; typeLabel = "Φωτογραφία"; }
+        if (task.type === "video") { typeIcon = "🎥"; typeLabel = "Βίντεο"; }
+        if (task.type === "measurement") { typeIcon = "📏"; typeLabel = "Μέτρηση"; }
 
-        rowsHTML += `
-            <tr>
-                <td style="text-align: center; color: #64748b; font-weight: bold;">${index + 1}</td>
-                <td>
-                    <div class="task-title">${typeIcon} ${task.title}</div>
-                    ${descHTML}
-                </td>
-                <td style="text-align: center;">${statusBadge}</td>
-                <td style="text-align: right;">${valueDisplay}</td>
-            </tr>`;
+        // Generate media section (thumbnails + GPS links)
+        let mediaHTML = "";
+
+        if (task.type === "photo" && task.images.length > 0) {
+          // Photo thumbnails (max 4)
+          const displayImages = task.images.slice(0, 4);
+          const remainingCount = task.images.length - 4;
+
+          let thumbnailsHTML = displayImages
+            .filter(img => img.startsWith("https://")) // Only show remote URLs in PDF
+            .map(img => `<img src="${img}" class="thumbnail" onerror="this.style.display='none'" />`)
+            .join("");
+
+          if (remainingCount > 0) {
+            thumbnailsHTML += `<div class="more-badge">+${remainingCount}</div>`;
+          }
+
+          // GPS links for photos
+          const gpsLinks = task.imageLocations
+            .map((loc, i) => {
+              const url = generateGpsLink(loc);
+              return url ? `<a href="${url}" class="gps-link" target="_blank">📍 Φωτο ${i + 1}</a>` : null;
+            })
+            .filter(Boolean)
+            .slice(0, 4) // Max 4 GPS links
+            .join(" ");
+
+          mediaHTML = `
+            <div class="media-section">
+              <div class="media-count photo-count">📷 ${task.images.length} Φωτογραφίες</div>
+              ${thumbnailsHTML ? `<div class="thumbnails-row">${thumbnailsHTML}</div>` : ""}
+              ${gpsLinks ? `<div class="gps-row">${gpsLinks}</div>` : ""}
+            </div>
+          `;
+        } else if (task.type === "video" && task.videos.length > 0) {
+          // Video count and GPS links
+          const gpsLinks = task.videoLocations
+            .map((loc, i) => {
+              const url = generateGpsLink(loc);
+              return url ? `<a href="${url}" class="gps-link" target="_blank">📍 Βίντεο ${i + 1}</a>` : null;
+            })
+            .filter(Boolean)
+            .slice(0, 4)
+            .join(" ");
+
+          mediaHTML = `
+            <div class="media-section">
+              <div class="media-count video-count">🎥 ${task.videos.length} Βίντεο</div>
+              ${gpsLinks ? `<div class="gps-row">${gpsLinks}</div>` : ""}
+            </div>
+          `;
+        } else if ((task.type === "measurement" || task.type === "general") && task.value) {
+          mediaHTML = `
+            <div class="media-section">
+              <div class="value-box">${task.value}</div>
+            </div>
+          `;
+        }
+
+        tasksHTML += `
+          <div class="task-card ${isDone ? 'completed' : ''}">
+            <div class="task-header">
+              <div class="task-number">${index + 1}</div>
+              <div class="task-info">
+                <div class="task-title-row">
+                  <span class="task-title">${typeIcon} ${task.title}</span>
+                  <span class="task-type">${typeLabel}</span>
+                </div>
+                ${descHTML}
+                ${dateHTML}
+              </div>
+              <div class="task-status">
+                ${statusBadge}
+              </div>
+            </div>
+            ${mediaHTML}
+          </div>
+        `;
       });
 
       const html = `
@@ -1183,50 +1272,51 @@ export default function ProjectDetailsScreen() {
             <meta name="viewport" content="width=device-width,initial-scale=1.0">
             <style>
                 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-                
+
                 body {
                     font-family: 'Inter', Helvetica, Arial, sans-serif;
-                    padding: 40px;
+                    padding: 30px;
                     color: #1e293b;
                     background: #ffffff;
+                    font-size: 12px;
                 }
-                
+
                 /* HEADER */
                 .header {
                     display: flex;
                     justify-content: space-between;
                     align-items: flex-start;
-                    border-bottom: 2px solid #2563eb;
+                    border-bottom: 3px solid #2563eb;
                     padding-bottom: 20px;
-                    margin-bottom: 30px;
+                    margin-bottom: 25px;
                 }
                 .logo-placeholder {
                     width: 50px;
                     height: 50px;
-                    background: #2563eb;
+                    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
                     color: white;
-                    border-radius: 8px;
+                    border-radius: 12px;
                     display: flex;
                     align-items: center;
                     justify-content: center;
                     font-size: 24px;
                     font-weight: bold;
-                    box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
+                    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
                 }
                 .project-info h1 {
                     margin: 0;
-                    font-size: 22px;
+                    font-size: 20px;
                     color: #0f172a;
                     letter-spacing: -0.5px;
                 }
                 .project-info p {
                     margin: 4px 0 0;
                     color: #64748b;
-                    font-size: 12px;
+                    font-size: 11px;
                 }
                 .meta-info {
                     text-align: right;
-                    font-size: 11px;
+                    font-size: 10px;
                     color: #64748b;
                 }
                 .meta-info strong { color: #334155; }
@@ -1234,103 +1324,198 @@ export default function ProjectDetailsScreen() {
                 /* SUMMARY CARDS */
                 .summary {
                     display: flex;
-                    gap: 15px;
-                    margin-bottom: 30px;
+                    gap: 12px;
+                    margin-bottom: 25px;
                 }
                 .card {
                     flex: 1;
-                    background: #f8fafc;
-                    padding: 15px;
-                    border-radius: 8px;
+                    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+                    padding: 14px;
+                    border-radius: 10px;
                     border: 1px solid #e2e8f0;
                 }
-                .card-label { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; }
-                .card-value { font-size: 18px; font-weight: 700; color: #0f172a; margin-top: 5px; }
+                .card-label { font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; }
+                .card-value { font-size: 22px; font-weight: 800; color: #0f172a; margin-top: 4px; }
                 .card-value.green { color: #059669; }
 
-                /* TABLE */
-                table {
-                    width: 100%;
-                    border-collapse: collapse;
+                /* TASK CARDS */
+                .task-card {
+                    background: #ffffff;
+                    border: 1px solid #e2e8f0;
+                    border-radius: 12px;
+                    margin-bottom: 12px;
+                    overflow: hidden;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+                }
+                .task-card.completed {
+                    border-left: 4px solid #10b981;
+                }
+                .task-header {
+                    display: flex;
+                    align-items: flex-start;
+                    padding: 14px;
+                    gap: 12px;
+                }
+                .task-number {
+                    width: 28px;
+                    height: 28px;
+                    background: #f1f5f9;
+                    border-radius: 8px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-weight: 700;
+                    color: #64748b;
+                    font-size: 12px;
+                    flex-shrink: 0;
+                }
+                .task-info {
+                    flex: 1;
+                }
+                .task-title-row {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    flex-wrap: wrap;
+                }
+                .task-title {
+                    font-weight: 700;
+                    color: #1e293b;
                     font-size: 13px;
                 }
-                th {
-                    text-align: left;
-                    background-color: #f1f5f9;
-                    color: #475569;
-                    padding: 12px 16px;
-                    font-size: 10px;
+                .task-type {
+                    font-size: 9px;
+                    color: #94a3b8;
+                    background: #f1f5f9;
+                    padding: 2px 6px;
+                    border-radius: 4px;
                     text-transform: uppercase;
-                    letter-spacing: 0.8px;
-                    font-weight: 700;
-                    border-bottom: 2px solid #e2e8f0;
-                }
-                td {
-                    padding: 16px;
-                    border-bottom: 1px solid #f1f5f9;
-                    vertical-align: top;
-                }
-                tr:last-child td { border-bottom: none; }
-                tr:nth-child(even) { background-color: #fafafa; }
-
-                /* CONTENT STYLES */
-                .task-title {
                     font-weight: 600;
-                    color: #1e293b;
-                    font-size: 14px;
                 }
                 .desc {
-                    color: #94a3b8;
+                    color: #64748b;
                     font-size: 11px;
                     margin-top: 4px;
                     font-style: italic;
                     line-height: 1.4;
                 }
-                
+                .completed-date {
+                    font-size: 10px;
+                    color: #10b981;
+                    margin-top: 4px;
+                    font-weight: 500;
+                }
+                .task-status {
+                    flex-shrink: 0;
+                }
+
                 /* BADGES */
                 .badge {
-                    padding: 4px 10px;
-                    border-radius: 99px;
+                    padding: 5px 10px;
+                    border-radius: 6px;
                     font-size: 9px;
-                    font-weight: 800;
-                    letter-spacing: 0.5px;
+                    font-weight: 700;
+                    letter-spacing: 0.3px;
                     display: inline-block;
+                    white-space: nowrap;
                 }
-                .badge-success { background-color: #dcfce7; color: #166534; }
-                .badge-pending { background-color: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
+                .badge-success {
+                    background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+                    color: #166534;
+                    border: 1px solid #86efac;
+                }
+                .badge-pending {
+                    background: #f8fafc;
+                    color: #64748b;
+                    border: 1px solid #e2e8f0;
+                }
+
+                /* MEDIA SECTION */
+                .media-section {
+                    background: #f8fafc;
+                    padding: 12px 14px;
+                    border-top: 1px solid #f1f5f9;
+                }
+                .media-count {
+                    font-size: 11px;
+                    font-weight: 600;
+                    margin-bottom: 8px;
+                }
+                .photo-count { color: #db2777; }
+                .video-count { color: #ea580c; }
+
+                .thumbnails-row {
+                    display: flex;
+                    gap: 6px;
+                    flex-wrap: wrap;
+                    margin-bottom: 8px;
+                }
+                .thumbnail {
+                    width: 60px;
+                    height: 60px;
+                    object-fit: cover;
+                    border-radius: 6px;
+                    border: 2px solid #e2e8f0;
+                }
+                .more-badge {
+                    width: 60px;
+                    height: 60px;
+                    background: #e2e8f0;
+                    border-radius: 6px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-weight: 700;
+                    color: #64748b;
+                    font-size: 14px;
+                }
+
+                .gps-row {
+                    display: flex;
+                    gap: 8px;
+                    flex-wrap: wrap;
+                }
+                .gps-link {
+                    font-size: 10px;
+                    color: #2563eb;
+                    text-decoration: none;
+                    background: #eff6ff;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    border: 1px solid #dbeafe;
+                    font-weight: 500;
+                }
+                .gps-link:hover {
+                    background: #dbeafe;
+                }
 
                 /* VALUE BOXES */
                 .value-box {
-                    background: #eff6ff;
+                    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
                     color: #1d4ed8;
-                    padding: 6px 12px;
-                    border-radius: 6px;
+                    padding: 8px 14px;
+                    border-radius: 8px;
                     font-family: 'Courier New', monospace;
                     font-weight: 700;
                     display: inline-block;
-                    border: 1px solid #dbeafe;
-                    font-size: 12px;
+                    border: 1px solid #bfdbfe;
+                    font-size: 13px;
                 }
-                .media-box {
-                    display: inline-flex;
-                    align-items: center;
-                    padding: 5px 10px;
-                    border-radius: 6px;
-                    font-size: 11px;
-                    font-weight: 600;
-                }
-                .media-box.photo { background: #fdf2f8; color: #db2777; border: 1px solid #fce7f3; }
-                .media-box.video { background: #fff7ed; color: #ea580c; border: 1px solid #ffedd5; }
-                .icon { margin-right: 5px; font-size: 12px; }
 
                 /* FOOTER */
                 .footer {
-                    margin-top: 50px;
+                    margin-top: 30px;
                     text-align: center;
-                    color: #cbd5e1;
+                    color: #94a3b8;
                     font-size: 9px;
                     border-top: 1px solid #f1f5f9;
-                    padding-top: 20px;
+                    padding-top: 15px;
+                }
+
+                /* PRINT STYLES */
+                @media print {
+                    body { padding: 20px; }
+                    .task-card { break-inside: avoid; }
                 }
             </style>
         </head>
@@ -1344,8 +1529,8 @@ export default function ProjectDetailsScreen() {
                     </div>
                 </div>
                 <div class="meta-info">
-                    <div><strong>Ημερομηνία:</strong> ${dateStr}</div>
-                    <div style="margin-top: 4px;"><strong>ID Έργου:</strong> #${projectId.slice(0, 6)}</div>
+                    <div><strong>Ημερομηνία Αναφοράς:</strong> ${dateStr}</div>
+                    <div style="margin-top: 4px;"><strong>Κωδικός Έργου:</strong> #${projectId.slice(0, 8).toUpperCase()}</div>
                 </div>
             </div>
 
@@ -1359,29 +1544,25 @@ export default function ProjectDetailsScreen() {
                     <div class="card-value green">${completedTasks}</div>
                 </div>
                 <div class="card">
+                    <div class="card-label">ΠΡΟΟΔΟΣ</div>
+                    <div class="card-value" style="color: ${progressPercent === 100 ? "#059669" : "#2563eb"};">
+                        ${Math.round(progressPercent)}%
+                    </div>
+                </div>
+                <div class="card">
                     <div class="card-label">ΚΑΤΑΣΤΑΣΗ</div>
-                    <div class="card-value" style="color: ${projectStatus === "completed" ? "#059669" : "#2563eb"}; font-size: 14px;">
-                        ${projectStatus === "completed" ? "✅ ΟΛΟΚΛΗΡΩΜΕΝΟ" : "🔄 ΣΕ ΕΞΕΛΙΞΗ"}
+                    <div class="card-value" style="color: ${projectStatus === "completed" ? "#059669" : projectStatus === "pending" ? "#f59e0b" : "#2563eb"}; font-size: 11px; margin-top: 8px;">
+                        ${projectStatus === "completed" ? "✅ ΟΛΟΚΛΗΡΩΜΕΝΟ" : projectStatus === "pending" ? "⏳ ΣΕ ΕΞΕΛΙΞΗ" : "🔄 ΕΝΕΡΓΟ"}
                     </div>
                 </div>
             </div>
 
-            <table>
-                <thead>
-                    <tr>
-                        <th style="width: 5%; text-align: center;">#</th>
-                        <th style="width: 45%">ΠΕΡΙΓΡΑΦΗ ΕΡΓΑΣΙΑΣ</th>
-                        <th style="width: 20%; text-align: center;">ΚΑΤΑΣΤΑΣΗ</th>
-                        <th style="width: 30%; text-align: right;">ΑΠΟΤΕΛΕΣΜΑ / MEDIA</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${rowsHTML}
-                </tbody>
-            </table>
+            <div class="tasks-section">
+                ${tasksHTML}
+            </div>
 
             <div class="footer">
-                Ergon Work Management • Δημιουργήθηκε αυτόματα στις ${new Date().toLocaleTimeString("el-GR")}
+                <strong>Ergon Work Management</strong> • Αυτόματη Αναφορά • ${new Date().toLocaleString("el-GR")}
             </div>
         </body>
         </html>

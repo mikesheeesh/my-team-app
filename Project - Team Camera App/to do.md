@@ -73,6 +73,18 @@
   - ~3 second end-to-end join workflow
   - 100% free hosting (Vercel free tier: 100GB/month)
 
+- [x] **Enhanced PDF Report (v2.1.2)**
+  Βελτιωμένη αναφορά PDF με περισσότερες πληροφορίες
+  **Λεπτομέρειες:**
+  - Photo thumbnails: Μικρογραφίες 60x60px (max 4 ανά task) με "+X" badge
+  - GPS Links: Clickable links για κάθε φωτογραφία/βίντεο στο Google Maps
+  - Completion dates: Ημερομηνία/ώρα ολοκλήρωσης για κάθε task
+  - Card-based layout: Νέα εμφάνιση με κάρτες αντί για πίνακα
+  - 4 summary cards: ΣΥΝΟΛΟ, ΟΛΟΚΛΗΡΩΜΕΝΕΣ, ΠΡΟΟΔΟΣ %, ΚΑΤΑΣΤΑΣΗ
+  - completedAt field: Αυτόματη καταγραφή timestamp όταν task γίνει completed
+  - Print-friendly: Βελτιστοποιημένο για εκτύπωση με page breaks
+  - Professional styling: Gradients, shadows, modern typography
+
 ---
 
 ## 🚧 Pending Features
@@ -112,12 +124,12 @@
 
 | Κατηγορία | Completed | Pending | Total |
 |-----------|-----------|---------|-------|
-| Core Features | 9 | 0 | 9 |
+| Core Features | 10 | 0 | 10 |
 | New Features | 0 | 2 | 2 |
 | Rejected | 1 | 0 | 1 |
-| **ΣΥΝΟΛΟ** | **9** | **2** | **11** |
+| **ΣΥΝΟΛΟ** | **10** | **2** | **12** |
 
-**Progress:** 81.8% ολοκληρωμένο
+**Progress:** 83.3% ολοκληρωμένο
 
 ---
 
@@ -163,8 +175,18 @@
 - **Project Group Move (v2.1.1):**
   - Instant UI refresh όταν μετακινείται project σε άλλο group
   - Local state update πριν το Firestore update (optimistic UI)
+- **Enhanced PDF Report (v2.1.2):**
+  - Card-based layout αντί για table
+  - Photo thumbnails με onerror fallback
+  - Clickable GPS links για Google Maps
+  - completedAt timestamp καταγράφεται αυτόματα στο saveTaskLocal()
+  - Αφαιρείται completedAt αν task γυρίσει σε pending
+  - Thumbnails εμφανίζονται μόνο για Firebase Storage URLs (όχι file://)
+- **User Name Offline Cache (v2.1.2):**
+  - Cached user name με AsyncStorage
+  - Εμφανίζεται το πραγματικό όνομα offline αντί για "Χρήστης"
 
 ---
 
 **Last Updated:** Φεβρουάριος 2026
-**Version:** 2.1.1
+**Version:** 2.1.2
