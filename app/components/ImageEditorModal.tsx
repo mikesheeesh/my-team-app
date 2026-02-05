@@ -181,16 +181,19 @@ export default function ImageEditorModal({
           }
 
           // Μέσα στα όρια - σχεδίασε
+          // CRITICAL: Ελέγχουμε ΠΡΩΤΑ αν ήμασταν εκτός και ΜΕΤΑ κάνουμε update
+          // Αυτό αποτρέπει το race condition με το async state update
+          const needsNewSegment = !wasInBounds.current;
+          wasInBounds.current = true; // Set BEFORE the state update
+
           setCurrentPath((prev) => {
-            if (!wasInBounds.current) {
+            if (needsNewSegment) {
               // Μόλις γυρίσαμε στα όρια - ξεκίνα νέο segment
-              wasInBounds.current = true;
               return `${prev} M${locationX},${locationY}`;
             }
             // Συνέχισε τη γραμμή κανονικά
             return `${prev} L${locationX},${locationY}`;
           });
-          wasInBounds.current = true;
         } else {
           // ΜΕΤΑΚΙΝΗΣΗ (Framing) - ΟΜΑΛΗ ΕΚΔΟΣΗ
           // Υπολογίζουμε τη νέα θέση βασισμένοι στην παλιά + την κίνηση του δαχτύλου.

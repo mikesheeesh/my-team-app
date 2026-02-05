@@ -703,6 +703,11 @@ export default function TeamProjectsScreen() {
         return { ...g, projects: [...g.projects, project] };
       return g;
     });
+
+    // Update local state immediately for UI refresh
+    setGroups(updatedGroups);
+
+    // Update Firestore
     await updateTeamData("groups", updatedGroups);
     setMoveModalVisible(false);
     setProjectSettingsVisible(false);

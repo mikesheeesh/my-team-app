@@ -159,8 +159,12 @@
   - Αποτρέπει line jumps όταν το δάχτυλο βγαίνει εκτός canvas
   - Αποτρέπει flicks προς header/footer areas
   - Wild value detection για UI element transitions
+  - **v2.1.1:** Race condition fix - capture wasInBounds value πριν το async state update
+- **Project Group Move (v2.1.1):**
+  - Instant UI refresh όταν μετακινείται project σε άλλο group
+  - Local state update πριν το Firestore update (optimistic UI)
 
 ---
 
 **Last Updated:** Φεβρουάριος 2026
-**Version:** 2.1.0
+**Version:** 2.1.1
