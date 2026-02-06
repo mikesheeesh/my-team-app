@@ -2068,10 +2068,10 @@ export default function ProjectDetailsScreen() {
           <View
             style={[
               styles.toolBar,
-              // Move toolbar higher for videos to align with video controls bar
+              // Move toolbar higher for videos to stay above native video controls
               (selectedMediaForView?.startsWith("data:video") ||
                 activeTaskForGallery?.type === "video") && {
-                bottom: 100,
+                bottom: insets.bottom + 120,
               },
             ]}
           >
