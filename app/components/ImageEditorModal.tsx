@@ -84,6 +84,16 @@ export default function ImageEditorModal({
   // Track last valid drawing position to detect jumps
   const lastValidPos = useRef({ x: 0, y: 0 });
 
+  // Dimensions πρέπει να δηλωθούν ΠΡΙΝ τα canvas refs που τα χρησιμοποιούν
+  const viewShotRef = useRef<ViewShot>(null);
+  const { width, height } = Dimensions.get("window");
+
+  // Canvas layout measurement (absolute screen coordinates)
+  const canvasLayoutRef = useRef({ top: 100, bottom: height - 110, left: 0, right: width });
+  const canvasContainerRef = useRef<View>(null);
+  const canvasHeightRef = useRef(height - 210);
+  const [measuredCanvasHeight, setMeasuredCanvasHeight] = useState(height - 210);
+
   useEffect(() => {
     colorRef.current = selectedColor;
   }, [selectedColor]);
@@ -97,6 +107,27 @@ export default function ImageEditorModal({
     scaleRef.current = scale;
   }, [scale]);
 
+  // Keep canvasHeightRef in sync with state
+  useEffect(() => {
+    canvasHeightRef.current = measuredCanvasHeight;
+  }, [measuredCanvasHeight]);
+
+  // Re-measure canvas when tool changes (footer size changes with paintRow)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      canvasContainerRef.current?.measureInWindow((x: number, y: number, w: number, h: number) => {
+        if (h > 0) {
+          canvasLayoutRef.current = { top: y, bottom: y + h, left: x, right: x + w };
+          if (Math.abs(h - canvasHeightRef.current) > 5) {
+            setMeasuredCanvasHeight(h);
+            canvasHeightRef.current = h;
+          }
+        }
+      });
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [activeTool]);
+
   // Auto-hide hint after 2 seconds when tool changes
   useEffect(() => {
     setShowHint(true);
@@ -105,10 +136,6 @@ export default function ImageEditorModal({
     }, 2000);
     return () => clearTimeout(timer);
   }, [activeTool]);
-
-  const viewShotRef = useRef<ViewShot>(null);
-  const { width, height } = Dimensions.get("window");
-  const CANVAS_HEIGHT = height - 160;
 
   // --- PAN RESPONDER ---
   const panResponder = useRef(
@@ -119,25 +146,34 @@ export default function ImageEditorModal({
       onPanResponderTerminationRequest: () => true,
 
       onPanResponderGrant: (evt) => {
-        const { locationX, locationY, pageY } = evt.nativeEvent;
+        const { locationX, locationY, pageX, pageY } = evt.nativeEvent;
         if (toolRef.current === "pen") {
           // Έλεγχος αν το αρχικό touch είναι μέσα στα όρια
           const EDGE_MARGIN = 15;
-          // Header είναι ~100px, footer ξεκινά στο CANVAS_HEIGHT + ~100
-          const HEADER_HEIGHT = 100;
-          const footerStartY = HEADER_HEIGHT + CANVAS_HEIGHT;
+          const { top: canvasTop, bottom: canvasBottom, left: canvasLeft, right: canvasRight } = canvasLayoutRef.current;
 
-          // Χρήση pageY για απόλυτο έλεγχο θέσης στην οθόνη
-          const isInFooterArea = pageY > footerStartY;
-          const isInHeaderArea = pageY < HEADER_HEIGHT + 20; // +20 buffer μέσα στο canvas
+          // Compute actual image bounds in screen coords (accounting for pan + scale)
+          const s = scaleRef.current;
+          const tx = lastPan.current.x;
+          const ty = lastPan.current.y;
+          const cx = width / 2;
+          const cy = canvasHeightRef.current / 2;
+          const imgLeft = canvasLeft + cx * (1 - s) + s * tx;
+          const imgRight = canvasLeft + cx * (1 + s) + s * tx;
+          const imgTop = canvasTop + cy * (1 - s) + s * ty;
+          const imgBottom = canvasTop + cy * (1 + s) + s * ty;
+
+          // Visible area = intersection of canvas bounds and image bounds
+          const isOutsideVisible =
+            pageX < Math.max(canvasLeft, imgLeft) || pageX > Math.min(canvasRight, imgRight) ||
+            pageY < Math.max(canvasTop, imgTop) || pageY > Math.min(canvasBottom, imgBottom);
 
           const isInBounds =
-            !isInFooterArea &&
-            !isInHeaderArea &&
+            !isOutsideVisible &&
             locationX >= EDGE_MARGIN &&
             locationX <= width - EDGE_MARGIN &&
             locationY >= EDGE_MARGIN &&
-            locationY <= CANVAS_HEIGHT - EDGE_MARGIN;
+            locationY <= canvasHeightRef.current - EDGE_MARGIN;
 
           if (isInBounds) {
             setCurrentPath(`M${locationX},${locationY}`);
@@ -152,21 +188,31 @@ export default function ImageEditorModal({
       },
 
       onPanResponderMove: (evt, gestureState) => {
-        const { locationX, locationY, pageY } = evt.nativeEvent;
+        const { locationX, locationY, pageX, pageY } = evt.nativeEvent;
 
         if (toolRef.current === "pen") {
           // ΖΩΓΡΑΦΙΣΜΑ - ΑΥΣΤΗΡΟΣ ΕΛΕΓΧΟΣ ΟΡΙΩΝ
           const EDGE_MARGIN = 15;
-          const HEADER_HEIGHT = 100;
-          const footerStartY = HEADER_HEIGHT + CANVAS_HEIGHT;
+          const { top: canvasTop, bottom: canvasBottom, left: canvasLeft, right: canvasRight } = canvasLayoutRef.current;
 
-          // ΠΡΩΤΑ: Έλεγχος με pageY (απόλυτη θέση στην οθόνη)
-          // Αν το δάχτυλο είναι στο footer ή header, ΑΓΝΟΗΣΕ ΤΕΛΕΙΩΣ
-          const isInFooterArea = pageY > footerStartY - 20; // 20px buffer ΠΡΙΝ τον footer
-          const isInHeaderArea = pageY < HEADER_HEIGHT + 20; // 20px buffer ΜΕΤΑ τον header
+          // Compute actual image bounds in screen coords (accounting for pan + scale)
+          const s = scaleRef.current;
+          const tx = lastPan.current.x;
+          const ty = lastPan.current.y;
+          const cx = width / 2;
+          const cy = canvasHeightRef.current / 2;
+          const imgLeft = canvasLeft + cx * (1 - s) + s * tx;
+          const imgRight = canvasLeft + cx * (1 + s) + s * tx;
+          const imgTop = canvasTop + cy * (1 - s) + s * ty;
+          const imgBottom = canvasTop + cy * (1 + s) + s * ty;
 
-          if (isInFooterArea || isInHeaderArea) {
-            // Το δάχτυλο είναι σε UI area - σταμάτα και μην κάνεις τίποτα
+          // Visible area = intersection of canvas (with 20px header/footer buffer) and image bounds
+          const isOutsideVisible =
+            pageX < Math.max(canvasLeft, imgLeft) || pageX > Math.min(canvasRight, imgRight) ||
+            pageY < Math.max(canvasTop + 20, imgTop) || pageY > Math.min(canvasBottom - 20, imgBottom);
+
+          if (isOutsideVisible) {
+            // Το δάχτυλο είναι εκτός ορατής εικόνας - σταμάτα
             wasInBounds.current = false;
             return;
           }
@@ -175,7 +221,7 @@ export default function ImageEditorModal({
           const minX = EDGE_MARGIN;
           const maxX = width - EDGE_MARGIN;
           const minY = EDGE_MARGIN;
-          const maxY = CANVAS_HEIGHT - EDGE_MARGIN;
+          const maxY = canvasHeightRef.current - EDGE_MARGIN;
 
           const isInBounds =
             locationX >= minX &&
@@ -188,7 +234,7 @@ export default function ImageEditorModal({
             locationX < -20 ||
             locationX > width + 20 ||
             locationY < -20 ||
-            locationY > CANVAS_HEIGHT + 50 ||
+            locationY > canvasHeightRef.current + 50 ||
             Math.abs(locationX) > 2000 ||
             Math.abs(locationY) > 2000;
 
@@ -363,6 +409,20 @@ export default function ImageEditorModal({
 
         {/* --- CANVAS AREA --- */}
         <View
+          ref={canvasContainerRef}
+          onLayout={() => {
+            requestAnimationFrame(() => {
+              canvasContainerRef.current?.measureInWindow((x: number, y: number, w: number, h: number) => {
+                if (h > 0) {
+                  canvasLayoutRef.current = { top: y, bottom: y + h, left: x, right: x + w };
+                  if (Math.abs(h - canvasHeightRef.current) > 5) {
+                    setMeasuredCanvasHeight(h);
+                    canvasHeightRef.current = h;
+                  }
+                }
+              });
+            });
+          }}
           style={{
             flex: 1,
             overflow: "hidden",
@@ -376,7 +436,7 @@ export default function ImageEditorModal({
             options={{ format: "jpg", quality: 0.9 }}
             style={{
               width: width,
-              height: CANVAS_HEIGHT,
+              height: measuredCanvasHeight,
               backgroundColor: "black",
               overflow: "hidden",
             }}

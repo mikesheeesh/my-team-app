@@ -48,6 +48,16 @@ const isWiFiConnected = async (): Promise<boolean> => {
   }
 };
 
+// Check if we have ANY internet connectivity (WiFi or cellular)
+const isNetworkAvailable = async (): Promise<boolean> => {
+  try {
+    const state = await NetInfo.fetch();
+    return state.isConnected === true;
+  } catch {
+    return false;
+  }
+};
+
 type SyncContextType = {
   isSyncing: boolean;
   syncNow: () => Promise<void>;
@@ -71,6 +81,7 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
   const isSyncingRef = useRef(false);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const shouldAbortRef = useRef(false); // Flag to abort sync when network drops
+  const manualSyncRef = useRef(false); // Flag: manual sync allows cellular data
 
   const setSyncState = (status: boolean) => {
     setIsSyncing(status);
@@ -92,8 +103,8 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
         syncTimeoutRef.current = setTimeout(() => {
           performGlobalSync();
         }, 1000);
-      } else if (!hasWiFi && isSyncingRef.current) {
-        // WiFi dropped while syncing → set abort flag
+      } else if (!hasWiFi && isSyncingRef.current && !manualSyncRef.current) {
+        // WiFi dropped while auto-syncing → set abort flag (skip if manual sync with cellular)
         console.log("⚠️ WiFi dropped during sync, setting abort flag");
         shouldAbortRef.current = true;
       }
@@ -106,13 +117,14 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   // 2. Η ΚΥΡΙΑ ΛΟΓΙΚΗ ΤΟΥ SYNC (Εσωτερική συνάρτηση)
-  const performGlobalSync = async () => {
+  const performGlobalSync = async (allowCellular: boolean = false) => {
     if (isSyncingRef.current) return;
+    manualSyncRef.current = allowCellular;
 
-    // Pre-check: Make sure we have WiFi before starting
-    const hasWiFi = await isWiFiConnected();
-    if (!hasWiFi) {
-      console.log("⏸️ No WiFi, skipping sync");
+    // Pre-check: connectivity ανάλογα με mode
+    const hasNetwork = allowCellular ? await isNetworkAvailable() : await isWiFiConnected();
+    if (!hasNetwork) {
+      console.log(allowCellular ? "⏸️ No internet, skipping sync" : "⏸️ No WiFi, skipping sync");
       return;
     }
 
@@ -153,8 +165,9 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
         );
 
         // Check connectivity before Firestore operation
-        if (shouldAbortRef.current || !(await isWiFiConnected())) {
-          console.log("🛑 Sync aborted before getDoc - no WiFi");
+        const checkConn = manualSyncRef.current ? isNetworkAvailable : isWiFiConnected;
+        if (shouldAbortRef.current || !(await checkConn())) {
+          console.log("🛑 Sync aborted before getDoc - no connection");
           break;
         }
 
@@ -203,7 +216,7 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
                   const fileExists = await validateFileExists(imgUri);
                   if (!fileExists) {
                     console.warn("⚠️ Image file not found, skipping:", imgUri);
-                    taskFailed = true; // Mark task as having issues
+                    // NOT retryable - temp file deleted, won't come back
                     continue; // Skip this image
                   }
                   // Local file → Upload to Storage
@@ -261,7 +274,7 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
                   const fileExists = await validateFileExists(videoUri);
                   if (!fileExists) {
                     console.warn("⚠️ Video file not found, skipping:", videoUri);
-                    taskFailed = true;
+                    // NOT retryable - temp file deleted, won't come back
                     continue;
                   }
                   const mediaId = generateMediaId();
@@ -310,7 +323,7 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
                 const fileExists = await validateFileExists(task.value);
                 if (!fileExists) {
                   console.warn("⚠️ Task value file not found:", task.value);
-                  taskFailed = true;
+                  // NOT retryable - temp file deleted, won't come back
                   finalValue = ""; // Clear invalid file reference
                 } else {
                   // Local file → Upload to Storage (photos only, for backward compat)
@@ -399,8 +412,9 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
 
         if (changesMade) {
           // Check connectivity before Firestore update
-          if (shouldAbortRef.current || !(await isWiFiConnected())) {
-            console.log("🛑 Sync aborted before updateDoc - no WiFi");
+          const checkConn2 = manualSyncRef.current ? isNetworkAvailable : isWiFiConnected;
+          if (shouldAbortRef.current || !(await checkConn2())) {
+            console.log("🛑 Sync aborted before updateDoc - no connection");
             // Save current state to retry later
             await AsyncStorage.setItem(key, JSON.stringify(localList));
             break;
@@ -412,10 +426,21 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
             ),
           );
 
-          // 1. ΑΝΕΒΑΣΜΑ
+          // 1. ΑΝΕΒΑΣΜΑ + STATUS RECALCULATION
           try {
-            await updateDoc(projectRef, { tasks: safeList });
-            console.log(`✅ Uploaded: ${projectId}`);
+            // Recalculate project status from tasks
+            const completedCount = safeList.filter((t: any) => t.status === "completed").length;
+            const totalCount = safeList.length;
+            let newStatus = "active";
+            if (totalCount > 0) {
+              if (completedCount === totalCount) {
+                newStatus = "completed";
+              } else if (completedCount > 0) {
+                newStatus = "pending";
+              }
+            }
+            await updateDoc(projectRef, { tasks: safeList, status: newStatus });
+            console.log(`✅ Uploaded: ${projectId} (status: ${newStatus})`);
 
             // 2. ΕΝΗΜΕΡΩΣΗ UI (ΑΜΕΣΩΣ!)
             setJustSyncedProjectId(projectId);
@@ -468,13 +493,15 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
       console.error("Sync Error:", error);
     } finally {
       // 4. ΚΑΜΙΑ ΚΑΘΥΣΤΕΡΗΣΗ - ΚΛΕΙΣΙΜΟ SPINNER ΑΜΕΣΩΣ
+      const wasManualSync = manualSyncRef.current;
+      manualSyncRef.current = false; // Reset manual mode
       setSyncState(false);
 
-      // 5. RE-SYNC CHECK: Αν υπάρχουν ακόμα items στο queue και έχουμε WiFi, retry μετά από λίγο
+      // 5. RE-SYNC CHECK: Αν υπάρχουν ακόμα items στο queue, retry μετά από λίγο
       setTimeout(async () => {
         try {
-          const hasWiFi = await isWiFiConnected();
-          if (!hasWiFi || isSyncingRef.current) return;
+          const hasNetwork = wasManualSync ? await isNetworkAvailable() : await isWiFiConnected();
+          if (!hasNetwork || isSyncingRef.current) return;
 
           const keys = await AsyncStorage.getAllKeys();
           const queueKeys = keys.filter((k) => k.startsWith(OFFLINE_QUEUE_PREFIX));
@@ -495,7 +522,7 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
 
             if (hasItems) {
               console.log("🔄 Re-sync: Found remaining items in queue, retrying...");
-              performGlobalSync();
+              performGlobalSync(wasManualSync);
             }
           }
         } catch (e) {
@@ -514,11 +541,11 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
       return;
     }
 
-    // ΔΙΟΡΘΩΣΗ 3: Χρήση NetInfoStateType.wifi
+    // WiFi → sync κανονικά
     if (netState.type === NetInfoStateType.wifi) {
-      await performGlobalSync();
+      await performGlobalSync(false);
     }
-    // ΔΙΟΡΘΩΣΗ 4: Χρήση NetInfoStateType.cellular
+    // Cellular → ρώτα τον χρήστη, μετά sync με allowCellular=true
     else if (netState.type === NetInfoStateType.cellular) {
       Alert.alert(
         "Χρήση Δεδομένων",
@@ -527,14 +554,14 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
           { text: "Άκυρο", style: "cancel" },
           {
             text: "Ναι, Συνέχεια",
-            onPress: () => performGlobalSync(),
+            onPress: () => performGlobalSync(true),
           },
         ],
       );
     }
-    // Άλλο δίκτυο
+    // Άλλο δίκτυο → allow
     else {
-      await performGlobalSync();
+      await performGlobalSync(true);
     }
   };
 

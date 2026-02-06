@@ -275,10 +275,18 @@ export default function TeamProjectsScreen() {
           projects: group.projects.map((proj) => {
             const freshData = freshProjectsMap.get(proj.id);
             if (freshData) {
-              // Αντικαθιστούμε τα παλιά δεδομένα με τα φρέσκα (members, supervisors, status)
+              // Derive status from tasks (πιο αξιόπιστο από stored status field)
+              const tasks = freshData.tasks || [];
+              let derivedStatus = freshData.status || "active";
+              if (tasks.length > 0) {
+                const done = tasks.filter((t: any) => t.status === "completed").length;
+                if (done === tasks.length) derivedStatus = "completed";
+                else if (done > 0) derivedStatus = "pending";
+                else derivedStatus = "active";
+              }
               return {
                 ...proj,
-                status: freshData.status,
+                status: derivedStatus,
                 supervisors: freshData.supervisors || [],
                 members: freshData.members || [],
               };

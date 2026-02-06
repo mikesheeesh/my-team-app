@@ -764,6 +764,7 @@ export default function ProjectDetailsScreen() {
           setTaskForEditing(task);
           setTempImageUri(r.assets[0].uri);
           setTempGpsLoc(gpsLoc);
+          setReEditingIndex(null); // Ensure we're in "add" mode, not "replace" mode
           setEditorVisible(true);
         }
       }
@@ -1907,6 +1908,7 @@ export default function ProjectDetailsScreen() {
           onClose={() => {
             setEditorVisible(false);
             setTempImageUri(null);
+            setReEditingIndex(null); // Reset re-edit mode to prevent overwriting new photos
           }}
           onSave={handleEditorSave}
         />
@@ -2031,7 +2033,13 @@ export default function ProjectDetailsScreen() {
         transparent
         onRequestClose={() => setSelectedMediaForView(null)}
       >
-        <View style={styles.modalBackground}>
+        <View style={[
+          styles.modalBackground,
+          (selectedMediaForView?.startsWith("data:video") ||
+            activeTaskForGallery?.type === "video") && {
+            paddingBottom: insets.bottom + 20,
+          },
+        ]}>
           {/* Show Video component for video tasks (file://, data:video, Storage URLs) */}
           {(selectedMediaForView?.startsWith("data:video") ||
             activeTaskForGallery?.type === "video") ? (
