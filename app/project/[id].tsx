@@ -1974,7 +1974,7 @@ export default function ProjectDetailsScreen() {
           activeOpacity={1}
           onPress={() => setMediaPickerVisible(false)}
         >
-          <View style={styles.pickerContainer}>
+          <View style={[styles.pickerContainer, { paddingBottom: insets.bottom + 20 }]}>
             <View style={styles.pickerRow}>
               <TouchableOpacity
                 style={styles.pickerBtn}
