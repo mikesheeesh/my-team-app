@@ -3,11 +3,13 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import * as Updates from "expo-updates";
 import { onAuthStateChanged } from "firebase/auth";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
   Image,
+  Platform,
   StatusBar,
   StyleSheet,
   Text,
@@ -84,7 +86,25 @@ export default function LandingScreen() {
     return () => unsubscribe();
   }, []);
 
-  // 3. LOADING SCREEN TIMER - 2 δευτερόλεπτα, μετά fade out και navigate
+  // 3. OTA UPDATE CHECK - Ελέγχει για νέα version κατά το launch
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const checkForUpdate = async () => {
+      try {
+        const update = await Updates.checkForUpdateAsync();
+        if (update.isAvailable) {
+          await Updates.fetchUpdateAsync();
+          await Updates.reloadAsync();
+        }
+      } catch (e) {
+        // Σιωπηλό fallback - δεν μπλοκάρει το app
+        console.log("Update check failed:", e);
+      }
+    };
+    checkForUpdate();
+  }, []);
+
+  // 4. LOADING SCREEN TIMER - 2 δευτερόλεπτα, μετά fade out και navigate
   useEffect(() => {
     const timer = setTimeout(() => {
       Animated.timing(fadeAnim, {
