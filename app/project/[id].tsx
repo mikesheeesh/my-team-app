@@ -774,6 +774,68 @@ export default function ProjectDetailsScreen() {
     }
   };
 
+  const launchGallery = async (task: Task) => {
+    try {
+      const gpsPromise = Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      }).catch(() => null);
+
+      if (task.type === "video") {
+        const r = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        });
+
+        if (!r.canceled && r.assets[0].uri) {
+          setProcessing(true);
+          try {
+            const videoUri = r.assets[0].uri;
+            const { uri: compressedUri, compressionRatio } = await compressVideo(
+              videoUri,
+              (progress) => {
+                console.log(`  Compressing: ${Math.round(progress * 100)}%`);
+              }
+            );
+            console.log(`✓ Video compressed (${compressionRatio.toFixed(0)}% smaller)`);
+
+            const gpsResult = await gpsPromise;
+            const gpsLoc = gpsResult ? { lat: gpsResult.coords.latitude, lng: gpsResult.coords.longitude } : undefined;
+
+            await addMediaToTask(task.id, compressedUri, gpsLoc);
+          } catch (e: any) {
+            Alert.alert("Σφάλμα", e.message || "Απέτυχε η συμπίεση του βίντεο.");
+          } finally {
+            setProcessing(false);
+          }
+        }
+      } else {
+        const r = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          quality: 0.8,
+        });
+
+        if (!r.canceled && r.assets[0].uri) {
+          const gpsResult = await gpsPromise;
+          const gpsLoc = gpsResult ? { lat: gpsResult.coords.latitude, lng: gpsResult.coords.longitude } : undefined;
+
+          setTaskForEditing(task);
+          setTempImageUri(r.assets[0].uri);
+          setTempGpsLoc(gpsLoc);
+          setReEditingIndex(null);
+          setEditorVisible(true);
+        }
+      }
+    } catch (e) {
+      Alert.alert("Σφάλμα", "Αποτυχία πρόσβασης στη συλλογή");
+      setProcessing(false);
+    }
+  };
+
+  const [mediaPickerVisible, setMediaPickerVisible] = useState(false);
+
+  const showMediaPicker = (task: Task) => {
+    setMediaPickerVisible(true);
+  };
+
   const handleEditorSave = async (editedUri: string) => {
     setEditorVisible(false);
     setProcessing(true);
@@ -1900,6 +1962,51 @@ export default function ProjectDetailsScreen() {
         </View>
       </Modal>
 
+      {/* MEDIA PICKER (Κάμερα / Συλλογή) */}
+      <Modal
+        visible={mediaPickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMediaPickerVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.pickerOverlay}
+          activeOpacity={1}
+          onPress={() => setMediaPickerVisible(false)}
+        >
+          <View style={styles.pickerContainer}>
+            <View style={styles.pickerRow}>
+              <TouchableOpacity
+                style={styles.pickerBtn}
+                onPress={() => {
+                  setMediaPickerVisible(false);
+                  if (activeTaskForGallery) launchCamera(activeTaskForGallery);
+                }}
+              >
+                <Ionicons name="camera" size={28} color="#2563eb" />
+                <Text style={styles.pickerBtnText}>Κάμερα</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.pickerBtn}
+                onPress={() => {
+                  setMediaPickerVisible(false);
+                  if (activeTaskForGallery) launchGallery(activeTaskForGallery);
+                }}
+              >
+                <Ionicons name="images" size={28} color="#2563eb" />
+                <Text style={styles.pickerBtnText}>Συλλογή</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={styles.pickerCancel}
+              onPress={() => setMediaPickerVisible(false)}
+            >
+              <Text style={styles.pickerCancelText}>Ακύρωση</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* CUSTOM IMAGE EDITOR (Only show if not web) */}
       {Platform.OS !== "web" && (
         <ImageEditorModal
@@ -1971,7 +2078,7 @@ export default function ProjectDetailsScreen() {
                   <TouchableOpacity
                     style={styles.addPhotoTile}
                     onPress={() =>
-                      activeTaskForGallery && launchCamera(activeTaskForGallery)
+                      activeTaskForGallery && showMediaPicker(activeTaskForGallery)
                     }
                   >
                     <Ionicons
@@ -2437,4 +2544,46 @@ const styles = StyleSheet.create({
   },
   optionTextBase: { fontSize: 17, fontWeight: "600" },
   separator: { height: 1, backgroundColor: "#f1f5f9" },
+  pickerOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "flex-end",
+  },
+  pickerContainer: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 20,
+    paddingBottom: 30,
+    paddingHorizontal: 20,
+  },
+  pickerRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 12,
+  },
+  pickerBtn: {
+    flex: 1,
+    backgroundColor: "#f1f5f9",
+    borderRadius: 14,
+    paddingVertical: 18,
+    alignItems: "center",
+    gap: 6,
+  },
+  pickerBtnText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#334155",
+  },
+  pickerCancel: {
+    backgroundColor: "#f1f5f9",
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  pickerCancelText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#94a3b8",
+  },
 });

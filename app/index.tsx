@@ -6,6 +6,7 @@ import * as SplashScreen from "expo-splash-screen";
 import { onAuthStateChanged } from "firebase/auth";
 import React, { useEffect, useRef, useState } from "react";
 import {
+  Animated,
   Image,
   StatusBar,
   StyleSheet,
@@ -24,8 +25,11 @@ SplashScreen.preventAutoHideAsync();
 
 export default function LandingScreen() {
   const router = useRouter();
+  const [showLoading, setShowLoading] = useState(true);
   const [appIsReady, setAppIsReady] = useState(false);
   const hasHandledDeepLink = useRef(false);
+  const pendingNavRef = useRef<(() => void) | null>(null);
+  const fadeAnim = useRef(new Animated.Value(1)).current;
 
   // 1. DEEP LINK CHECK - Αποθηκεύουμε τον κωδικό, δεν κάνουμε redirect αν δεν είναι logged in
   const url = Linking.useURL();
@@ -57,33 +61,63 @@ export default function LandingScreen() {
     handleDeepLink();
   }, [url]);
 
-  // 2. AUTH CHECK & SPLASH SCREEN HIDE
+  // 2. AUTH CHECK - αποθηκεύουμε navigation για μετά το loading
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        // Αν είναι ήδη συνδεδεμένος, ελέγχουμε για pending invite
         const pendingCode = await AsyncStorage.getItem(PENDING_INVITE_KEY);
         if (pendingCode) {
-          // Υπάρχει pending invite, πάμε στο join
           await AsyncStorage.removeItem(PENDING_INVITE_KEY);
-          console.log("🎟️ Found pending invite code, redirecting to join:", pendingCode);
-          router.replace(`/join?inviteCode=${pendingCode}`);
+          pendingNavRef.current = () => router.replace(`/join?inviteCode=${pendingCode}`);
         } else {
-          // Κανονικό login, πάμε Dashboard
-          router.replace("/dashboard");
+          pendingNavRef.current = () => router.replace("/dashboard");
         }
       } else {
-        // Αν όχι, δείχνουμε αυτή τη σελίδα
-        setAppIsReady(true);
+        // Δεν είναι logged in - θα δείξουμε landing μετά το loading
+        pendingNavRef.current = null;
       }
 
-      // Κρύβουμε το Splash Screen
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Κρύβουμε το native splash αμέσως, δείχνουμε custom loading
       await SplashScreen.hideAsync();
     });
 
     return () => unsubscribe();
   }, []);
+
+  // 3. LOADING SCREEN TIMER - 2 δευτερόλεπτα, μετά fade out και navigate
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 500,
+        useNativeDriver: true,
+      }).start(() => {
+        setShowLoading(false);
+        if (pendingNavRef.current) {
+          pendingNavRef.current();
+        } else {
+          setAppIsReady(true);
+        }
+      });
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Loading screen
+  if (showLoading) {
+    return (
+      <Animated.View style={[styles.loadingContainer, { opacity: fadeAnim }]}>
+        <StatusBar barStyle="dark-content" backgroundColor="#f8fafc" />
+        <Image
+          source={require("../assets/logo2.png")}
+          style={styles.loadingLogo}
+          resizeMode="contain"
+        />
+        <Text style={styles.loadingVersion}>v1.0.0</Text>
+      </Animated.View>
+    );
+  }
 
   if (!appIsReady) {
     return null;
@@ -101,12 +135,6 @@ export default function LandingScreen() {
             style={styles.customLogo}
             resizeMode="contain"
           />
-        </View>
-
-        {/* TITLE */}
-        <View style={styles.textContainer}>
-          <Text style={styles.titleMain}>ERGON</Text>
-          <Text style={styles.titleSub}>WORK MANAGEMENT</Text>
         </View>
 
         {/* BUTTON */}
@@ -150,8 +178,8 @@ const styles = StyleSheet.create({
     // Αφαιρέσαμε τα shadows του container για να μην φαίνονται άσχημα γύρω από διαφανές PNG
   },
   customLogo: {
-    width: 160, // Προσαρμογή μεγέθους
-    height: 160,
+    width: 250,
+    height: 250,
   },
 
   // Text Styles
@@ -200,5 +228,21 @@ const styles = StyleSheet.create({
     color: "#cbd5e1",
     fontSize: 12,
     marginBottom: 20,
+  },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: "#f8fafc",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingLogo: {
+    width: 250,
+    height: 250,
+  },
+  loadingVersion: {
+    position: "absolute",
+    bottom: 60,
+    color: "#cbd5e1",
+    fontSize: 12,
   },
 });
