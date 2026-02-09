@@ -1,28 +1,14 @@
-# 🤖 CLAUDE CODE - ΟΔΗΓΙΕΣ ΕΡΓΑΣΙΑΣ
+# CLAUDE CODE - ΟΔΗΓΙΕΣ ΕΡΓΑΣΙΑΣ
 
-## 📋 Περιεχόμενα
-1. [Γενική Επισκόπηση](#γενική-επισκόπηση)
-2. [Συνεργασία & Επικοινωνία](#συνεργασία--επικοινωνία)
-3. [Αρχιτεκτονική & Πρότυπα](#αρχιτεκτονική--πρότυπα)
-4. [Coding Standards](#coding-standards)
-5. [State Management](#state-management)
-6. [Offline-First Προτεραιότητες](#offline-first-προτεραιότητες)
-7. [Testing & QA](#testing--qa)
-8. [Git Workflow](#git-workflow)
-9. [DO's and DON'Ts](#dos-and-donts)
-10. [Γλώσσα & Localization](#γλώσσα--localization)
-11. [Performance Guidelines](#performance-guidelines)
-
----
-
-## 🎯 Γενική Επισκόπηση
+## Γενική Επισκόπηση
 
 ### Project: ERGON Work Management
 - **Type:** Cross-platform mobile app (iOS, Android, Web)
 - **Framework:** React Native + Expo SDK 54
-- **Backend:** Firebase (Auth, Firestore)
-- **Language:** TypeScript + Ελληνικά
+- **Backend:** Firebase (Auth, Firestore, Storage)
+- **Language:** TypeScript + Ελληνικά UI
 - **Architecture:** Offline-First με Real-Time Sync
+- **Version:** 2.2.0
 
 ### Κύριοι Στόχοι
 1. **Offline-First:** Πρώτα local storage, μετά sync
@@ -32,1216 +18,150 @@
 
 ---
 
-## 🤝 Συνεργασία & Επικοινωνία
+## Συνεργασία & Επικοινωνία
 
-### 🔴 Κανόνας #1: ΠΑΝΤΑ Ρώτα Πριν Αλλάξεις
+### Κανόνας #1: MD Files vs Code Files
 
-**ΜΗΝ ΚΑΝΕΙΣ ποτέ:**
-- ❌ Άμεσες αλλαγές χωρίς confirmation
-- ❌ Breaking changes χωρίς warning
-- ❌ Διαγραφή κώδικα/features χωρίς λόγο
-- ❌ Refactoring χωρίς συζήτηση
-- ❌ Αλλαγή architecture patterns χωρίς approval
+| Τύπος Αρχείου | Πολιτική |
+|----------------|----------|
+| **MD Files** (.md) | Ελεύθερη ενημέρωση χωρίς επιβεβαίωση |
+| **Code Files** (.ts, .tsx, .js, .json) | ΠΑΝΤΑ ρώτα πριν αλλάξεις |
 
-**ΚΑΝΕ ΠΑΝΤΑ:**
-- ✅ Ρώτα: "Θέλεις να αλλάξω X σε Y;"
-- ✅ Εξήγησε: "Προτείνω Α γιατί Β"
-- ✅ Περίμενε confirmation πριν προχωρήσεις
+**Code files:** Εξήγησε πρόβλημα → Πρότεινε λύση + εναλλακτικές → Περίμενε confirmation → Κάνε αλλαγή
 
-#### Παράδειγμα Workflow
-```
-User: "Φτιάξε το bug στο sync"
+### Κανόνας #2: Πρότεινε Εναλλακτικές
+- Για κάθε πρόταση: Pros, Cons, Impact, Effort
+- Τουλάχιστον 2 options όπου υπάρχουν
 
-Claude Response:
-"Βρήκα το bug στο SyncContext.tsx:245. Το πρόβλημα είναι ότι
-το cleanup δεν γίνεται σωστά μετά το merge.
-
-Προτείνω να:
-1. Προσθέσω ένα check για empty arrays πριν το cleanup
-2. Αλλάξω το filter logic να ελέγχει και τα imageLocations
-
-Εναλλακτικά θα μπορούσα να:
-- Κάνω complete rewrite του cleanup logic (πιο safe αλλά breaking change)
-- Προσθέσω μόνο try-catch (quick fix αλλά δεν λύνει root cause)
-
-Ποια approach προτιμάς;"
-
-User: "Πήγαινε με την πρώτη"
-
-Claude: "Perfect! Προχωράω με την αλλαγή..."
-```
+### Κανόνας #3: Εξήγησε το "Γιατί"
+- Bug fix: Τι ήταν, πώς φτιάχνεται
+- Feature: Γιατί χρειάζεται
+- Breaking change: **ΥΠΟΧΡΕΩΤΙΚΗ** εξήγηση + migration plan
 
 ---
 
-#### 🔷 ΕΞΑΙΡΕΣΗ: MD Files vs Code Files
-
-**ΣΗΜΑΝΤΙΚΗ ΔΙΕΥΚΡΙΝΙΣΗ:**
-
-| Τύπος Αρχείου | Πολιτική Ενημέρωσης |
-|----------------|---------------------|
-| **📄 MD Files (Documentation)** | ✅ Ελεύθερη ενημέρωση χωρίς επιβεβαίωση |
-| **💻 Code Files (Project)** | ⚠️ ΠΑΝΤΑ ρώτα πριν αλλάξεις |
-
-#### MD Files - Auto-Update OK ✅
-
-Τα **αρχεία documentation** (.md) μπορούν να ενημερώνονται αυτόματα:
-
-**Ποια αρχεία:**
-- `BUSINESS_PLAN.md`
-- `SERVICE_FLOWS.md`
-- `to do.md`
-- `CLAUDE_INSTRUCTIONS.md`
-- Οποιοδήποτε άλλο `.md` file
-
-**Τι μπορώ να κάνω:**
-- ✅ Προσθήκη νέων features που ολοκληρώθηκαν
-- ✅ Update των flows με νέα λειτουργικότητα
-- ✅ Marking tasks ως completed στο TODO
-- ✅ Προσθήκη νέων οδηγιών/rules
-- ✅ Διόρθωση outdated information
-
-**Πώς να το κάνω:**
-```
-User: "Προσθέτω GPS tracking στο project"
-
-Claude Response:
-"Ολοκλήρωσα το GPS tracking! Ενημερώνω τα MD files...
-
-✅ BUSINESS_PLAN.md: Προσθέτω Section 5.9 με GPS features
-✅ SERVICE_FLOWS.md: Ενημερώνω Photo Task Flow (Step 3)
-✅ to do.md: Marking GPS feature ως completed
-
-Όλα ενημερωμένα! 🎉"
-```
-
-**ΠΡΟΣΟΧΗ:** Ενημερώνω τον χρήστη **ΜΕΤΑ** την αλλαγή, δεν ρωτάω πριν.
-
-#### Code Files - Always Ask First ⚠️
-
-Για **οποιοδήποτε αρχείο κώδικα** (`.ts`, `.tsx`, `.js`, `.json`, etc.) ισχύουν τα **ΠΑΝΤΑ Ρώτα Πριν Αλλάξεις** rules:
-
-**Ποια αρχεία:**
-- `app/**/*.tsx` (components, screens)
-- `app/**/*.ts` (context, utils)
-- `firebaseConfig.ts`
-- `app.json`
-- `package.json`
-- Οποιοδήποτε αρχείο κώδικα
-
-**Workflow:**
-1. 🔍 Εξήγησε το πρόβλημα/ανάγκη
-2. 💡 Πρότεινε λύση + εναλλακτικές
-3. ⏸️ Περίμενε confirmation
-4. ✅ Κάνε την αλλαγή
-
-**Παράδειγμα:**
-```
-User: "Φτιάξε το bug στο sync"
-
-Claude: "Βρήκα το bug... [analysis]
-
-Προτείνω να: [solution + alternatives]
-
-Ποια approach προτιμάς?"
-
-User: "Πήγαινε με την πρώτη"
-
-Claude: "Perfect! Προχωράω..." [makes changes]
-```
-
----
-
-### 🎯 Κανόνας #2: Πρότεινε Ιδέες & Εναλλακτικές
-
-Όταν ο χρήστης ζητάει κάτι, **ΠΑΝΤΑ** προσφέρε:
-
-#### ✅ Πολλαπλές Επιλογές
-```
-User: "Θέλω να προσθέσω comments στα tasks"
-
-Claude Response:
-"Εξαιρετική ιδέα! Έχω 3 approaches:
-
-**Option 1: Simple (Προτεινόμενο)**
-- Array of comments στο Task type
-- Store locally με το task
-- Pros: Εύκολο, fast, offline-ready
-- Cons: Περιορισμένη functionality (όχι mentions, όχι reactions)
-
-**Option 2: Firestore Subcollection**
-- tasks/{taskId}/comments/{commentId}
-- Real-time updates
-- Pros: Scalable, rich features
-- Cons: Πολυπλοκότερο, χρειάζεται online
-
-**Option 3: Hybrid**
-- Local για offline, subcollection για sync
-- Pros: Best of both worlds
-- Cons: Πιο πολύς κώδικας
-
-Ποια θα δουλέψει καλύτερα για το use case σου;"
-```
-
-#### ✅ Tradeoffs Analysis
-Για κάθε πρόταση, εξήγησε:
-- ✅ **Pros** - Τι κερδίζουμε
-- ⚠️ **Cons** - Τι χάνουμε
-- 💡 **Impact** - Πώς επηρεάζει το project
-- ⏱️ **Effort** - Complexity level (Low/Medium/High)
-
----
-
-### 📝 Κανόνας #3: Εξήγησε το "Γιατί"
-
-Για **κάθε αλλαγή** που κάνεις, εξήγησε τον λόγο:
-
-#### Format:
-```typescript
-// ✅ ΣΩΣΤΟ Comment
-// FIX: Προσθήκη check για empty imageLocations
-// ΛΟΓΟΣ: Το app crashάρει όταν task έχει images αλλά όχι locations
-// IMPACT: Prevents crash σε edge case (old tasks χωρίς GPS)
-if (task.imageLocations && task.imageLocations.length > 0) {
-  // ... location logic
-}
-
-// ❌ ΛΑΘΟΣ Comment (δεν λέει γιατί)
-// Added check
-if (task.imageLocations && task.imageLocations.length > 0) {
-```
-
-#### Κατηγορίες Αλλαγών:
-| Τύπος | Πρέπει να Εξηγήσεις |
-|-------|---------------------|
-| **Bug Fix** | Τι ήταν το bug, πώς το φτιάχνεις |
-| **Feature** | Γιατί χρειάζεται, πώς δουλεύει |
-| **Refactor** | Τι βελτιώνεται, τι risks υπάρχουν |
-| **Performance** | Πόσο faster, τι compromises |
-| **Breaking Change** | **ΥΠΟΧΡΕΩΤΙΚΗ** εξήγηση + migration plan |
-
----
-
-### 💬 Communication Templates
-
-#### Template 1: Πρόταση Αλλαγής
-```
-📌 ΠΡΟΤΑΣΗ: [Short description]
-
-🔍 ΑΝΑΛΥΣΗ:
-- Current state: [Πώς είναι τώρα]
-- Problem: [Τι δεν δουλεύει]
-- Impact: [Ποιους επηρεάζει]
-
-💡 ΛΥΣΗ:
-[Η προτεινόμενη αλλαγή]
-
-✅ PROS:
-- [Όφελος 1]
-- [Όφελος 2]
-
-⚠️ CONS:
-- [Tradeoff 1]
-- [Tradeoff 2]
-
-🎯 ΕΝΑΛΛΑΚΤΙΚΕΣ:
-1. [Option A] - [Σύντομη περιγραφή]
-2. [Option B] - [Σύντομη περιγραφή]
-
-Προχωράω με την κύρια λύση ή προτιμάς κάποια εναλλακτική;
-```
-
-#### Template 2: Επεξήγηση Κώδικα
-```
-🔧 ΑΛΛΑΓΗ: [Τι άλλαξα]
-
-📍 LOCATION: [Αρχείο:γραμμή]
-
-❓ ΛΟΓΟΣ:
-[Γιατί ήταν ανάγκη]
-
-💻 ΠΩΣ ΔΟΥΛΕΥΕΙ:
-[Σύντομη τεχνική εξήγηση]
-
-⚡ IMPACT:
-- Performance: [None/Better/Worse]
-- Breaking: [Yes/No]
-- Testing needed: [Yes/No]
-```
-
----
-
-### 🚨 Critical Communication Rules
-
-#### 1. Πριν Διαγράψεις Κώδικα
-```
-⚠️ ΠΡΟΣΟΧΗ: Θέλω να διαγράψω [X]
-
-ΛΟΓΟΣ: [Γιατί δεν χρειάζεται]
-
-ΘΑ ΕΠΗΡΕΑΣΤΕΙ:
-- [Feature/File 1]
-- [Feature/File 2]
-
-Είσαι σίγουρος ότι μπορώ να το αφαιρέσω;
-```
-
-#### 2. Πριν Breaking Changes
-```
-🔴 BREAKING CHANGE ALERT
-
-ΑΛΛΑΓΗ: [Τι θα σπάσει]
-
-AFFECTED:
-- Users: [Πώς επηρεάζονται]
-- Code: [Ποια files χρειάζονται update]
-
-MIGRATION:
-[Step-by-step πώς να φτιαχτεί]
-
-Θέλεις να προχωρήσω; (Χρειάζεται explicit YES)
-```
-
-#### 3. Πριν Architectural Changes
-```
-🏗️ ARCHITECTURE PROPOSAL
-
-CURRENT: [Πώς δουλεύει τώρα]
-PROPOSED: [Πώς θα δουλεύει]
-
-BENEFITS:
-- [Benefit 1]
-
-RISKS:
-- [Risk 1]
-
-FILES TO CHANGE: [N files]
-ESTIMATED EFFORT: [Low/Medium/High]
-
-Θέλεις να δούμε alternatives ή να προχωρήσω;
-```
-
----
-
-### 🎓 Best Practices Checklist
-
-Πριν κάθε response, check:
-
-- [ ] Εξήγησα το "γιατί" για κάθε αλλαγή;
-- [ ] Έδωσα τουλάχιστον 2 εναλλακτικές (αν υπάρχουν);
-- [ ] Ανέφερα pros/cons για κάθε option;
-- [ ] Ζήτησα confirmation πριν breaking changes;
-- [ ] Χρησιμοποίησα clear, structured format;
-- [ ] Έδωσα code examples όπου χρειάζεται;
-
----
-
-### 📌 Quick Reference
-
-| Scenario | Action Required |
-|----------|----------------|
-| Simple bug fix | Εξήγησε bug + fix |
-| New feature | Πρότεινε 2-3 approaches |
-| Refactoring | Εξήγησε benefits + risks |
-| Breaking change | **ΠΑΝΤΑ ρώτα** + migration plan |
-| Delete code | **ΠΑΝΤΑ ρώτα** + explain why |
-| Unclear request | Ρώτα clarifying questions |
-
----
-
-## 🏗️ Αρχιτεκτονική & Πρότυπα
+## Αρχιτεκτονική & Πρότυπα
 
 ### File-Based Routing (Expo Router)
 ```
 app/
 ├── _layout.tsx          # Root layout με providers
-├── index.tsx            # Landing/splash
+├── index.tsx            # Landing/splash + custom loading screen
 ├── login.tsx            # Auth screen
 ├── dashboard.tsx        # Main dashboard
 ├── teams/my-teams.tsx   # Team list
-├── team/[id].tsx        # Team details (dynamic route)
-├── project/[id].tsx     # Project tasks (dynamic route)
-├── onboarding/          # Onboarding flows
-├── components/          # Shared components
-└── context/             # Global state (Context API)
+├── team/[id].tsx        # Team details (real-time via onSnapshot)
+├── project/[id].tsx     # Project tasks, media, PDF export
+├── components/          # Shared components (ImageEditorModal, etc.)
+└── context/             # SyncContext (offline sync)
 ```
 
-### Κανόνες Αρχιτεκτονικής
+### Κανόνες
 
-#### ✅ ΚΑΝΕ:
-1. **Χρησιμοποίησε Context API** για global state (όχι Redux/Zustand)
-   - `SyncContext` για offline sync state
-   - Lightweight, minimal dependencies
+**ΚΑΝΕ:**
+1. **Context API** για global state (όχι Redux/Zustand)
+2. **AsyncStorage** για local data (`cached_{entity}_{id}`, `offline_tasks_queue_{projectId}`)
+3. **onSnapshot** για real-time Firestore data (ΠΑΝΤΑ cleanup: `return () => unsubscribe()`)
+4. **Firebase Storage** για media (URLs στο Firestore, όχι base64)
+5. **Navigation debounce** (500ms lock pattern)
 
-2. **AsyncStorage για όλα τα local data**
-   - Cache key pattern: `cached_{entity}_{id}`
-   - Queue key pattern: `offline_tasks_queue_{projectId}`
-
-3. **Firestore listeners (onSnapshot) για real-time**
-   ```typescript
-   const unsubscribe = onSnapshot(
-     doc(db, "teams", teamId),
-     { includeMetadataChanges: true },
-     (snapshot) => {
-       if (!snapshot.metadata.fromCache) {
-         // Update from server
-       }
-     }
-   );
-   // ΠΑΝΤΑ cleanup: return () => unsubscribe();
-   ```
-
-4. **Base64 encoding για images/videos**
-   - ΟΧΙ Firebase Storage (τουλάχιστον για MVP)
-   - Pattern: `data:image/jpeg;base64,{base64Data}`
-
-#### ❌ ΜΗΝ ΚΑΝΕΙΣ:
-1. **Μην χρησιμοποιείς Firebase Storage** (rejected feature)
-2. **Μην κάνεις direct Firestore writes χωρίς local cache**
-3. **Μην ξεχνάς cleanup** (listeners, timeouts, subscriptions)
-4. **Μην κάνεις navigation χωρίς debounce** (500ms lock pattern)
+**ΜΗΝ ΚΑΝΕΙΣ:**
+1. Direct Firestore writes χωρίς local cache
+2. Console.log σε production (χρήση `__DEV__`)
+3. `any` types - χρήση strict TypeScript
+4. Ξεχνάς cleanup (listeners, timeouts, subscriptions)
 
 ---
 
-## 💻 Coding Standards
-
-### TypeScript
-```typescript
-// ✅ ΣΩΣΤΟ: Strict typing
-type Task = {
-  id: string;
-  title: string;
-  description?: string;
-  type: "photo" | "video" | "measurement" | "general";
-  status: "pending" | "completed";
-  value: string | null;
-  images?: string[];
-  imageLocations?: GeoPoint[];
-  isLocal?: boolean;
-};
-
-// ❌ ΛΑΘΟΣ: Any types
-const task: any = { ... };
-```
+## Coding Standards
 
 ### Naming Conventions
-```typescript
-// Variables & Functions: camelCase
-const userName = "Michael";
-const handleSyncPress = () => {};
-
-// Components: PascalCase
-const ImageEditorModal = () => {};
-
-// Constants: UPPER_SNAKE_CASE
-const OFFLINE_QUEUE_PREFIX = "offline_tasks_queue_";
-const CACHE_KEY = "cached_project_tasks_";
-
-// Types/Interfaces: PascalCase
-type GeoPoint = { lat: number; lng: number };
-interface TaskProps { task: Task; onPress: () => void; }
-```
+- Variables/Functions: `camelCase`
+- Components: `PascalCase`
+- Constants: `UPPER_SNAKE_CASE`
+- Types/Interfaces: `PascalCase`
 
 ### Component Structure
 ```typescript
-// Σειρά imports
-import { useState, useEffect } from "react";        // 1. React
-import { View, Text, Alert } from "react-native";  // 2. React Native
-import { router } from "expo-router";               // 3. Expo
-import AsyncStorage from "@react-native-async-storage/async-storage"; // 4. External libs
-import { auth, db } from "@/firebaseConfig";        // 5. Local imports
-
-// Σειρά στο component
+// Import order: React → React Native → Expo → External → Local
 const MyComponent = () => {
-  // 1. Hooks (useState, useRef, etc.)
-  const [loading, setLoading] = useState(false);
-
-  // 2. Effects
-  useEffect(() => { ... }, []);
-
-  // 3. Functions
-  const handlePress = () => { ... };
-
-  // 4. Render
-  return <View>...</View>;
+  // 1. Hooks  2. Effects  3. Functions  4. Render
 };
 ```
 
 ---
 
-## 🔄 State Management
+## Offline-First Pattern
 
-### Local State (useState)
-- Χρήση για UI state (modals, inputs, loading)
+### Local FIRST, Cloud SECOND
 ```typescript
-const [modalVisible, setModalVisible] = useState(false);
-const [inputValue, setInputValue] = useState("");
-```
-
-### Global State (Context)
-- **SyncContext** - μόνο για sync-related state
-```typescript
-const { isSyncing, syncNow, justSyncedProjectId } = useSyncContext();
-```
-
-### Persistent State (AsyncStorage)
-- **Cache pattern:**
-```typescript
-// Save
-await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(data));
-
-// Load with fallback
-const cached = await AsyncStorage.getItem(CACHE_KEY);
-const data = cached ? JSON.parse(cached) : defaultValue;
-```
-
-### Server State (Firestore)
-- **Real-time listeners** για live updates
-- **Optimistic UI updates** πριν το Firestore
-
----
-
-## 📴 Offline-First Προτεραιότητες
-
-### Κανόνας #1: Local FIRST, Cloud SECOND
-```typescript
-// ✅ ΣΩΣΤΟ
 const saveTask = async (task: Task) => {
   // 1. Save locally ΑΜΕΣΑ
-  const localTasks = [...tasks, { ...task, isLocal: true }];
-  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(localTasks));
-  setTasks(localTasks);
-
+  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify([...tasks, { ...task, isLocal: true }]));
   // 2. Trigger sync (αν υπάρχει WiFi)
-  if (isConnected) {
-    syncNow();
-  }
-};
-
-// ❌ ΛΑΘΟΣ: Firestore first
-const saveTask = async (task: Task) => {
-  await updateDoc(projectRef, { tasks: [...tasks, task] }); // ΟΧΙ!
+  if (isConnected) syncNow();
 };
 ```
 
 ### Merge Strategy
-```typescript
-// Cloud + Local merge με Map
-const merged = new Map<string, Task>();
-cloudTasks.forEach(t => merged.set(t.id, t));
-localTasks.forEach(t => merged.set(t.id, t)); // Local overwrites cloud
-const combinedTasks = Array.from(merged.values());
-```
+Cloud + Local merge με Map - local overwrites cloud (by task ID).
 
-### Cleanup After Sync
-```typescript
-// Αφαίρεση μόνο αν fully synced
-const remainingLocal = localTasks.filter(localTask => {
-  const cloudTask = cloudMap.get(localTask.id);
-  if (!cloudTask) return true; // Keep (not synced)
-  if (localTask.value !== cloudTask.value) return true; // Keep (different)
-  if (localTask.images?.length !== cloudTask.images?.length) return true;
-  return false; // Remove (identical)
-});
-```
+### Sync System (SyncContext.tsx)
+- `shouldAbortRef` + `manualSyncRef` flags control sync behavior
+- `performGlobalSync(allowCellular)` - WiFi auto, cellular on manual only
+- Missing files (deleted temp) skip without retry
+- Status recalculated from tasks during sync
+- Re-sync after 3sec if queue still has items
+- `file://` URIs: validate existence before upload
 
 ---
 
-## 🧪 Testing & QA
+## Media Storage (v2.0+)
 
-### Πριν το Commit - Checklist
-- [ ] TypeScript errors: `npx tsc --noEmit`
-- [ ] Offline mode tested (Airplane mode)
-- [ ] WiFi sync tested
-- [ ] Cellular data confirmation tested
-- [ ] Navigation lock (500ms) working
-- [ ] Listeners cleanup (no memory leaks)
-- [ ] AsyncStorage cleanup after sync
+### Firebase Storage
+- Path: `teams/{teamId}/projects/{projectId}/tasks/{taskId}/{mediaId}.{ext}`
+- Photos: 70% compression, full resolution, JPEG
+- Videos: 720p HD, 2.5Mbps, 4s max, MP4 (react-native-compressor)
+- Storage URLs (~100 bytes) stored in Firestore, not base64
 
-### Edge Cases να Τσεκάρεις
-1. **Empty states** - τι γίνεται αν δεν υπάρχουν tasks;
-2. **Network failures** - τι γίνεται αν πέσει το WiFi στη μέση;
-3. **Concurrent syncs** - `isSyncingRef` lock working;
-4. **Large images** - compression σε 800px, 40% quality;
-5. **GPS failures** - fallback σε (0, 0);
+### Upload Flow
+1. `file://` → Upload to Storage → Save URL
+2. `data:image/video` → Migrate to Storage (backward compat)
+3. `https://firebasestorage` → Keep as-is
 
 ---
 
-## 🔀 Git Workflow
+## Git Workflow
 
 ### Commit Messages
-```bash
-# Format: <type>: <short description>
-git commit -m "feat: Add video task support with 4s duration limit"
-git commit -m "fix: Prevent double navigation with 500ms debounce"
-git commit -m "docs: Update BUSINESS_PLAN.md with GPS features"
-git commit -m "refactor: Extract sync logic to SyncContext"
 ```
-
-### Types:
-- `feat` - Νέο feature
-- `fix` - Bug fix
-- `docs` - Documentation changes
-- `refactor` - Code refactoring (no behavior change)
-- `style` - Formatting, styling
-- `perf` - Performance improvements
-- `test` - Tests
-
-### Branch Strategy
-- `main` - Production-ready code
-- `feature/feature-name` - Νέα features
-- `fix/bug-description` - Bug fixes
-
----
-
-## ✅ DO's and ❌ DON'Ts
-
-### DO's
-
-#### 1. Πάντα Cleanup
-```typescript
-useEffect(() => {
-  const unsubscribe = onSnapshot(docRef, callback);
-  return () => unsubscribe(); // ✅ CLEANUP
-}, []);
-```
-
-#### 2. Debounce Navigation
-```typescript
-const [isNavigating, setIsNavigating] = useState(false);
-
-const safeNavigate = (path: string) => {
-  if (isNavigating) return;
-  setIsNavigating(true);
-  router.push(path);
-  setTimeout(() => setIsNavigating(false), 500);
-};
-```
-
-#### 3. Error Handling
-```typescript
-try {
-  await riskyOperation();
-} catch (error: any) {
-  console.error("Error:", error);
-  Alert.alert("Σφάλμα", error.message || "Κάτι πήγε στραβά");
-}
-```
-
-#### 4. Optimistic UI
-```typescript
-// Update UI ΑΜΕΣΑ
-setUsers(prev => prev.map(u =>
-  u.id === userId ? { ...u, role: newRole } : u
-));
-
-// ΜΕΤΑ update Firestore
-await updateDoc(teamRef, { [`roles.${userId}`]: newRole });
-```
-
-#### 5. Platform Checks
-```typescript
-import { Platform } from "react-native";
-
-if (Platform.OS !== "web") {
-  // Mobile-only code (long press, image editor, etc.)
-}
-```
-
-### DON'Ts
-
-#### 1. ❌ Μην Ξεχνάς το `isLocal` Flag
-```typescript
-// ✅ ΣΩΣΤΟ
-const newTask = { ...task, isLocal: true };
-
-// ❌ ΛΑΘΟΣ - χάνεται το tracking
-const newTask = { ...task };
-```
-
-#### 2. ❌ Μην Κάνεις Direct Firestore Writes σε Offline Mode
-```typescript
-// ❌ ΛΑΘΟΣ
-await updateDoc(projectRef, { tasks: newTasks }); // Θα πετάξει error!
-
-// ✅ ΣΩΣΤΟ
-await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(newTasks));
-// Sync θα το στείλει μετά
-```
-
-#### 3. ❌ Μην Χρησιμοποιείς `any`
-```typescript
-// ❌ ΛΑΘΟΣ
-const data: any = await getDoc(docRef);
-
-// ✅ ΣΩΣΤΟ
-const data = (await getDoc(docRef)).data() as TeamData;
-```
-
-#### 4. ❌ Μην Κάνεις Console.log σε Production
-```typescript
-// ✅ ΣΩΣΤΟ (αν χρειάζεται)
-if (__DEV__) {
-  console.log("Debug info:", data);
-}
+<type>: <short description>
+Types: feat, fix, docs, refactor, style, perf, test
 ```
 
 ---
 
-## 🌍 Γλώσσα & Localization
-
-### Πρότυπα
-1. **UI Text:** Πάντα στα Ελληνικά
-2. **Code:** Αγγλικά (variables, functions, comments σε Ελληνικά OK)
-3. **Documentation:** Ελληνικά
-
-### Παραδείγματα
-```typescript
-// ✅ ΣΩΣΤΟ
-const userName = "Μιχάλης"; // Variable: Αγγλικά, Value: Ελληνικά
-Alert.alert("Σφάλμα", "Δεν υπάρχει σύνδεση"); // UI: Ελληνικά
-
-// Comment: Ελληνικά OK
-// Αυτή η function κάνει sync των tasks
-
-// ❌ ΛΑΘΟΣ
-const onoma_xristi = "Μιχάλης"; // Variable σε Ελληνικά - ΟΧΙ
-```
+## Γλώσσα
+- **UI Text:** Ελληνικά
+- **Code:** Αγγλικά (variables, functions)
+- **Documentation:** Ελληνικά
 
 ---
 
-## ⚡ Performance Guidelines
-
-### Image Optimization
-```typescript
-// Πάντα compress
-const manipResult = await ImageManipulator.manipulateAsync(
-  uri,
-  [{ resize: { width: 800 } }],
-  {
-    compress: 0.4,  // 40% quality
-    format: SaveFormat.JPEG,
-    base64: true
-  }
-);
-```
-
-### Lazy Loading
-```typescript
-// Load cache first, fetch later
-useEffect(() => {
-  // 1. Load from cache ΑΜΕΣΑ
-  const loadCache = async () => {
-    const cached = await AsyncStorage.getItem(CACHE_KEY);
-    if (cached) {
-      setData(JSON.parse(cached));
-      setLoading(false); // Show cached data
-    }
-  };
-  loadCache();
-
-  // 2. Setup Firestore listener
-  const unsubscribe = onSnapshot(docRef, (snap) => {
-    if (!snap.metadata.fromCache) {
-      setData(snap.data());
-    }
-  });
-
-  return () => unsubscribe();
-}, []);
-```
-
-### Memoization
-```typescript
-import { useMemo } from "react";
-
-// Expensive computation
-const combinedTasks = useMemo(() => {
-  const map = new Map();
-  cloudTasks.forEach(t => map.set(t.id, t));
-  localTasks.forEach(t => map.set(t.id, t));
-  return Array.from(map.values());
-}, [cloudTasks, localTasks]);
-```
-
----
-
-## 📚 Αναφορές
+## Αναφορές
 
 ### Documentation Files
-- `BUSINESS_PLAN.md` - Business logic, schema, features
+- `BUSINESS_PLAN.md` - Business logic, schema, features, roadmap
 - `SERVICE_FLOWS.md` - Detailed flows για κάθε λειτουργία
 - `to do.md` - Pending features & roadmap
 
-### Key Files να Γνωρίζεις
+### Key Files
 - `app/context/SyncContext.tsx` - Offline sync logic
 - `app/components/ImageEditorModal.tsx` - Image editing
+- `app/project/[id].tsx` - Project tasks, media, PDF
 - `firebaseConfig.ts` - Firebase initialization
-- `app/_layout.tsx` - Root layout με SyncProvider
 
 ---
 
-## 🚨 Critical Rules - ΔΙΑΒΑΣΕ ΠΡΩΤΑ
-
-### 1. ΠΑΝΤΑ Cache + Firestore
-```typescript
-// ✅ Pattern να ακολουθείς ΠΑΝΤΟΤΕ
-const saveData = async (data: any) => {
-  // 1. Local
-  await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(data));
-  setData(data); // Optimistic UI
-
-  // 2. Cloud
-  await updateDoc(docRef, data);
-};
-```
-
-### 2. ΠΑΝΤΑ Cleanup Listeners
-```typescript
-useEffect(() => {
-  const unsubscribe = onSnapshot(...);
-  return () => unsubscribe(); // ΥΠΟΧΡΕΩΤΙΚΟ
-}, []);
-```
-
-### 3. ΠΑΝΤΑ Navigation Debounce
-```typescript
-const safeNavigate = (path: string) => {
-  if (isNavigating) return; // Prevent double nav
-  setIsNavigating(true);
-  router.push(path);
-  setTimeout(() => setIsNavigating(false), 500);
-};
-```
-
-### 4. ΠΑΝΤΑ Ελεγχος για Offline
-```typescript
-const netState = await NetInfo.fetch();
-if (!netState.isConnected) {
-  Alert.alert("Offline", "Χρειάζεται σύνδεση");
-  return;
-}
-```
-
----
-
-## 🆕 Recently Implemented Features (v1.1.0)
-
-### 1. Project Search & Filter System
-**File:** `app/team/[id].tsx`
-
-#### Implementation Details:
-```typescript
-// State Management
-const [searchQuery, setSearchQuery] = useState("");
-const [statusFilter, setStatusFilter] = useState<"all" | "active" | "pending" | "completed">("all");
-const [filterModalVisible, setFilterModalVisible] = useState(false);
-
-// AsyncStorage Persistence (per team)
-const FILTER_CACHE_KEY = `team_filters_${teamId}`;
-```
-
-#### Features:
-- **Search Bar**: Real-time filtering by project title (case-insensitive)
-- **Status Filter**: Bottom Sheet Modal με 4 options (all, active, pending, completed)
-- **Persistence**: Filters saved to AsyncStorage and restored on mount
-- **Visual Indicators**: Blue badge dot when filters active
-- **UI Pattern**: Compact search bar + filter icon button (not always-visible buttons)
-
-#### Filter Pipeline (3-stage):
-```typescript
-1. Role-based filter (Users see only assigned projects)
-2. Status filter (if statusFilter !== "all")
-3. Search filter (if searchQuery.trim())
-```
-
----
-
-### 2. 3-Stage Project Status System
-**File:** `app/project/[id].tsx`
-
-#### Status States:
-```typescript
-type ProjectStatus = "active" | "pending" | "completed";
-
-// Transition Logic:
-// - active: 0% tasks completed
-// - pending: 1-99% tasks completed
-// - completed: 100% tasks completed
-```
-
-#### Auto-Update Logic:
-```typescript
-useEffect(() => {
-  const completedCount = combinedTasks.filter(t => t.status === "completed").length;
-  const totalCount = combinedTasks.length;
-
-  let newStatus: ProjectStatus;
-  if (completedCount === totalCount) {
-    newStatus = "completed";
-  } else if (completedCount > 0) {
-    newStatus = "pending";
-  } else {
-    newStatus = "active";
-  }
-
-  if (newStatus !== projectStatus) {
-    setProjectStatus(newStatus);
-    updateDoc(projectRef, { status: newStatus });
-  }
-}, [combinedTasks]);
-```
-
-#### Visual Badges:
-- **Active**: 📋 Blue badge (#2563eb)
-- **Pending**: ⏳ Orange badge (#d97706)
-- **Completed**: ✅ Green badge (#16a34a)
-
----
-
-### 3. Role Change Cleanup Logic
-**File:** `app/team/[id].tsx` → `changeUserRole()`
-
-#### Purpose:
-Όταν αλλάζει ο ρόλος ενός χρήστη, πρέπει να αφαιρείται από τα projects arrays, αλλά **ΟΧΙ** να προστίθεται αυτόματα στο νέο array (manual assignment only).
-
-#### Implementation:
-```typescript
-// After updating team role:
-const q = query(collection(db, "projects"), where("teamId", "==", teamId));
-const querySnapshot = await getDocs(q);
-
-const updatePromises = querySnapshot.docs.map((projectDoc) => {
-  // Case 1: User → Supervisor (remove from members[])
-  if (targetUser.role === "User" && newRole === "Supervisor") {
-    return updateDoc(projectDoc.ref, {
-      members: arrayRemove(targetUser.id),
-    });
-  }
-  // Case 2: Supervisor → User (remove from supervisors[])
-  else if (targetUser.role === "Supervisor" && newRole === "User") {
-    return updateDoc(projectDoc.ref, {
-      supervisors: arrayRemove(targetUser.id),
-    });
-  }
-  // Case 3: Supervisor → Admin (remove from supervisors[])
-  else if (targetUser.role === "Supervisor" && newRole === "Admin") {
-    return updateDoc(projectDoc.ref, {
-      supervisors: arrayRemove(targetUser.id),
-    });
-  }
-  // Case 4: Admin → Supervisor (no action - Admins never in arrays)
-  else {
-    return Promise.resolve();
-  }
-});
-
-await Promise.all(updatePromises);
-```
-
-#### Design Decision:
-- **NO auto-assignment**: Prevents unwanted project access
-- **Manual selection only**: Admins manually assign users via Project Settings modal
-- **Admins & Founders hidden**: Don't appear in assignment UI (automatic access)
-
----
-
-### 4. Bottom Sheet Modal Pattern
-**File:** `app/team/[id].tsx`
-
-#### UI Pattern:
-```typescript
-// Filter Modal with Bottom Sheet
-<Modal visible={filterModalVisible} transparent animationType="slide">
-  <View style={styles.modalOverlay}>
-    <View style={styles.modalContent}>
-      {/* Radio button options with badges */}
-    </View>
-  </View>
-</Modal>
-```
-
-#### Styling:
-```typescript
-modalOverlay: {
-  flex: 1,
-  justifyContent: "flex-end",
-  backgroundColor: "rgba(0,0,0,0.4)",
-},
-modalContent: {
-  backgroundColor: "white",
-  borderTopLeftRadius: 20,
-  borderTopRightRadius: 20,
-  padding: 20,
-  maxHeight: "70%",
-}
-```
-
----
-
-### 5. Key Technical Decisions
-
-#### AsyncStorage Keys Structure:
-```typescript
-// Filter persistence (per team)
-`team_filters_${teamId}` → { search: string, status: string }
-```
-
-#### Firestore Schema Updates:
-```typescript
-// projects collection
-{
-  status: "active" | "pending" | "completed",  // NEW: 3-stage status
-  // ... existing fields
-}
-```
-
-#### State Management:
-- **Search/Filter state**: Local useState (persisted to AsyncStorage)
-- **Project status**: Real-time Firestore listeners με optimistic UI updates
-- **Role cleanup**: Server-side batch updates (no local state)
-
----
-
-## 🎯 Priorities Matrix
-
-| Priority | Feature Type | Example |
-|----------|--------------|---------|
-| 🔴 **P0** | Data integrity, Offline sync | Merge conflicts, Queue cleanup |
-| 🟠 **P1** | Core functionality | Task CRUD, Authentication |
-| 🟡 **P2** | UX improvements | Animations, Loading states |
-| 🟢 **P3** | Nice-to-have | Advanced filters, Analytics |
-
----
-
-## 📸 Firebase Storage (v2.0)
-
-### Αρχιτεκτονική Media Storage
-
-**Πριν (v1.x):** Base64 → Firestore
-**Τώρα (v2.0):** File Upload → Firebase Storage → URL → Firestore
-
-### Storage Structure
-
-```
-teams/{teamId}/projects/{projectId}/tasks/{taskId}/{mediaId}.{ext}
-```
-
-**Παράδειγμα:**
-```
-teams/5sQy9vPLTuzo9APgdJvy/projects/1770039824481dzb40/tasks/1770040984867/1770040995223_rrpvtgd4z.jpg
-```
-
-### Storage Utils (`utils/storageUtils.ts`)
-
-#### Key Functions
-
-```typescript
-// Generate unique media ID
-generateMediaId(): string
-
-// Upload image to Storage
-uploadImageToStorage(
-  imageUri: string,
-  teamId: string,
-  projectId: string,
-  taskId: string,
-  mediaId: string
-): Promise<string> // Returns Storage URL
-
-// Upload video to Storage
-uploadVideoToStorage(
-  videoUri: string,
-  teamId: string,
-  projectId: string,
-  taskId: string,
-  mediaId: string
-): Promise<string> // Returns Storage URL
-
-// Delete media from Storage
-deleteMediaFromStorage(storageUrl: string): Promise<void>
-
-// Migration function (for existing base64 data)
-uploadBase64ToStorage(
-  base64Data: string,
-  teamId: string,
-  projectId: string,
-  taskId: string,
-  mediaId: string,
-  mediaType: 'image' | 'video'
-): Promise<string>
-```
-
-### Upload Flow
-
-#### Photo Upload
-1. Camera capture → `expo-image-picker`
-2. Image editor → `ImageEditorModal`
-3. Compress → `ImageManipulator.manipulateAsync()`
-   - Compression: **70%** (0.7)
-   - Resolution: **Full camera resolution** (no resize)
-   - Format: JPEG
-4. Upload → `uploadImageToStorage()`
-5. Get Storage URL → Save to Firestore task.images[]
-
-#### Video Upload
-1. Camera capture → `expo-image-picker`
-   - Quality: **High** (1080p)
-   - Duration: **4 seconds max**
-2. Upload → `uploadVideoToStorage()`
-3. Get Storage URL → Save to Firestore task.value
-
-### Firestore Data Structure
-
-**Πριν (Base64):**
-```typescript
-task: {
-  images: ["data:image/jpeg;base64,/9j/4AAQ..."], // 500KB+
-  value: "data:video/mp4;base64,AAAAIGZ0..." // 2MB+
-}
-```
-
-**Τώρα (Storage URLs):**
-```typescript
-task: {
-  images: ["https://firebasestorage.googleapis.com/..."], // ~100 bytes
-  value: "https://firebasestorage.googleapis.com/..." // ~100 bytes
-}
-```
-
-### Storage Rules
-
-**File:** `storage.rules`
-
-**Current Rules:**
-```javascript
-// Allow all authenticated users
-allow read, delete: if request.auth != null;
-allow write: if request.auth != null && request.resource.size < 10 * 1024 * 1024;
-```
-
-**Notes:**
-- Authentication required for all operations
-- 10MB file size limit
-- Team isolation not fully implemented (requires Cloud Functions)
-
-### Offline Sync (`app/context/SyncContext.tsx`)
-
-**Handles 3 types of media:**
-
-1. **Local files** (`file://...`)
-   - Upload to Storage
-   - Save URL to Firestore
-
-2. **Base64 data** (`data:image/...`)
-   - Migrate to Storage (backward compatibility)
-   - Save URL to Firestore
-
-3. **Storage URLs** (`https://firebasestorage...`)
-   - Already migrated, keep as-is
-
-**Example:**
-```typescript
-if (imgUri.startsWith("file://")) {
-  const storageUrl = await uploadImageToStorage(...);
-  processedImages.push(storageUrl);
-} else if (imgUri.startsWith("data:image")) {
-  const storageUrl = await uploadBase64ToStorage(...);
-  processedImages.push(storageUrl);
-} else if (imgUri.startsWith("https://firebasestorage")) {
-  processedImages.push(imgUri);
-}
-```
-
-### Migration Script
-
-**File:** `scripts/migrateToStorage.ts`
-
-**Run:** `npm run migrate`
-
-**What it does:**
-1. Fetches all projects from Firestore
-2. For each task with base64 media:
-   - Uploads to Storage
-   - Gets download URL
-   - Updates Firestore with URL
-3. Prints statistics (migrated, skipped, failed)
-
-**Usage:**
-```bash
-npm install --save-dev ts-node @types/node
-npm run migrate
-```
-
-### Debugging
-
-**Console Logs:**
-```
-📸 Starting image save process...
-🔧 uploadImageToStorage called with:
-  - imageUri: file:///path/to/image.jpg
-  - teamId: 5sQy9vPLTuzo9APgdJvy
-  - projectId: 1770039824481dzb40
-  - taskId: 1770040984867
-  - mediaId: 1770040995223_rrpvtgd4z
-✓ Blob created from URI, size: 524288 bytes
-✓ Image uploaded successfully
-  - Download URL: https://firebasestorage.googleapis.com/...
-```
-
-### Common Issues
-
-#### 1. Permission Denied
-**Error:** `storage/unauthorized`
-
-**Cause:** User not authenticated or Storage rules blocking access
-
-**Fix:** Check Firebase Console → Storage → Rules
-
-#### 2. Blob Creation Failed
-**Error:** `creating blobs from arraybuffer not supported`
-
-**Cause:** Platform-specific Blob API issues
-
-**Fix:** Use `fetch(uri).then(r => r.blob())` instead of manual conversion
-
-#### 3. TeamId Missing
-**Error:** `Missing required parameters for image upload`
-
-**Cause:** teamId not loaded from Firestore
-
-**Fix:** Ensure project document has `teamId` field
-
-### Best Practices
-
-1. **Always use Storage URLs** - Never store base64 in Firestore
-2. **Delete from Storage** - When deleting media, call `deleteMediaFromStorage()` first
-3. **Handle offline** - Store file:// URIs locally, upload when online
-4. **Error handling** - Always wrap Storage operations in try-catch
-5. **Logging** - Keep console.log() during development for debugging
-
-### Performance
-
-**Before (Base64):**
-- Task document size: ~500KB per image
-- Firestore read: Slow (large documents)
-- Network: Heavy bandwidth usage
-
-**After (Storage URLs):**
-- Task document size: ~100 bytes per image
-- Firestore read: Fast (tiny documents)
-- Network: Efficient (only URLs transferred)
-
-**Improvement:**
-- 📉 **99.98% smaller** Firestore documents
-- 🚀 **10x faster** task loading
-- 💾 **Unlimited storage** (Firebase Storage pricing)
-
----
-
-**Version:** 2.0.0
+**Version:** 2.2.0
 **Last Updated:** Φεβρουάριος 2026
-**Maintainer:** Michael
-
----
-
-**Σημείωση:** Αυτό το αρχείο είναι **living document**. Update όποτε αλλάζουν patterns ή standards.

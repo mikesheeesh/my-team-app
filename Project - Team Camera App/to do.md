@@ -1,218 +1,54 @@
 # ERGON WORK MANAGEMENT - TODO LIST
 
-## 📋 Κατάσταση Features
+## Ολοκληρωμένα (v1.0 - v2.2.0)
 
-### ✅ Ολοκληρωμένα
-
-- [x] **GPS σε φωτογραφία και βίντεο**
-  Location tracking με expo-location (Accuracy.Balanced)
-  Google Maps integration με deep linking
-
-- [x] **Edit φωτογραφίες με σχέδιο, zoom κλπ.**
-  Advanced Image Editor με drawing/annotation tools
-  Pan & zoom capabilities (1x-3x), 6 colors, 3 stroke widths
-  **v2.1:** Boundary fixes για αποφυγή line jumps/flicks όταν το δάχτυλο βγαίνει εκτός canvas
-
-- [x] **Web View**
-  Full web support με react-native-web
-  Platform-specific conditionals για optimized UX
-
-- [x] **Φίλτρα αναζήτησης**
-  Search bar για project titles (always visible)
-  Filter by status (active/pending/completed) με Bottom Sheet Modal
-  AsyncStorage persistence για filters (per team)
-  Visual indicators (badge dot) για active filters
-
-- [x] **3-Stage Project Status**
-  Automatic status transitions: active → pending → completed
-  Pending status όταν έστω 1 task ολοκληρωθεί
-  Real-time status updates με Firestore listeners
-
-- [x] **Role Change Cleanup Logic**
-  Automatic removal από projects όταν αλλάζει ρόλος χρήστη
-  User → Supervisor: Αφαίρεση από members[]
-  Supervisor → User/Admin: Αφαίρεση από supervisors[]
-  ΟΧΙ automatic assignment (manual selection only)
-
-- [x] **Firebase Storage Migration (v2.0)**
-  Base64 → Firebase Storage URLs για photos/videos
-  **Λεπτομέρειες:**
-  - Photos: 70% compression, full camera resolution
-  - Videos: 720p HD, 2.5Mbps bitrate, 4 seconds max (react-native-compressor)
-  - Team-isolated paths: `teams/{teamId}/projects/{projectId}/tasks/{taskId}/{mediaId}.{ext}`
-  - Storage URLs στο Firestore (~100 bytes vs 500KB+ base64)
-  - Offline sync με automatic upload όταν επιστρέφει Internet
-  - Migration script: `npm run migrate` για existing base64 data
-  - 99.98% μείωση Firestore document size
-  - 10x faster task loading
-
-- [x] **Multiple Videos Support + UX Improvements**
-  VideoTask υποστηρίζει πολλαπλά βίντεο (όπως PhotoTask)
-  **Λεπτομέρειες:**
-  - VideoTask: `value: string` → `videos: string[]`, `videoLocations: GeoPoint[]`
-  - Backward compatibility με normalizeVideoTask() helper
-  - No preview modal - media εμφανίζονται μόνο στο gallery
-  - Auto-refresh gallery όταν προστεθεί/διαγραφεί media
-  - GPS support για κάθε βίντεο ξεχωριστά
-  - Badge δείχνει αριθμό βίντεο (π.χ. "3 videos")
-  - Πλήρης ενημέρωση: SyncContext, PDF generation, UI rendering
-
-- [x] **Clickable Invite Links με Web Landing Page (v2.0)**
-  Web-based invite system με clickable https:// links
-  **Λεπτομέρειες:**
-  - Web landing page hosted on Vercel (free tier)
-  - Clickable links σε όλα τα messaging apps (WhatsApp, Viber, Messenger, Email)
-  - Auto-join functionality (zero manual code entry)
-  - Smart device detection (mobile vs desktop)
-  - Auto-redirect σε app μέσω deep linking
-  - Download fallback για χρήστες χωρίς εγκατεστημένη app
-  - Branded landing page με team logo και όνομα
-  - Professional UX με gradient background, spinner animations
-  - EAS build integration για APK download: https://expo.dev/artifacts/eas/4bXP8oAFwjZMK61hxRLpgx.apk
-  - Vercel deployment με rewrites configuration
-  - ~3 second end-to-end join workflow
-  - 100% free hosting (Vercel free tier: 100GB/month)
-
-- [x] **Enhanced PDF Report (v2.1.2)**
-  Βελτιωμένη αναφορά PDF με περισσότερες πληροφορίες
-  **Λεπτομέρειες:**
-  - Photo thumbnails: Μικρογραφίες 60x60px (max 4 ανά task) με "+X" badge
-  - GPS Links: Clickable links για κάθε φωτογραφία/βίντεο στο Google Maps
-  - Completion dates: Ημερομηνία/ώρα ολοκλήρωσης για κάθε task
-  - Card-based layout: Νέα εμφάνιση με κάρτες αντί για πίνακα
-  - 4 summary cards: ΣΥΝΟΛΟ, ΟΛΟΚΛΗΡΩΜΕΝΕΣ, ΠΡΟΟΔΟΣ %, ΚΑΤΑΣΤΑΣΗ
-  - completedAt field: Αυτόματη καταγραφή timestamp όταν task γίνει completed
-  - Print-friendly: Βελτιστοποιημένο για εκτύπωση με page breaks
-  - Professional styling: Gradients, shadows, modern typography
-
-- [x] **Sync Queue Stuck Bug Fix (v2.1.3)**
-  Fix race condition που έκανε τα tasks να "κολλάνε" στο sync queue
-  **Λεπτομέρειες:**
-  - File validation: Έλεγχος αν το `file://` URI υπάρχει πριν το upload
-  - Retry counter: Max 3 προσπάθειες, μετά αφαίρεση από queue
-  - Per-task queue management: Διαγραφή κάθε task ξεχωριστά μετά το sync
-  - QueuedTask format: Νέο format με `{ task, retryCount }` για tracking
-  - Backward compatibility: Migration για παλιό queue format
-  - updateDoc failure handling: Increment retry count αν αποτύχει το Firestore update
-  - Invalid URI cleanup: Αφαίρεση invalid `file://` URIs από tasks
-  - **v2.1.3.1:** Abort flag για instant stop όταν πέφτει το WiFi mid-sync
-  - **v2.1.3.1:** Re-sync mechanism: Αυτόματο retry μετά 3 sec αν υπάρχουν items στο queue
-  - **v2.1.3.1:** Network check πριν από κάθε Firebase operation
+- [x] GPS σε φωτογραφία και βίντεο (expo-location, Google Maps deep linking)
+- [x] Edit φωτογραφίες με σχέδιο, zoom (v2.1: boundary fixes)
+- [x] Web View (react-native-web)
+- [x] Φίλτρα αναζήτησης (search bar, status filter, AsyncStorage persistence)
+- [x] 3-Stage Project Status (active/pending/completed, auto-transitions)
+- [x] Role Change Cleanup (auto-remove from project arrays)
+- [x] Firebase Storage Migration v2.0 (99.98% smaller docs, 10x faster loading)
+- [x] Multiple Videos Support (videos[], videoLocations[], normalizeVideoTask)
+- [x] Clickable Invite Links v2.0 (web landing page, auto-join, ~3sec)
+- [x] Enhanced PDF Report v2.1.2 (thumbnails, GPS links, completion dates, card layout)
+- [x] Sync Queue Stuck Fix v2.1.3 (file validation, retry counter, abort flag, re-sync)
+- [x] Custom Loading Screen v2.2.0 (logo + version)
+- [x] Gallery Picker v2.2.0 (bottom sheet modal)
+- [x] OTA Updates v2.2.0 (expo-updates, EAS Update)
 
 ---
 
-## 🚧 Pending Features
+## Pending Features
 
-### 🔴 Υψηλή Προτεραιότητα
+### Υψηλή Προτεραιότητα
 
 - [ ] **Ρόλος Supervisor για χρήστες**
-  - [ ] Δικαίωμα δημιουργίας project για Users
-  - [ ] Αυτόματη ανάθεση σε Supervisor κατά τη δημιουργία
-  - [ ] Update permissions matrix στο BUSINESS_PLAN.md
+  - Δικαίωμα δημιουργίας project για Users
+  - Αυτόματη ανάθεση σε Supervisor κατά τη δημιουργία
 
 - [ ] **Task Search & Filtering**
-  - [ ] Search tasks by title/description (within projects)
-  - [ ] Filter tasks by status/priority
-  - [ ] Filter by assigned members
+  - Search tasks by title/description (within projects)
+  - Filter tasks by status/priority/assigned members
 
-### 🟡 Μέτρια Προτεραιότητα
+### Μέτρια Προτεραιότητα
 
 - [ ] **Κλείσιμο project από owners**
-  - [ ] Lock/Archive functionality
-  - [ ] Prevent edits σε closed projects
-  - [ ] Status badge: "Κλειστό"
-  - [ ] Restore option για Founder/Admin
+  - Lock/Archive functionality
+  - Prevent edits, status badge "Κλειστό"
+  - Restore option για Founder/Admin
 
 ---
 
-## ❌ Απορριφθέντα / Δεν Θα Γίνουν
+## Progress
 
-- [x] **~~Φωτογραφίες και βίντεο αποθηκεύονται σε Google Drive του email ομάδας~~**
-  **ΑΠΟΦΑΣΗ:** Υλοποιήθηκε με Firebase Storage (όχι Google Drive)
-  **ΕΝΑΛΛΑΚΤΙΚΗ ΛΥΣΗ:** Firebase Storage με team isolation
-  **v2.0:** Base64 deprecated, χρησιμοποιείται Firebase Storage
+| Κατηγορία | Done | Pending | Total |
+|-----------|------|---------|-------|
+| Features | 14 | 3 | 17 |
 
----
-
-## 📊 Progress Overview
-
-| Κατηγορία | Completed | Pending | Total |
-|-----------|-----------|---------|-------|
-| Core Features | 11 | 0 | 11 |
-| New Features | 0 | 2 | 2 |
-| Rejected | 1 | 0 | 1 |
-| **ΣΥΝΟΛΟ** | **11** | **2** | **13** |
-
-**Progress:** 84.6% ολοκληρωμένο
-
----
-
-## 📝 Notes
-
-- Τα completed features έχουν ήδη documented στα BUSINESS_PLAN.md & SERVICE_FLOWS.md
-- Supervisor role update θα χρειαστεί schema changes στο Firestore
-- Project search/filter: Implemented με client-side filtering (AsyncStorage persistence)
-- 3-stage status: Auto-updates με Firestore real-time listeners
-- Role cleanup: Αφαιρεί χρήστες από projects, αλλά ΟΧΙ auto-assignment
-- Project locking: soft-delete approach με `status: "archived"` (pending)
-- **Firebase Storage (v2.0):**
-  - Media stored in Firebase Storage (not Firestore base64)
-  - 99.98% smaller Firestore documents
-  - 10x faster task loading
-  - Team isolation με storage paths
-  - Migration script available για existing data
-  - Offline mode: Local URIs → Auto-upload when online
-- **Multiple Videos Support:**
-  - VideoTask τώρα υποστηρίζει arrays: `videos[]` και `videoLocations[]`
-  - Backward compatible με παλιά format (normalizeVideoTask helper)
-  - No preview modal - καλύτερο UX
-  - Auto-refresh gallery με useEffect
-  - GPS για κάθε βίντεο ξεχωριστά
-- **Clickable Invite Links (v2.0):**
-  - Web landing page: https://ergon-work-management.vercel.app
-  - Clickable https:// links αντί για custom scheme (ergonwork://)
-  - Auto-join με zero manual code entry
-  - Hosted on Vercel free tier (100GB bandwidth/month)
-  - Download button με real EAS build URL
-  - Professional branded UX με app logo
-- **Video Compression (v2.1):**
-  - react-native-compressor library
-  - Manual mode: 720p HD, 2.5Mbps bitrate
-  - ~70% μείωση μεγέθους με καλή ποιότητα
-  - Αυτόματη συμπίεση πριν το upload
-- **Image Editor Boundaries (v2.1):**
-  - Strict boundary checking (15px margin)
-  - Αποτρέπει line jumps όταν το δάχτυλο βγαίνει εκτός canvas
-  - Αποτρέπει flicks προς header/footer areas
-  - Wild value detection για UI element transitions
-  - **v2.1.1:** Race condition fix - capture wasInBounds value πριν το async state update
-- **Project Group Move (v2.1.1):**
-  - Instant UI refresh όταν μετακινείται project σε άλλο group
-  - Local state update πριν το Firestore update (optimistic UI)
-- **Enhanced PDF Report (v2.1.2):**
-  - Card-based layout αντί για table
-  - Photo thumbnails με onerror fallback
-  - Clickable GPS links για Google Maps
-  - completedAt timestamp καταγράφεται αυτόματα στο saveTaskLocal()
-  - Αφαιρείται completedAt αν task γυρίσει σε pending
-  - Thumbnails εμφανίζονται μόνο για Firebase Storage URLs (όχι file://)
-- **User Name Offline Cache (v2.1.2):**
-  - Cached user name με AsyncStorage
-  - Εμφανίζεται το πραγματικό όνομα offline αντί για "Χρήστης"
-- **Sync Queue Stuck Fix (v2.1.3):**
-  - Race condition: Network drop mid-sync → queue never removed
-  - File validation με `FileSystem.getInfoAsync()` πριν το upload
-  - QueuedTask format: `{ task: any, retryCount: number }`
-  - MAX_SYNC_RETRIES = 3, μετά αφαίρεση από queue
-  - Per-task removal αντί για all-or-nothing cleanup
-  - updateDoc wrapped σε try-catch με retry increment
-  - Invalid `file://` URIs δεν κρατούνται στα processed arrays
-  - **v2.1.3.1:** `shouldAbortRef` flag για instant abort όταν πέφτει WiFi
-  - **v2.1.3.1:** Network listener θέτει abort flag κατά τη διάρκεια sync
-  - **v2.1.3.1:** Re-sync check στο finally (3 sec delay)
-  - **v2.1.3.1:** `isWiFiConnected()` check πριν getDoc/updateDoc
+**Progress:** 82.4%
 
 ---
 
 **Last Updated:** Φεβρουάριος 2026
-**Version:** 2.1.3
+**Version:** 2.2.0
