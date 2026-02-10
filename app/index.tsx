@@ -97,7 +97,6 @@ export default function LandingScreen() {
           await Updates.reloadAsync();
         }
       } catch (e) {
-        // Σιωπηλό fallback - δεν μπλοκάρει το app
         console.log("Update check failed:", e);
       }
     };
