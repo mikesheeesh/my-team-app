@@ -270,20 +270,21 @@ export default function TeamProjectsScreen() {
 
       // Ενημερώνουμε τα groups ώστε να περιέχουν τα ΠΡΑΓΜΑΤΙΚΑ δεδομένα (counts, status)
       setGroups((currentGroups) => {
-        return currentGroups.map((group) => ({
+        let hasChanges = false;
+        const updatedGroups = currentGroups.map((group) => ({
           ...group,
           projects: group.projects.map((proj) => {
             const freshData = freshProjectsMap.get(proj.id);
             if (freshData) {
-              // Derive status from tasks (πιο αξιόπιστο από stored status field)
               const tasks = freshData.tasks || [];
-              let derivedStatus = freshData.status || "active";
+              let derivedStatus: "active" | "pending" | "completed" = freshData.status || "active";
               if (tasks.length > 0) {
                 const done = tasks.filter((t: any) => t.status === "completed").length;
                 if (done === tasks.length) derivedStatus = "completed";
                 else if (done > 0) derivedStatus = "pending";
                 else derivedStatus = "active";
               }
+              if (proj.status !== derivedStatus) hasChanges = true;
               return {
                 ...proj,
                 status: derivedStatus,
@@ -294,6 +295,26 @@ export default function TeamProjectsScreen() {
             return proj;
           }),
         }));
+
+        // Sync στη βάση μόνο αν άλλαξε κάποιο status
+        if (hasChanges) {
+          const groupsForDb = updatedGroups.map((g) => ({
+            id: g.id,
+            title: g.title,
+            projects: g.projects.map((p) => ({
+              id: p.id,
+              title: p.title,
+              status: p.status,
+              supervisors: p.supervisors || [],
+              members: p.members || [],
+              createdBy: p.createdBy || "",
+              teamId: p.teamId || teamId,
+            })),
+          }));
+          updateDoc(doc(db, "teams", teamId), { groups: groupsForDb }).catch(() => {});
+        }
+
+        return updatedGroups;
       });
     });
 
