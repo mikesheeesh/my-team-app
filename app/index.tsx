@@ -244,7 +244,7 @@ const styles = StyleSheet.create({
 
   version: {
     textAlign: "center",
-    color: "#cbd5e1",
+    color: "#0f172a",
     fontSize: 12,
     marginBottom: 20,
   },
@@ -261,7 +261,7 @@ const styles = StyleSheet.create({
   loadingVersion: {
     position: "absolute",
     bottom: 60,
-    color: "#cbd5e1",
+    color: "#0f172a",
     fontSize: 12,
   },
 });
