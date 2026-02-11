@@ -133,7 +133,7 @@ export default function LandingScreen() {
           style={styles.loadingLogo}
           resizeMode="contain"
         />
-        <Text style={styles.loadingVersion}>v1.0.1 OTA</Text>
+        <Text style={styles.loadingVersion}>v1.0.2 OTA</Text>
       </Animated.View>
     );
   }
@@ -173,7 +173,7 @@ export default function LandingScreen() {
       </View>
 
       {/* VERSION FOOTER */}
-      <Text style={styles.version}>v1.0.1 OTA</Text>
+      <Text style={styles.version}>v1.0.2 OTA</Text>
     </SafeAreaView>
   );
 }
