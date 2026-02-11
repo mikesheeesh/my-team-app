@@ -3,7 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
 import * as Network from "expo-network";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -70,6 +70,8 @@ export default function TeamProjectsScreen() {
   const [teamLogo, setTeamLogo] = useState<string | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
+  const userCacheRef = useRef(new Map<string, { fullname: string; email: string }>());
+  const syncDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // --- SEARCH & FILTER STATE ---
   const [searchQuery, setSearchQuery] = useState("");
@@ -139,7 +141,6 @@ export default function TeamProjectsScreen() {
         const teamRef = doc(db, "teams", teamId);
         const unsubscribeTeam = onSnapshot(
           teamRef,
-          { includeMetadataChanges: true },
           async (docSnap) => {
             if (docSnap.exists()) {
               const data = docSnap.data();
@@ -170,18 +171,26 @@ export default function TeamProjectsScreen() {
               let loadedUsers: User[] = [];
               if (data.memberIds && data.memberIds.length > 0) {
                 for (const uid of data.memberIds) {
-                  let userData = { fullname: "Μέλος", email: "..." };
-                  try {
-                    const userDoc = await getDoc(doc(db, "users", uid));
-                    if (userDoc.exists()) {
-                      userData = userDoc.data() as any;
+                  let cached = userCacheRef.current.get(uid);
+                  if (!cached) {
+                    try {
+                      const userDoc = await getDoc(doc(db, "users", uid));
+                      if (userDoc.exists()) {
+                        const d = userDoc.data() as any;
+                        cached = { fullname: d.fullname || "Μέλος", email: d.email || "..." };
+                      } else {
+                        cached = { fullname: "Μέλος", email: "..." };
+                      }
+                    } catch (e) {
+                      cached = { fullname: "Μέλος", email: "..." };
                     }
-                  } catch (e) {}
+                    userCacheRef.current.set(uid, cached);
+                  }
 
                   loadedUsers.push({
                     id: uid,
-                    name: userData.fullname || "Χρήστης",
-                    email: uid === user.uid ? "Εγώ" : userData.email || "...",
+                    name: cached.fullname,
+                    email: uid === user.uid ? "Εγώ" : cached.email,
                     role: data.roles[uid] || "User",
                   });
                 }
@@ -296,22 +305,25 @@ export default function TeamProjectsScreen() {
           }),
         }));
 
-        // Sync στη βάση μόνο αν άλλαξε κάποιο status
+        // Debounced sync στη βάση μόνο αν άλλαξε κάποιο status
         if (hasChanges) {
-          const groupsForDb = updatedGroups.map((g) => ({
-            id: g.id,
-            title: g.title,
-            projects: g.projects.map((p) => ({
-              id: p.id,
-              title: p.title,
-              status: p.status,
-              supervisors: p.supervisors || [],
-              members: p.members || [],
-              createdBy: p.createdBy || "",
-              teamId: p.teamId || teamId,
-            })),
-          }));
-          updateDoc(doc(db, "teams", teamId), { groups: groupsForDb }).catch(() => {});
+          if (syncDebounceRef.current) clearTimeout(syncDebounceRef.current);
+          syncDebounceRef.current = setTimeout(() => {
+            const groupsForDb = updatedGroups.map((g) => ({
+              id: g.id,
+              title: g.title,
+              projects: g.projects.map((p) => ({
+                id: p.id,
+                title: p.title,
+                status: p.status,
+                supervisors: p.supervisors || [],
+                members: p.members || [],
+                createdBy: p.createdBy || "",
+                teamId: p.teamId || teamId,
+              })),
+            }));
+            updateDoc(doc(db, "teams", teamId), { groups: groupsForDb }).catch(() => {});
+          }, 5000);
         }
 
         return updatedGroups;

@@ -16,10 +16,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, onSnapshot, updateDoc } from "firebase/firestore";
+import { doc, updateDoc } from "firebase/firestore";
 import { auth, db } from "../firebaseConfig";
 
 import InputModal from "./components/InputModal";
+import { useUser } from "./context/UserContext";
 
 const PROFILE_CACHE_KEY = "user_profile_data_cache";
 
@@ -27,6 +28,7 @@ export default function ProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
+  const { user: contextUser } = useUser();
   const [loading, setLoading] = useState(true);
   const [userData, setUserData] = useState<any>(null);
   const [isOffline, setIsOffline] = useState(false);
@@ -56,33 +58,22 @@ export default function ProfileScreen() {
   }, []);
 
   useEffect(() => {
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        const userRef = doc(db, "users", user.uid);
-        const unsubscribeSnapshot = onSnapshot(
-          userRef,
-          (docSnap) => {
-            if (docSnap.exists()) {
-              const data = docSnap.data();
-              const fullData = { ...data, email: user.email };
-              setUserData(fullData);
-              AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(fullData));
-            }
-            setLoading(false);
-          },
-          (error) => {
-            console.log("Offline mode, keeping cached data.");
-            setIsOffline(true);
-            setLoading(false);
-          },
-        );
-        return () => unsubscribeSnapshot();
-      } else {
-        router.replace("/");
-      }
-    });
-    return () => unsubscribeAuth();
-  }, []);
+    if (contextUser) {
+      const fullData = {
+        fullname: contextUser.fullname,
+        email: contextUser.email,
+        phone: contextUser.phone,
+      };
+      setUserData(fullData);
+      AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(fullData));
+      setLoading(false);
+    } else {
+      const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+        if (!user) router.replace("/");
+      });
+      return () => unsubscribeAuth();
+    }
+  }, [contextUser]);
 
   const handleLogout = async () => {
     Alert.alert("Αποσύνδεση", "Είστε σίγουροι;", [

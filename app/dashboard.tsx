@@ -13,14 +13,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-// FIREBASE
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, onSnapshot } from "firebase/firestore";
-import { auth, db } from "../firebaseConfig";
+import { auth } from "../firebaseConfig";
+import { useUser } from "./context/UserContext";
 
 export default function DashboardScreen() {
   const router = useRouter();
-  const [userName, setUserName] = useState("Φόρτωση...");
+  const { user: userData } = useUser();
   const [loading, setLoading] = useState(true);
 
   // --- NAVIGATION LOCK (500ms) ---
@@ -49,29 +48,12 @@ export default function DashboardScreen() {
     }, []),
   );
 
-  // 2. AUTH & DATA LISTENER
+  // 2. AUTH CHECK
   useFocusEffect(
     useCallback(() => {
       const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
         if (user) {
-          const userRef = doc(db, "users", user.uid);
-          const unsubscribeUser = onSnapshot(
-            userRef,
-            (docSnap) => {
-              if (docSnap.exists()) {
-                const data = docSnap.data();
-                setUserName(data.fullname || user.displayName || "Χρήστης");
-              } else {
-                setUserName(user.displayName || "Χρήστης");
-              }
-              setLoading(false);
-            },
-            (error) => {
-              console.log("Dashboard User Error:", error);
-              setLoading(false);
-            },
-          );
-          return () => unsubscribeUser();
+          setLoading(false);
         } else {
           router.replace("/");
         }
@@ -96,7 +78,7 @@ export default function DashboardScreen() {
       <View style={styles.header}>
         <View>
           <Text style={styles.appName}>Ergon Work Management</Text>
-          <Text style={styles.greeting}>Γεια σου, {userName}!</Text>
+          <Text style={styles.greeting}>Γεια σου, {userData?.fullname || "Χρήστης"}!</Text>
         </View>
         <TouchableOpacity
           style={styles.profileButton}

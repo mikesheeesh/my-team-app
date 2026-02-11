@@ -1,7 +1,8 @@
 import { Stack } from "expo-router";
 import { useEffect } from "react";
 import { LogBox } from "react-native";
-import { SyncProvider } from "./context/SyncContext"; // <--- IMPORT
+import { SyncProvider } from "./context/SyncContext";
+import { UserProvider } from "./context/UserContext";
 
 export default function Layout() {
   useEffect(() => {
@@ -9,20 +10,21 @@ export default function Layout() {
   }, []);
 
   return (
-    // ΤΥΛΙΓΟΥΜΕ ΤΑ ΠΑΝΤΑ ΜΕ ΤΟΝ SYNC PROVIDER
-    <SyncProvider>
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="index" />
-        <Stack.Screen name="login" />
-        <Stack.Screen name="onboarding/invite" />
-        <Stack.Screen
-          name="dashboard/index"
-          options={{
-            gestureEnabled: false,
-            headerLeft: () => null,
-          }}
-        />
-      </Stack>
-    </SyncProvider>
+    <UserProvider>
+      <SyncProvider>
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="index" />
+          <Stack.Screen name="login" />
+          <Stack.Screen name="onboarding/invite" />
+          <Stack.Screen
+            name="dashboard/index"
+            options={{
+              gestureEnabled: false,
+              headerLeft: () => null,
+            }}
+          />
+        </Stack>
+      </SyncProvider>
+    </UserProvider>
   );
 }

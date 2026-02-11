@@ -17,11 +17,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // FIREBASE
 import { onAuthStateChanged } from "firebase/auth";
-import { collection, doc, onSnapshot, query, where } from "firebase/firestore";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { auth, db } from "../../firebaseConfig";
 
 // CONTEXT
 import { useSync } from "../context/SyncContext";
+import { useUser } from "../context/UserContext";
 
 type Role = "Founder" | "Admin" | "Supervisor" | "User";
 
@@ -127,9 +128,9 @@ export default function MyTeamsScreen() {
   const insets = useSafeAreaInsets();
   const { isSyncing, syncNow } = useSync();
 
+  const { user: contextUser } = useUser();
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
-  const [userName, setUserName] = useState("Χρήστης");
   const [pendingCount, setPendingCount] = useState(0);
 
   // --- NAVIGATION LOCK (500ms) ---
@@ -178,11 +179,6 @@ export default function MyTeamsScreen() {
             setTeams(parsed);
           }
         }
-        // Load cached user name
-        const cachedName = await AsyncStorage.getItem(USER_NAME_CACHE_KEY);
-        if (cachedName) {
-          setUserName(cachedName);
-        }
       } catch (e) {
         console.log("Cache load error:", e);
       }
@@ -196,15 +192,6 @@ export default function MyTeamsScreen() {
 
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (user) {
-        onSnapshot(doc(db, "users", user.uid), (snap) => {
-          if (snap.exists()) {
-            const name = snap.data().fullname || "Χρήστης";
-            setUserName(name);
-            // Cache the user name for offline use
-            AsyncStorage.setItem(USER_NAME_CACHE_KEY, name);
-          }
-        });
-
         const q = query(
           collection(db, "teams"),
           where("memberIds", "array-contains", user.uid),
@@ -284,7 +271,7 @@ export default function MyTeamsScreen() {
       <View style={styles.header}>
         <View>
           <Text style={styles.welcomeText}>Λίστα Ομάδων</Text>
-          <Text style={styles.userName}>{userName}</Text>
+          <Text style={styles.userName}>{contextUser?.fullname || "Χρήστης"}</Text>
         </View>
         <TouchableOpacity
           onPress={() => router.push("/profile")}
