@@ -367,7 +367,13 @@ export default function ProjectDetailsScreen() {
   // Ελέγχουμε αν άλλαξε κάτι στα tasks και ενημερώνουμε το status ΑΥΤΟΜΑΤΑ
   // NEW LOGIC: active → pending → completed
   useEffect(() => {
-    if (combinedTasks.length === 0) return;
+    if (combinedTasks.length === 0) {
+      // No tasks → reset to active
+      if (projectStatus !== "active") {
+        updateProjectStatus("active");
+      }
+      return;
+    }
 
     const completedCount = combinedTasks.filter(
       (t) => t.status === "completed",
