@@ -16,6 +16,11 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
+    // Allow list on team/project paths (needed for deleteProjectMedia)
+    match /teams/{teamId}/projects/{projectId}/{allPaths=**} {
+      allow list: if request.auth != null;
+    }
+
     // Team-isolated storage path
     match /teams/{teamId}/projects/{projectId}/tasks/{taskId}/{mediaFile} {
       // Allow authenticated users (team check via Firestore is complex)
