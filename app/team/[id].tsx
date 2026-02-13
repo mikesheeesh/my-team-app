@@ -21,6 +21,12 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import InputModal from "../components/InputModal";
+import { useDriveSync } from "../context/DriveSyncContext";
+import {
+  connectGoogleDrive,
+  disconnectGoogleDrive,
+} from "../../utils/driveAuth";
+import { deleteProjectMedia } from "../../utils/storageUtils";
 
 // FIREBASE - Προστέθηκε το arrayUnion εδώ
 import { onAuthStateChanged } from "firebase/auth";
@@ -70,8 +76,10 @@ export default function TeamProjectsScreen() {
   const [teamLogo, setTeamLogo] = useState<string | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
+  const groupsRef = useRef<Group[]>([]);
   const userCacheRef = useRef(new Map<string, { fullname: string; email: string }>());
   const syncDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [teamDriveConfig, setTeamDriveConfig] = useState<any>(null);
 
   // --- SEARCH & FILTER STATE ---
   const [searchQuery, setSearchQuery] = useState("");
@@ -96,6 +104,9 @@ export default function TeamProjectsScreen() {
   const [usersModalVisible, setUsersModalVisible] = useState(false);
   const [projectSettingsVisible, setProjectSettingsVisible] = useState(false);
   const [settingsSubMenuVisible, setSettingsSubMenuVisible] = useState(false);
+  const [driveModalVisible, setDriveModalVisible] = useState(false);
+  const [driveConnecting, setDriveConnecting] = useState(false);
+  const { isDriveSyncing, driveSyncProgress, triggerDriveSync } = useDriveSync();
 
   const [selectedProject, setSelectedProject] = useState<{
     groupId: string;
@@ -112,6 +123,11 @@ export default function TeamProjectsScreen() {
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
 
   const CACHE_KEY = `cached_team_${teamId}`;
+
+  // Keep groupsRef in sync with latest state
+  useEffect(() => {
+    groupsRef.current = groups;
+  }, [groups]);
 
   // 1. DATA LOADING (TEAM STRUCTURE)
   useEffect(() => {
@@ -148,6 +164,7 @@ export default function TeamProjectsScreen() {
               setTeamName(data.name);
               setTeamContact(data.contactEmail || "");
               setTeamLogo(data.logo || null);
+              setTeamDriveConfig(data.driveConfig || null);
 
               const initialGroups = data.groups || [];
 
@@ -309,7 +326,9 @@ export default function TeamProjectsScreen() {
         if (hasChanges) {
           if (syncDebounceRef.current) clearTimeout(syncDebounceRef.current);
           syncDebounceRef.current = setTimeout(() => {
-            const groupsForDb = updatedGroups.map((g) => ({
+            // Use ref for latest groups (avoids stale closure after delete/create)
+            const latestGroups = groupsRef.current;
+            const groupsForDb = latestGroups.map((g) => ({
               id: g.id,
               title: g.title,
               projects: g.projects.map((p) => ({
@@ -567,6 +586,12 @@ export default function TeamProjectsScreen() {
         text: "Διαγραφή",
         style: "destructive",
         onPress: async () => {
+          // Cancel any pending debounced sync (prevents stale data overwrite)
+          if (syncDebounceRef.current) {
+            clearTimeout(syncDebounceRef.current);
+            syncDebounceRef.current = null;
+          }
+
           // 1. Αφαίρεση από τη δομή του Group
           const updatedGroups = groups.map((g) =>
             g.id === groupId
@@ -583,7 +608,14 @@ export default function TeamProjectsScreen() {
           // Update Firestore
           await updateTeamData("groups", updatedGroups);
 
-          // 2. Διαγραφή του εγγράφου από τη συλλογή Projects
+          // 2. Διαγραφή media από Firebase Storage
+          try {
+            await deleteProjectMedia(teamId, project.id);
+          } catch (e) {
+            console.error("Storage cleanup failed:", e);
+          }
+
+          // 3. Διαγραφή του εγγράφου από τη συλλογή Projects
           try {
             await deleteDoc(doc(db, "projects", project.id));
           } catch (e) {}
@@ -821,6 +853,12 @@ export default function TeamProjectsScreen() {
             </Text>
           </View>
         </View>
+
+        {isDriveSyncing && (
+          <View style={{ flexDirection: "row", alignItems: "center", marginRight: 8 }}>
+            <ActivityIndicator size="small" color="#4285f4" />
+          </View>
+        )}
 
         {(myRole === "Founder" ||
           myRole === "Admin" ||
@@ -1124,11 +1162,153 @@ export default function TeamProjectsScreen() {
               <Text style={styles.menuText}>Αλλαγή Ονόματος</Text>
             </TouchableOpacity>
 
+            {(myRole === "Founder" || myRole === "Admin") && (
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => {
+                  setSettingsSubMenuVisible(false);
+                  setDriveModalVisible(true);
+                }}
+              >
+                <Ionicons name="cloud-upload-outline" size={20} color="#4285f4" />
+                <Text style={[styles.menuText, { color: "#4285f4" }]}>
+                  Google Drive Sync
+                </Text>
+              </TouchableOpacity>
+            )}
+
             <TouchableOpacity
               style={styles.closeMenuBtn}
               onPress={() => setSettingsSubMenuVisible(false)}
             >
               <Text style={{ color: "blue" }}>Πίσω</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* --- GOOGLE DRIVE MODAL --- */}
+      <Modal visible={driveModalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View
+            style={[styles.modalContent, { paddingBottom: insets.bottom + 20 }]}
+          >
+            <Text style={styles.modalHeader}>Google Drive Sync</Text>
+
+            {(() => {
+              const driveConfig = teamDriveConfig;
+              const connected = !!(driveConfig?.refreshToken && driveConfig?.connectedEmail);
+
+              if (connected) {
+                return (
+                  <View>
+                    <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12 }}>
+                      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: "#22c55e", marginRight: 8 }} />
+                      <Text style={{ fontSize: 14, color: "#16a34a", fontWeight: "600" }}>Συνδεδεμένο</Text>
+                    </View>
+                    <Text style={{ fontSize: 13, color: "#64748b", marginBottom: 4 }}>
+                      Email: {driveConfig.connectedEmail}
+                    </Text>
+                    <Text style={{ fontSize: 13, color: "#64748b", marginBottom: 16 }}>
+                      Συνδέθηκε: {new Date(driveConfig.connectedAt).toLocaleDateString("el-GR")}
+                    </Text>
+
+                    {isDriveSyncing && driveSyncProgress && (
+                      <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12, backgroundColor: "#eff6ff", padding: 10, borderRadius: 8 }}>
+                        <ActivityIndicator size="small" color="#4285f4" />
+                        <Text style={{ marginLeft: 8, fontSize: 12, color: "#3b82f6" }}>
+                          {driveSyncProgress.message} ({driveSyncProgress.current}/{driveSyncProgress.total})
+                        </Text>
+                      </View>
+                    )}
+
+                    <TouchableOpacity
+                      style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", backgroundColor: "#4285f4", padding: 14, borderRadius: 10, marginBottom: 10 }}
+                      onPress={() => triggerDriveSync(teamId)}
+                      disabled={isDriveSyncing}
+                    >
+                      <Ionicons name="sync-outline" size={18} color="white" />
+                      <Text style={{ color: "white", fontWeight: "600", marginLeft: 8 }}>
+                        {isDriveSyncing ? "Συγχρονισμός..." : "Συγχρονισμός Τώρα"}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", padding: 14, borderRadius: 10, borderWidth: 1, borderColor: "#ef4444" }}
+                      onPress={async () => {
+                        Alert.alert(
+                          "Αποσύνδεση Drive",
+                          "Θέλετε να αποσυνδέσετε το Google Drive;",
+                          [
+                            { text: "Άκυρο", style: "cancel" },
+                            {
+                              text: "Αποσύνδεση",
+                              style: "destructive",
+                              onPress: async () => {
+                                try {
+                                  await disconnectGoogleDrive(teamId);
+                                  Alert.alert("Επιτυχία", "Το Google Drive αποσυνδέθηκε.");
+                                  setDriveModalVisible(false);
+                                } catch {
+                                  Alert.alert("Σφάλμα", "Αποτυχία αποσύνδεσης.");
+                                }
+                              },
+                            },
+                          ]
+                        );
+                      }}
+                    >
+                      <Ionicons name="log-out-outline" size={18} color="#ef4444" />
+                      <Text style={{ color: "#ef4444", fontWeight: "600", marginLeft: 8 }}>
+                        Αποσύνδεση Google Drive
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              } else {
+                return (
+                  <View>
+                    <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12 }}>
+                      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: "#94a3b8", marginRight: 8 }} />
+                      <Text style={{ fontSize: 14, color: "#64748b", fontWeight: "600" }}>Μη Συνδεδεμένο</Text>
+                    </View>
+                    <Text style={{ fontSize: 13, color: "#64748b", marginBottom: 20, lineHeight: 20 }}>
+                      Συνδέστε το Google Drive της ομάδας για αυτόματο backup φωτογραφιών, βίντεο και αρχείων.
+                    </Text>
+
+                    <TouchableOpacity
+                      style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", backgroundColor: "#4285f4", padding: 14, borderRadius: 10 }}
+                      onPress={async () => {
+                        setDriveConnecting(true);
+                        const result = await connectGoogleDrive(teamId);
+                        setDriveConnecting(false);
+                        if (result.success) {
+                          Alert.alert("Επιτυχία", "Το Google Drive συνδέθηκε!");
+                        } else {
+                          Alert.alert("Σφάλμα", result.error || "Αποτυχία σύνδεσης.");
+                        }
+                      }}
+                      disabled={driveConnecting}
+                    >
+                      {driveConnecting ? (
+                        <ActivityIndicator size="small" color="white" />
+                      ) : (
+                        <Ionicons name="cloud-upload-outline" size={18} color="white" />
+                      )}
+                      <Text style={{ color: "white", fontWeight: "600", marginLeft: 8 }}>
+                        {driveConnecting ? "Σύνδεση..." : "Σύνδεση Google Drive"}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              }
+            })()}
+
+            <TouchableOpacity
+              style={styles.closeMenuBtn}
+              onPress={() => setDriveModalVisible(false)}
+            >
+              <Text style={{ color: "blue" }}>Κλείσιμο</Text>
             </TouchableOpacity>
           </View>
         </View>

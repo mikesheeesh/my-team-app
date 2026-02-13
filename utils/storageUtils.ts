@@ -11,6 +11,7 @@ import {
   uploadBytes,
   getDownloadURL,
   deleteObject,
+  listAll,
 } from "firebase/storage";
 import * as FileSystem from "expo-file-system/legacy";
 import { Platform } from "react-native";
@@ -281,5 +282,49 @@ export const getStoragePathFromUrl = (downloadUrl: string): string | null => {
     return decodeURIComponent(urlParts.split("?")[0]);
   } catch {
     return null;
+  }
+};
+
+/**
+ * Delete all media files for a project from Firebase Storage
+ * Recursively lists and deletes all files under teams/{teamId}/projects/{projectId}/
+ */
+export const deleteProjectMedia = async (
+  teamId: string,
+  projectId: string
+): Promise<void> => {
+  try {
+    const projectPath = `teams/${teamId}/projects/${projectId}`;
+    const projectRef = ref(storage, projectPath);
+
+    // Recursively delete all files
+    const deleteRecursive = async (folderRef: any): Promise<void> => {
+      const result = await listAll(folderRef);
+
+      // Delete all files in this folder
+      const deletePromises = result.items.map((itemRef) =>
+        deleteObject(itemRef).catch((err) => {
+          if (err.code !== "storage/object-not-found") {
+            console.warn("Failed to delete:", itemRef.fullPath, err);
+          }
+        })
+      );
+
+      // Recurse into subfolders
+      const folderPromises = result.prefixes.map((prefix) =>
+        deleteRecursive(prefix)
+      );
+
+      await Promise.all([...deletePromises, ...folderPromises]);
+    };
+
+    await deleteRecursive(projectRef);
+    console.log(`✓ All media deleted for project: ${projectPath}`);
+  } catch (error: any) {
+    if (error.code === "storage/object-not-found") {
+      console.log("No media files found for project");
+    } else {
+      console.error("Failed to delete project media:", error);
+    }
   }
 };
