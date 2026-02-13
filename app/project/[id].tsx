@@ -672,6 +672,17 @@ export default function ProjectDetailsScreen() {
         text: "Διαγραφή",
         style: "destructive",
         onPress: async () => {
+          // Delete media from Firebase Storage
+          const mediaUrls: string[] = [];
+          if (task.type === "photo" && task.images) {
+            mediaUrls.push(...task.images);
+          } else if (task.type === "video" && task.videos) {
+            mediaUrls.push(...task.videos);
+          }
+          for (const url of mediaUrls) {
+            deleteMediaFromStorage(url).catch(() => {});
+          }
+
           setLocalTasks((prev) => {
             const remaining = prev.filter((t) => t.id !== task.id);
             AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remaining));
