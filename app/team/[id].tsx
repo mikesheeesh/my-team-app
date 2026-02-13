@@ -303,7 +303,7 @@ export default function TeamProjectsScreen() {
             const freshData = freshProjectsMap.get(proj.id);
             if (freshData) {
               const tasks = freshData.tasks || [];
-              let derivedStatus: "active" | "pending" | "completed" = freshData.status || "active";
+              let derivedStatus: "active" | "pending" | "completed" = "active";
               if (tasks.length > 0) {
                 const done = tasks.filter((t: any) => t.status === "completed").length;
                 if (done === tasks.length) derivedStatus = "completed";
