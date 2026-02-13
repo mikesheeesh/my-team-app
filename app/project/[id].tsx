@@ -46,6 +46,9 @@ import {
 // VIDEO COMPRESSION
 import { compressVideo } from "../../utils/videoCompressor";
 
+// EXIF METADATA
+import { embedExifData } from "../../utils/exifUtils";
+
 import ImageEditorModal from "../components/ImageEditorModal";
 import InputModal from "../components/InputModal";
 import { useSync } from "../context/SyncContext";
@@ -883,18 +886,22 @@ export default function ProjectDetailsScreen() {
         throw new Error("Δεν βρέθηκε το task για επεξεργασία");
       }
 
+      // Embed EXIF metadata (GPS + date) into the JPEG
+      const finalUri = await embedExifData(m.uri, tempGpsLoc, new Date());
+      console.log("  - Final URI (with EXIF):", finalUri);
+
       // Check if we're re-editing an existing photo
       if (reEditingIndex !== null && taskForEditing.type === "photo") {
         // REPLACE existing image at index
         console.log("🔄 Replacing image at index:", reEditingIndex);
-        await replaceMediaInTask(taskForEditing.id, reEditingIndex, m.uri);
+        await replaceMediaInTask(taskForEditing.id, reEditingIndex, finalUri);
         console.log("✓ Image replaced successfully");
       } else {
         // ADD new image (original behavior)
         console.log("💾 Saving file:// URI to AsyncStorage...");
         await addMediaToTask(
           taskForEditing.id,
-          m.uri, // Save local file:// URI, NOT Storage URL
+          finalUri, // Save local file:// URI with EXIF, NOT Storage URL
           tempGpsLoc,
         );
         console.log("✓ Image saved successfully (offline-first)");

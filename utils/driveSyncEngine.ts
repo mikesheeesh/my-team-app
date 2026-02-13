@@ -7,7 +7,7 @@
  * 3. Hash-based change detection
  * 4. Create/ensure folder structure
  * 5. Download media from Firebase Storage → upload to Drive
- * 6. Generate PDFs for text/measurement tasks → upload to Drive
+ * 6. Generate Excel for measurement/text tasks → upload to Drive
  * 7. Track sync state in Firestore
  */
 
@@ -19,11 +19,7 @@ import {
   getOrCreateFolder,
   uploadFileResumable,
 } from "./driveApi";
-import {
-  generateMediaMetadataPdf,
-  generateMeasurementsPdf,
-  generateNotesPdf,
-} from "./drivePdfGenerator";
+import { generateProjectExcel } from "./driveExcelGenerator";
 
 // --- Types ---
 
@@ -163,10 +159,9 @@ const ensureFolderStructure = async (
   accessToken: string,
   syncState: SyncState
 ): Promise<{
+  project: string;
   photos: string;
   videos: string;
-  measurements: string;
-  notes: string;
 }> => {
   const getFolderId = async (
     pathKey: string,
@@ -190,18 +185,15 @@ const ensureFolderStructure = async (
   const groupId = await getFolderId(groupKey, groupName, teamId);
   // Level 3: Project
   const projectKey = `${teamName}/${groupName}/${projectName}`;
-  const projectId = await getFolderId(projectKey, projectName, groupId);
-  // Level 4: Type folders
-  const photosId = await getFolderId(`${projectKey}/Φωτογραφίες`, "Φωτογραφίες", projectId);
-  const videosId = await getFolderId(`${projectKey}/Βίντεο`, "Βίντεο", projectId);
-  const measurementsId = await getFolderId(`${projectKey}/Μετρήσεις`, "Μετρήσεις", projectId);
-  const notesId = await getFolderId(`${projectKey}/Κείμενο`, "Κείμενο", projectId);
+  const projectFolderId = await getFolderId(projectKey, projectName, groupId);
+  // Level 4: Media folders only (Excel goes directly in project folder)
+  const photosId = await getFolderId(`${projectKey}/Φωτογραφίες`, "Φωτογραφίες", projectFolderId);
+  const videosId = await getFolderId(`${projectKey}/Βίντεο`, "Βίντεο", projectFolderId);
 
   return {
+    project: projectFolderId,
     photos: photosId,
     videos: videosId,
-    measurements: measurementsId,
-    notes: notesId,
   };
 };
 
@@ -263,41 +255,33 @@ const downloadAndUploadMedia = async (
   }
 };
 
-const uploadPdfToDrive = async (
-  pdfUri: string,
+const uploadExcelToDrive = async (
+  blob: Blob,
   filename: string,
   driveFolderId: string,
   accessToken: string,
   syncState: SyncState,
   projectId: string,
-  pdfKey: string,
   contentHash: string
 ): Promise<void> => {
   try {
-    // Check if PDF content has changed
-    const existing = syncState.projects[projectId]?.syncedPdfs?.[pdfKey];
+    // Check if content has changed
+    const existing = syncState.projects[projectId]?.syncedPdfs?.["excel"];
     if (existing && existing.contentHash === contentHash) {
       return; // No changes
     }
-
-    // Read the PDF file
-    const response = await fetch(pdfUri);
-    const blob = await response.blob();
 
     // Upload (update existing or create new)
     const driveFileId = await uploadFileResumable(
       filename,
       blob,
-      "application/pdf",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       driveFolderId,
       accessToken,
       existing?.driveFileId
     );
 
-    // Clean up temp PDF
-    await FileSystem.deleteAsync(pdfUri, { idempotent: true });
-
-    // Track
+    // Track (reuse syncedPdfs map with key "excel")
     if (!syncState.projects[projectId]) {
       syncState.projects[projectId] = {
         lastSyncedTasksHash: "",
@@ -305,15 +289,13 @@ const uploadPdfToDrive = async (
         syncedPdfs: {},
       };
     }
-    syncState.projects[projectId].syncedPdfs[pdfKey] = {
+    syncState.projects[projectId].syncedPdfs["excel"] = {
       driveFileId,
       contentHash,
       syncedAt: Date.now(),
     };
   } catch (error) {
-    console.error(`Failed to upload PDF ${filename}:`, error);
-    // Clean up temp file on error too
-    try { await FileSystem.deleteAsync(pdfUri, { idempotent: true }); } catch {}
+    console.error(`Failed to upload Excel ${filename}:`, error);
   }
 };
 
@@ -388,17 +370,15 @@ export const syncProjectToDrive = async (
     // Count total items for progress
     const photoTasks = tasks.filter((t): t is PhotoTask => t.type === "photo" && (t as PhotoTask).images?.length > 0);
     const videoTasks = tasks.filter((t): t is VideoTask => t.type === "video" && (t as VideoTask).videos?.length > 0);
-    const measurementTasks = tasks.filter((t): t is MeasurementTask => t.type === "measurement" && t.status === "completed");
-    const generalTasks = tasks.filter((t): t is GeneralTask => t.type === "general" && t.status === "completed");
+    const measurementTasks = tasks.filter((t): t is MeasurementTask => t.type === "measurement");
+    const generalTasks = tasks.filter((t): t is GeneralTask => t.type === "general");
 
     let totalMedia = 0;
     photoTasks.forEach((t) => (totalMedia += t.images.length));
     videoTasks.forEach((t) => (totalMedia += t.videos.length));
-    const totalPdfs = (photoTasks.length > 0 ? photoTasks.length : 0) +
-      (videoTasks.length > 0 ? videoTasks.length : 0) +
-      (measurementTasks.length > 0 ? 1 : 0) +
-      (generalTasks.length > 0 ? 1 : 0);
-    const totalItems = totalMedia + totalPdfs;
+    // +1 for the Excel file (if there are measurement or general tasks)
+    const hasExcelData = measurementTasks.length > 0 || generalTasks.length > 0;
+    const totalItems = totalMedia + (hasExcelData ? 1 : 0);
     let currentItem = 0;
 
     // 6. Sync photo tasks
@@ -412,7 +392,7 @@ export const syncProjectToDrive = async (
       );
       syncState.folderIds[taskFolderKey] = taskFolderId;
 
-      // Upload each photo
+      // Upload each photo (EXIF metadata is already embedded in the JPEG)
       for (let i = 0; i < task.images.length; i++) {
         if (abortRef?.current) return false;
         const imgUrl = task.images[i];
@@ -431,28 +411,6 @@ export const syncProjectToDrive = async (
           imgUrl, mediaKey, filename, "image/jpeg", taskFolderId, accessToken, syncState, projectId
         );
       }
-
-      // Generate Στοιχεία.pdf for this photo task
-      const metadataItems = task.images.map((img, i) => ({
-        filename: `photo_${i + 1}.jpg`,
-        description: task.description,
-        location: task.imageLocations?.[i],
-        date: task.completedAt ? new Date(task.completedAt).toLocaleDateString("el-GR") : undefined,
-      }));
-
-      const contentHash = computeContentHash(metadataItems);
-      const pdfUri = await generateMediaMetadataPdf(task.title, "photo", metadataItems);
-      currentItem++;
-      onProgress?.({
-        current: currentItem,
-        total: totalItems,
-        message: `PDF: ${task.title}...`,
-      });
-
-      await uploadPdfToDrive(
-        pdfUri, "Στοιχεία.pdf", taskFolderId, accessToken, syncState, projectId,
-        `photos/${task.id}/metadata`, contentHash
-      );
     }
 
     // 7. Sync video tasks
@@ -485,79 +443,53 @@ export const syncProjectToDrive = async (
           videoUrl, mediaKey, filename, "video/mp4", taskFolderId, accessToken, syncState, projectId
         );
       }
-
-      // Generate Στοιχεία.pdf for this video task
-      const metadataItems = task.videos.map((vid, i) => ({
-        filename: `video_${i + 1}.mp4`,
-        description: task.description,
-        location: task.videoLocations?.[i],
-        date: task.completedAt ? new Date(task.completedAt).toLocaleDateString("el-GR") : undefined,
-      }));
-
-      const contentHash = computeContentHash(metadataItems);
-      const pdfUri = await generateMediaMetadataPdf(task.title, "video", metadataItems);
-      currentItem++;
-      onProgress?.({
-        current: currentItem,
-        total: totalItems,
-        message: `PDF: ${task.title}...`,
-      });
-
-      await uploadPdfToDrive(
-        pdfUri, "Στοιχεία.pdf", taskFolderId, accessToken, syncState, projectId,
-        `videos/${task.id}/metadata`, contentHash
-      );
     }
 
-    // 8. Sync measurements PDF
-    if (measurementTasks.length > 0) {
+    // 8. Generate and upload Excel (Μετρήσεις + Κείμενο sheets)
+    if (hasExcelData) {
       if (abortRef?.current) return false;
       currentItem++;
       onProgress?.({
         current: currentItem,
         total: totalItems,
-        message: "PDF: Μετρήσεις...",
+        message: "Excel: Μετρήσεις & Κείμενο...",
       });
 
-      const tasksData = measurementTasks.map((t) => ({
-        title: t.title,
-        description: t.description,
-        value: t.value,
-        completedAt: t.completedAt,
-      }));
-      const contentHash = computeContentHash(tasksData);
-      const pdfUri = await generateMeasurementsPdf(projectName, tasksData);
-      await uploadPdfToDrive(
-        pdfUri, "μετρήσεις.pdf", folders.measurements, accessToken, syncState, projectId,
-        "measurements", contentHash
+      const excelBlob = generateProjectExcel(
+        projectName,
+        measurementTasks.map((t) => ({
+          title: t.title,
+          description: t.description,
+          value: t.value,
+          completedAt: t.completedAt,
+          status: t.status,
+        })),
+        generalTasks.map((t) => ({
+          title: t.title,
+          description: t.description,
+          value: t.value,
+          completedAt: t.completedAt,
+          status: t.status,
+        }))
+      );
+
+      const contentHash = computeContentHash({
+        measurements: measurementTasks.map((t) => ({ title: t.title, value: t.value, status: t.status, completedAt: t.completedAt })),
+        general: generalTasks.map((t) => ({ title: t.title, value: t.value, status: t.status, completedAt: t.completedAt })),
+      });
+
+      await uploadExcelToDrive(
+        excelBlob,
+        `${projectName}.xlsx`,
+        folders.project,
+        accessToken,
+        syncState,
+        projectId,
+        contentHash
       );
     }
 
-    // 9. Sync notes PDF
-    if (generalTasks.length > 0) {
-      if (abortRef?.current) return false;
-      currentItem++;
-      onProgress?.({
-        current: currentItem,
-        total: totalItems,
-        message: "PDF: Σημειώσεις...",
-      });
-
-      const tasksData = generalTasks.map((t) => ({
-        title: t.title,
-        description: t.description,
-        value: t.value,
-        completedAt: t.completedAt,
-      }));
-      const contentHash = computeContentHash(tasksData);
-      const pdfUri = await generateNotesPdf(projectName, tasksData);
-      await uploadPdfToDrive(
-        pdfUri, "σημειώσεις.pdf", folders.notes, accessToken, syncState, projectId,
-        "notes", contentHash
-      );
-    }
-
-    // 10. Update sync state
+    // 9. Update sync state
     syncState.projects[projectId].lastSyncedTasksHash = currentHash;
     syncState.lastSyncTimestamp = Date.now();
     await saveSyncState(teamId, syncState);
