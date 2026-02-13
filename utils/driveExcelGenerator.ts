@@ -3,6 +3,7 @@
  * Generates a single .xlsx file per project with Μετρήσεις + Κείμενο sheets
  */
 
+import * as FileSystem from "expo-file-system/legacy";
 import * as XLSX from "xlsx";
 
 interface TaskData {
@@ -22,13 +23,13 @@ const formatDate = (timestamp?: number): string => {
 
 /**
  * Generate an Excel file with Μετρήσεις and Κείμενο sheets
- * Returns a Blob ready for Drive upload
+ * Writes to temp file and returns { uri, blob } for Drive upload
  */
-export const generateProjectExcel = (
+export const generateProjectExcel = async (
   projectName: string,
   measurementTasks: TaskData[],
   generalTasks: TaskData[]
-): Blob => {
+): Promise<{ uri: string; blob: Blob }> => {
   const wb = XLSX.utils.book_new();
 
   // Sheet 1: Μετρήσεις
@@ -89,9 +90,16 @@ export const generateProjectExcel = (
   ];
   XLSX.utils.book_append_sheet(wb, wsG, "Κείμενο");
 
-  // Write to binary
-  const wbOut = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-  return new Blob([wbOut], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  // Write to base64 and save to temp file (React Native Blob from ArrayBuffer is unreliable)
+  const wbBase64 = XLSX.write(wb, { bookType: "xlsx", type: "base64" });
+  const tempPath = FileSystem.cacheDirectory + `excel_${Date.now()}.xlsx`;
+  await FileSystem.writeAsStringAsync(tempPath, wbBase64, {
+    encoding: FileSystem.EncodingType.Base64,
   });
+
+  // Read back as blob via fetch (proven pattern in React Native)
+  const response = await fetch(tempPath);
+  const blob = await response.blob();
+
+  return { uri: tempPath, blob };
 };

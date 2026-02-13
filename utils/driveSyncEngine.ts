@@ -455,7 +455,7 @@ export const syncProjectToDrive = async (
         message: "Excel: Μετρήσεις & Κείμενο...",
       });
 
-      const excelBlob = generateProjectExcel(
+      const excel = await generateProjectExcel(
         projectName,
         measurementTasks.map((t) => ({
           title: t.title,
@@ -479,7 +479,7 @@ export const syncProjectToDrive = async (
       });
 
       await uploadExcelToDrive(
-        excelBlob,
+        excel.blob,
         `${projectName}.xlsx`,
         folders.project,
         accessToken,
@@ -487,6 +487,9 @@ export const syncProjectToDrive = async (
         projectId,
         contentHash
       );
+
+      // Clean up temp Excel file
+      await FileSystem.deleteAsync(excel.uri, { idempotent: true });
     }
 
     // 9. Update sync state

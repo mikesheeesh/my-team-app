@@ -4,7 +4,8 @@
  */
 
 import * as FileSystem from "expo-file-system/legacy";
-import piexif from "piexifjs";
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const piexif = require("piexifjs");
 
 type GeoPoint = { lat: number; lng: number };
 
@@ -43,6 +44,8 @@ export const embedExifData = async (
   date?: Date
 ): Promise<string> => {
   try {
+    console.log("EXIF: embedExifData called", { hasLocation: !!location, hasDate: !!date, fileUri });
+
     // Skip if no metadata to embed
     if (!location && !date) return fileUri;
 
@@ -52,10 +55,17 @@ export const embedExifData = async (
       if (!date) return fileUri;
     }
 
+    // Verify piexifjs loaded
+    if (!piexif || !piexif.dump || !piexif.insert) {
+      console.error("EXIF: piexifjs not loaded properly:", typeof piexif);
+      return fileUri;
+    }
+
     // Read JPEG as base64
     const base64 = await FileSystem.readAsStringAsync(fileUri, {
       encoding: FileSystem.EncodingType.Base64,
     });
+    console.log("EXIF: Read base64, length:", base64.length);
 
     const dataUri = `data:image/jpeg;base64,${base64}`;
 
@@ -94,8 +104,8 @@ export const embedExifData = async (
 
     console.log("✓ EXIF embedded:", location ? `GPS ${location.lat},${location.lng}` : "no GPS", date ? `Date ${formatExifDate(date)}` : "");
     return tempPath;
-  } catch (error) {
-    console.warn("EXIF embedding failed (non-fatal):", error);
+  } catch (error: any) {
+    console.error("EXIF embedding failed:", error?.message || error, error?.stack);
     return fileUri; // Return original on error
   }
 };
