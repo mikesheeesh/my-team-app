@@ -48,6 +48,7 @@ import { compressVideo } from "../../utils/videoCompressor";
 
 // EXIF METADATA
 import { embedExifData } from "../../utils/exifUtils";
+import { embedVideoGps } from "../../utils/mp4GpsUtils";
 
 import ImageEditorModal from "../components/ImageEditorModal";
 import InputModal from "../components/InputModal";
@@ -750,12 +751,14 @@ export default function ProjectDetailsScreen() {
             const gpsResult = await gpsPromise;
             const gpsLoc = gpsResult ? { lat: gpsResult.coords.latitude, lng: gpsResult.coords.longitude } : undefined;
 
-            // OFFLINE-FIRST: Save COMPRESSED file:// URI to AsyncStorage
-            // SyncContext will upload to Storage when online
-            console.log("💾 Saving compressed video to AsyncStorage...");
+            // Embed GPS coordinates into the MP4 file
+            const finalVideoUri = await embedVideoGps(compressedUri, gpsLoc);
+
+            // OFFLINE-FIRST: Save file with GPS to AsyncStorage
+            console.log("💾 Saving video to AsyncStorage...");
             await addMediaToTask(
               task.id,
-              compressedUri, // Save COMPRESSED local file:// URI
+              finalVideoUri,
               gpsLoc
             );
 
@@ -820,7 +823,8 @@ export default function ProjectDetailsScreen() {
             const gpsResult = await gpsPromise;
             const gpsLoc = gpsResult ? { lat: gpsResult.coords.latitude, lng: gpsResult.coords.longitude } : undefined;
 
-            await addMediaToTask(task.id, compressedUri, gpsLoc);
+            const finalVideoUri = await embedVideoGps(compressedUri, gpsLoc);
+            await addMediaToTask(task.id, finalVideoUri, gpsLoc);
           } catch (e: any) {
             Alert.alert("Σφάλμα", e.message || "Απέτυχε η συμπίεση του βίντεο.");
           } finally {

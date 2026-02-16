@@ -131,6 +131,41 @@ const computeContentHash = (data: any): string => {
   return hash.toString(36);
 };
 
+// --- URL Normalization ---
+
+/**
+ * Normalize Firebase Storage URL by stripping the token query parameter.
+ * Tokens can change between syncs, causing false mismatches.
+ */
+const normalizeStorageUrl = (url: string): string => {
+  try {
+    const questionMark = url.indexOf("?");
+    if (questionMark === -1) return url;
+    const base = url.substring(0, questionMark);
+    const params = url.substring(questionMark + 1).split("&")
+      .filter((p) => !p.startsWith("token="))
+      .join("&");
+    return params ? `${base}?${params}` : base;
+  } catch {
+    return url;
+  }
+};
+
+/**
+ * Extract the storage path from a Firebase Storage URL for use as a stable media key.
+ * e.g. "https://firebasestorage.../o/teams%2Fxyz%2Fphoto.jpg?..." → "teams/xyz/photo.jpg"
+ */
+const extractStoragePath = (url: string, fallbackKey: string): string => {
+  try {
+    const pathPart = url.split("/o/")[1];
+    if (!pathPart) return fallbackKey;
+    const encodedPath = pathPart.split("?")[0];
+    return decodeURIComponent(encodedPath);
+  } catch {
+    return fallbackKey;
+  }
+};
+
 // --- Sync State Management ---
 
 const getSyncState = async (teamId: string): Promise<SyncState> => {
@@ -209,10 +244,10 @@ const downloadAndUploadMedia = async (
   syncState: SyncState,
   projectId: string
 ): Promise<string | null> => {
-  // Check if already synced with same URL (no changes)
+  // Check if already synced with same URL (normalize to ignore token changes)
   const projectSync = syncState.projects[projectId];
   const existing = projectSync?.syncedMedia?.[mediaKey];
-  if (existing && existing.sourceUrl === storageUrl) {
+  if (existing && normalizeStorageUrl(existing.sourceUrl) === normalizeStorageUrl(storageUrl)) {
     return existing.driveFileId;
   }
 
@@ -244,7 +279,7 @@ const downloadAndUploadMedia = async (
     }
     syncState.projects[projectId].syncedMedia[mediaKey] = {
       driveFileId,
-      sourceUrl: storageUrl,
+      sourceUrl: normalizeStorageUrl(storageUrl),
       syncedAt: Date.now(),
     };
 
@@ -406,7 +441,7 @@ export const syncProjectToDrive = async (
         });
 
         const filename = `photo_${i + 1}.jpg`;
-        const mediaKey = `${task.id}/photo_${i + 1}`;
+        const mediaKey = extractStoragePath(imgUrl, `${task.id}/photo_${i + 1}`);
         await downloadAndUploadMedia(
           imgUrl, mediaKey, filename, "image/jpeg", taskFolderId, accessToken, syncState, projectId
         );
@@ -438,7 +473,7 @@ export const syncProjectToDrive = async (
         });
 
         const filename = `video_${i + 1}.mp4`;
-        const mediaKey = `${task.id}/video_${i + 1}`;
+        const mediaKey = extractStoragePath(videoUrl, `${task.id}/video_${i + 1}`);
         await downloadAndUploadMedia(
           videoUrl, mediaKey, filename, "video/mp4", taskFolderId, accessToken, syncState, projectId
         );
