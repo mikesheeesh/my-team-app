@@ -93,44 +93,6 @@ interface SyncProgress {
   message: string;
 }
 
-// --- Hash ---
-
-const computeTasksHash = (tasks: Task[]): string => {
-  const normalized = tasks.map((t) => ({
-    id: t.id,
-    type: t.type,
-    title: t.title,
-    description: t.description,
-    status: t.status,
-    ...(t.type === "photo"
-      ? { images: (t as PhotoTask).images, imageLocations: (t as PhotoTask).imageLocations }
-      : {}),
-    ...(t.type === "video"
-      ? { videos: (t as VideoTask).videos, videoLocations: (t as VideoTask).videoLocations }
-      : {}),
-    ...(t.type === "measurement" || t.type === "general"
-      ? { value: (t as MeasurementTask | GeneralTask).value }
-      : {}),
-  }));
-  const json = JSON.stringify(normalized);
-  let hash = 0;
-  for (let i = 0; i < json.length; i++) {
-    hash = (hash << 5) - hash + json.charCodeAt(i);
-    hash |= 0;
-  }
-  return hash.toString(36);
-};
-
-const computeContentHash = (data: any): string => {
-  const json = JSON.stringify(data);
-  let hash = 0;
-  for (let i = 0; i < json.length; i++) {
-    hash = (hash << 5) - hash + json.charCodeAt(i);
-    hash |= 0;
-  }
-  return hash.toString(36);
-};
-
 // --- URL Normalization ---
 
 /**
@@ -164,6 +126,44 @@ const extractStoragePath = (url: string, fallbackKey: string): string => {
   } catch {
     return fallbackKey;
   }
+};
+
+// --- Hash ---
+
+const computeTasksHash = (tasks: Task[]): string => {
+  const normalized = tasks.map((t) => ({
+    id: t.id,
+    type: t.type,
+    title: t.title,
+    description: t.description,
+    status: t.status,
+    ...(t.type === "photo"
+      ? { images: (t as PhotoTask).images.map(normalizeStorageUrl), imageLocations: (t as PhotoTask).imageLocations }
+      : {}),
+    ...(t.type === "video"
+      ? { videos: (t as VideoTask).videos.map(normalizeStorageUrl), videoLocations: (t as VideoTask).videoLocations }
+      : {}),
+    ...(t.type === "measurement" || t.type === "general"
+      ? { value: (t as MeasurementTask | GeneralTask).value }
+      : {}),
+  }));
+  const json = JSON.stringify(normalized);
+  let hash = 0;
+  for (let i = 0; i < json.length; i++) {
+    hash = (hash << 5) - hash + json.charCodeAt(i);
+    hash |= 0;
+  }
+  return hash.toString(36);
+};
+
+const computeContentHash = (data: any): string => {
+  const json = JSON.stringify(data);
+  let hash = 0;
+  for (let i = 0; i < json.length; i++) {
+    hash = (hash << 5) - hash + json.charCodeAt(i);
+    hash |= 0;
+  }
+  return hash.toString(36);
 };
 
 // --- Sync State Management ---
