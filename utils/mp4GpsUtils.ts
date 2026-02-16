@@ -131,6 +131,71 @@ const uint8ArrayToBase64 = (bytes: Uint8Array): string => {
 };
 
 /**
+ * Find all boxes of a given type recursively within a byte range.
+ * Used to find stco/co64 atoms nested inside trak/mdia/minf/stbl.
+ */
+const findAllBoxes = (
+  data: Uint8Array,
+  type: string,
+  start: number,
+  end: number
+): { offset: number; size: number }[] => {
+  const results: { offset: number; size: number }[] = [];
+  let pos = start;
+  while (pos + 8 <= end) {
+    const size = readUint32BE(data, pos);
+    if (size < 8) break;
+    const boxType = readType(data, pos + 4);
+    if (boxType === type) {
+      results.push({ offset: pos, size });
+    }
+    // Recurse into container boxes
+    if (["moov", "trak", "mdia", "minf", "stbl", "udta", "edts"].includes(boxType)) {
+      const children = findAllBoxes(data, type, pos + 8, pos + size);
+      results.push(...children);
+    }
+    pos += size;
+  }
+  return results;
+};
+
+/**
+ * Update stco (32-bit chunk offsets) by adding delta to all offsets
+ * that point to data AFTER the insertion point.
+ */
+const patchStco = (data: Uint8Array, stco: { offset: number; size: number }, delta: number, insertOffset: number): void => {
+  // stco format: [size][type][version(1)+flags(3)][entry_count(4)][offsets(4 each)]
+  const entryCount = readUint32BE(data, stco.offset + 12);
+  for (let i = 0; i < entryCount; i++) {
+    const offsetPos = stco.offset + 16 + i * 4;
+    const chunkOffset = readUint32BE(data, offsetPos);
+    if (chunkOffset >= insertOffset) {
+      writeUint32BE(data, offsetPos, chunkOffset + delta);
+    }
+  }
+};
+
+/**
+ * Update co64 (64-bit chunk offsets) by adding delta.
+ * We only handle the lower 32 bits since our files are small (<4GB).
+ */
+const patchCo64 = (data: Uint8Array, co64: { offset: number; size: number }, delta: number, insertOffset: number): void => {
+  const entryCount = readUint32BE(data, co64.offset + 12);
+  for (let i = 0; i < entryCount; i++) {
+    const offsetPos = co64.offset + 16 + i * 8;
+    // Read as two 32-bit values (hi + lo)
+    const hi = readUint32BE(data, offsetPos);
+    const lo = readUint32BE(data, offsetPos + 4);
+    const chunkOffset = hi * 0x100000000 + lo;
+    if (chunkOffset >= insertOffset) {
+      const newOffset = chunkOffset + delta;
+      writeUint32BE(data, offsetPos, Math.floor(newOffset / 0x100000000));
+      writeUint32BE(data, offsetPos + 4, newOffset >>> 0);
+    }
+  }
+};
+
+/**
  * Embed GPS coordinates into an MP4 file.
  * Returns the URI of the modified file, or the original URI on error.
  */
@@ -160,12 +225,9 @@ export const embedVideoGps = async (
       return fileUri;
     }
 
-    // Safety check: if moov is before mdat, inserting bytes would corrupt chunk offsets
     const mdat = findBox(data, "mdat", 0, data.length);
-    if (mdat && moov.offset < mdat.offset) {
-      console.warn("MP4 GPS: moov before mdat layout, skipping to avoid corruption");
-      return fileUri;
-    }
+    const moovBeforeMdat = mdat && moov.offset < mdat.offset;
+    console.log("MP4 GPS: moov at", moov.offset, "mdat at", mdat?.offset, moovBeforeMdat ? "(moov-first)" : "(moov-last)");
 
     // Build the ©xyz atom
     const gpsString = formatIso6709(location);
@@ -180,12 +242,10 @@ export const embedVideoGps = async (
     let insertOffset: number;
 
     if (existingUdta) {
-      // Append ©xyz atom at end of existing udta
       console.log("MP4 GPS: Found existing udta, appending ©xyz");
       insertBytes = xyzAtom;
       insertOffset = existingUdta.offset + existingUdta.size;
     } else {
-      // Create new udta box with ©xyz, append at end of moov
       console.log("MP4 GPS: No udta found, creating new");
       insertBytes = buildUdtaBox(xyzAtom);
       insertOffset = moovDataEnd;
@@ -203,6 +263,25 @@ export const embedVideoGps = async (
     // Update udta box size if it existed
     if (existingUdta) {
       writeUint32BE(newData, existingUdta.offset, existingUdta.size + xyzAtom.length);
+    }
+
+    // If moov is before mdat, inserting bytes shifts mdat position.
+    // Patch stco/co64 chunk offsets to account for the shift.
+    if (moovBeforeMdat) {
+      console.log("MP4 GPS: Patching stco/co64 offsets (moov-first layout)");
+      const delta = insertBytes.length;
+
+      // Find and patch all stco atoms (32-bit chunk offsets)
+      const stcoBoxes = findAllBoxes(newData, "stco", moov.offset + 8, moov.offset + moov.size + delta);
+      for (const stco of stcoBoxes) {
+        patchStco(newData, stco, delta, insertOffset);
+      }
+
+      // Find and patch all co64 atoms (64-bit chunk offsets)
+      const co64Boxes = findAllBoxes(newData, "co64", moov.offset + 8, moov.offset + moov.size + delta);
+      for (const co64 of co64Boxes) {
+        patchCo64(newData, co64, delta, insertOffset);
+      }
     }
 
     // Write to temp file

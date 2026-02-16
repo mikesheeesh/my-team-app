@@ -248,8 +248,10 @@ const downloadAndUploadMedia = async (
   const projectSync = syncState.projects[projectId];
   const existing = projectSync?.syncedMedia?.[mediaKey];
   if (existing && normalizeStorageUrl(existing.sourceUrl) === normalizeStorageUrl(storageUrl)) {
+    console.log(`Drive sync: SKIP ${filename} (already synced, key=${mediaKey})`);
     return existing.driveFileId;
   }
+  console.log(`Drive sync: UPLOAD ${filename} (key=${mediaKey}, hasExisting=${!!existing})`);
 
   try {
     // Download from Firebase Storage to local temp
@@ -379,10 +381,12 @@ export const syncProjectToDrive = async (
     const syncState = await getSyncState(teamId);
     const currentHash = computeTasksHash(tasks);
     const prevHash = syncState.projects[projectId]?.lastSyncedTasksHash;
+    console.log(`Drive sync: hash check for ${projectName}: current=${currentHash} prev=${prevHash} match=${currentHash === prevHash}`);
     if (currentHash === prevHash) {
-      console.log(`Drive sync: No changes for project ${projectName}`);
+      console.log(`Drive sync: No changes for project ${projectName}, skipping`);
       return true;
     }
+    console.log(`Drive sync: Changes detected for ${projectName}, syncing...`);
 
     onProgress?.({ current: 0, total: 1, message: "Δημιουργία φακέλων..." });
 

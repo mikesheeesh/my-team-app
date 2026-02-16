@@ -70,6 +70,7 @@ export const DriveSyncProvider = ({
     new Map()
   );
   const connectedTeamsRef = useRef<Map<string, any>>(new Map());
+  const initialSnapshotRef = useRef<Set<string>>(new Set());
 
   // Check WiFi
   const isWiFiConnected = async (): Promise<boolean> => {
@@ -208,8 +209,20 @@ export const DriveSyncProvider = ({
           const unsubProjectListener = onSnapshot(
             projectsQuery,
             (projectSnap) => {
-              // Any project change triggers debounced sync
-              if (projectSnap.docChanges().length > 0) {
+              // Skip initial snapshot load (all docs come as "added" on first listen)
+              const snapshotKey = `projects_${teamId}`;
+              if (!initialSnapshotRef.current.has(snapshotKey)) {
+                initialSnapshotRef.current.add(snapshotKey);
+                console.log("Drive auto-sync: Skipping initial snapshot for", teamId);
+                return;
+              }
+
+              // Only sync on actual modifications (not initial load)
+              const hasRealChanges = projectSnap.docChanges().some(
+                (change) => change.type === "modified" || change.type === "removed"
+              );
+              if (hasRealChanges) {
+                console.log("Drive auto-sync: Project changes detected for", teamId);
                 scheduleSync(teamId);
               }
             }
