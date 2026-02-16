@@ -1285,7 +1285,7 @@ export default function ProjectDetailsScreen() {
 
           let thumbnailsHTML = displayImages
             .filter(img => img.startsWith("https://")) // Only show remote URLs in PDF
-            .map(img => `<img src="${img}" class="thumbnail" onerror="this.style.display='none'" />`)
+            .map(img => `<a href="${img}" target="_blank"><img src="${img}" class="thumbnail" onerror="this.style.display='none'" /></a>`)
             .join("");
 
           if (remainingCount > 0) {
