@@ -1279,14 +1279,13 @@ export default function ProjectDetailsScreen() {
         let mediaHTML = "";
 
         if (task.type === "photo" && task.images.length > 0) {
-          // GPS links for photos
+          // GPS links for photos (all photos, no limit)
           const gpsLinks = task.imageLocations
             .map((loc, i) => {
               const url = generateGpsLink(loc);
               return url ? `<a href="${url}" class="gps-link" target="_blank">📍 Φωτο ${i + 1}</a>` : null;
             })
             .filter(Boolean)
-            .slice(0, 4)
             .join(" ");
 
           mediaHTML = `
@@ -1349,9 +1348,13 @@ export default function ProjectDetailsScreen() {
       if (photoTasksForAppendix.length > 0) {
         let photoGroupsHTML = "";
         photoTasksForAppendix.forEach((task) => {
+          let photoIndex = 0;
           const imagesHTML = task.images
             .filter((img: string) => img.startsWith("https://"))
-            .map((img: string) => `<div class="photo-wrapper"><img src="${img}" class="photo-full" onerror="this.parentElement.style.display='none'" /></div>`)
+            .map((img: string) => {
+              photoIndex++;
+              return `<div class="photo-wrapper"><div class="photo-number">Φωτογραφία ${photoIndex}</div><img src="${img}" class="photo-full" onerror="this.parentElement.style.display='none'" /></div>`;
+            })
             .join("");
           if (imagesHTML) {
             photoGroupsHTML += `
@@ -1579,25 +1582,27 @@ export default function ProjectDetailsScreen() {
                     text-align: center;
                 }
                 .photo-grid {
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
                 }
                 .photo-wrapper {
                     page-break-inside: avoid;
                     break-inside: avoid;
-                    page-break-before: auto;
-                    margin-bottom: 16px;
+                    margin-bottom: 20px;
                     text-align: center;
-                    width: 100%;
+                }
+                .photo-number {
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: #64748b;
+                    margin-bottom: 6px;
                 }
                 .photo-full {
+                    display: block;
+                    margin: 0 auto;
                     max-width: 100%;
                     max-height: 700px;
                     height: auto;
                     border-radius: 8px;
                     border: 1px solid #e2e8f0;
-                    object-fit: contain;
                 }
 
                 .gps-row {
