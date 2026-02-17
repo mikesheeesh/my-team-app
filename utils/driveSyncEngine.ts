@@ -17,6 +17,7 @@ import { db } from "../firebaseConfig";
 import { getValidAccessToken } from "./driveAuth";
 import {
   getOrCreateFolder,
+  shareFolderWithEmail,
   uploadFileResumable,
 } from "./driveApi";
 import { generateProjectExcel } from "./driveExcelGenerator";
@@ -85,6 +86,7 @@ interface SyncState {
     };
   };
   folderIds: { [path: string]: string };
+  sharedWith?: string[];
 }
 
 interface SyncProgress {
@@ -394,6 +396,34 @@ export const syncProjectToDrive = async (
     const folders = await ensureFolderStructure(
       teamName, groupName, projectName, accessToken, syncState
     );
+
+    // 5b. Auto-share team folder with all team members
+    const teamFolderId = syncState.folderIds[teamName];
+    if (teamFolderId && teamData.memberIds?.length > 0) {
+      const sharedWith: string[] = syncState.sharedWith || [];
+      const newMembers = (teamData.memberIds as string[]).filter(
+        (uid: string) => !sharedWith.includes(uid)
+      );
+      if (newMembers.length > 0) {
+        for (const uid of newMembers) {
+          try {
+            const userDoc = await getDoc(doc(db, "users", uid));
+            const email = userDoc.data()?.email;
+            if (email) {
+              const ok = await shareFolderWithEmail(teamFolderId, email, "writer", accessToken);
+              if (ok) {
+                sharedWith.push(uid);
+                console.log(`Drive: shared with ${email}`);
+              }
+            }
+          } catch (e) {
+            console.log(`Drive: share error for uid ${uid}:`, e);
+          }
+        }
+        syncState.sharedWith = sharedWith;
+        await saveSyncState(teamId, syncState);
+      }
+    }
 
     if (abortRef?.current) return false;
 

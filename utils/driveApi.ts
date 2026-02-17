@@ -233,6 +233,43 @@ export const findFile = async (
 };
 
 /**
+ * Share a file/folder with a user by email
+ * Uses sendNotificationEmail=false to avoid spamming team members
+ */
+export const shareFolderWithEmail = async (
+  folderId: string,
+  email: string,
+  role: "reader" | "writer",
+  accessToken: string
+): Promise<boolean> => {
+  try {
+    const response = await fetch(
+      `${DRIVE_API}/files/${folderId}/permissions?sendNotificationEmail=false`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          type: "user",
+          emailAddress: email,
+          role,
+        }),
+      }
+    );
+    // 400 = invalid email, 404 = file not found - skip silently
+    if (!response.ok && response.status !== 400 && response.status !== 404) {
+      console.log(`Drive share error for ${email}: ${response.status}`);
+    }
+    return response.ok;
+  } catch (e) {
+    console.log(`Drive share failed for ${email}:`, e);
+    return false;
+  }
+};
+
+/**
  * Delete a file from Google Drive
  */
 export const deleteFile = async (
