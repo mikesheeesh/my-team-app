@@ -9,6 +9,7 @@ import {
   Alert,
   FlatList,
   Image,
+  Linking,
   Modal,
   SafeAreaView,
   ScrollView,
@@ -1230,6 +1231,33 @@ export default function TeamProjectsScreen() {
                       <Ionicons name="sync-outline" size={18} color="white" />
                       <Text style={{ color: "white", fontWeight: "600", marginLeft: 8 }}>
                         {isDriveSyncing ? "Συγχρονισμός..." : "Συγχρονισμός Τώρα"}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", backgroundColor: "#34a853", padding: 14, borderRadius: 10, marginBottom: 10 }}
+                      onPress={async () => {
+                        try {
+                          const syncDoc = await getDoc(doc(db, "driveSyncState", teamId));
+                          const folderIds = syncDoc.data()?.folderIds;
+                          if (!folderIds) {
+                            Alert.alert("Σφάλμα", "Δεν έχει γίνει ακόμα συγχρονισμός. Κάντε πρώτα συγχρονισμό.");
+                            return;
+                          }
+                          const folderId = folderIds[teamName] || folderIds["root"];
+                          if (!folderId) {
+                            Alert.alert("Σφάλμα", "Δεν βρέθηκε φάκελος Drive. Κάντε πρώτα συγχρονισμό.");
+                            return;
+                          }
+                          await Linking.openURL(`https://drive.google.com/drive/folders/${folderId}`);
+                        } catch {
+                          Alert.alert("Σφάλμα", "Αποτυχία ανοίγματος Google Drive.");
+                        }
+                      }}
+                    >
+                      <Ionicons name="folder-open-outline" size={18} color="white" />
+                      <Text style={{ color: "white", fontWeight: "600", marginLeft: 8 }}>
+                        Άνοιγμα στο Drive
                       </Text>
                     </TouchableOpacity>
 
