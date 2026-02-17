@@ -1555,7 +1555,6 @@ export default function ProjectDetailsScreen() {
                 /* PHOTOS APPENDIX */
                 .photos-appendix {
                     margin-top: 30px;
-                    page-break-before: always;
                 }
                 .section-title {
                     font-size: 16px;
@@ -1563,31 +1562,37 @@ export default function ProjectDetailsScreen() {
                     border-bottom: 2px solid #2563eb;
                     padding-bottom: 8px;
                     margin-bottom: 20px;
+                    text-align: center;
                 }
                 .photo-group {
-                    margin-bottom: 20px;
+                    margin-bottom: 24px;
                 }
                 .photo-group-title {
                     font-size: 13px;
                     font-weight: 700;
                     color: #1e293b;
-                    margin-bottom: 10px;
+                    margin-bottom: 14px;
                     background: #f8fafc;
                     padding: 6px 10px;
                     border-radius: 6px;
                     border: 1px solid #e2e8f0;
+                    text-align: center;
                 }
                 .photo-grid {
                     display: flex;
                     flex-direction: column;
+                    align-items: center;
                 }
                 .photo-wrapper {
                     page-break-inside: avoid;
                     break-inside: avoid;
-                    margin-bottom: 12px;
+                    page-break-before: auto;
+                    margin-bottom: 16px;
+                    text-align: center;
+                    width: 100%;
                 }
                 .photo-full {
-                    width: 100%;
+                    max-width: 100%;
                     max-height: 700px;
                     height: auto;
                     border-radius: 8px;
