@@ -1579,16 +1579,14 @@ export default function ProjectDetailsScreen() {
                 }
                 .photo-grid {
                     display: flex;
-                    flex-wrap: wrap;
-                    gap: 10px;
+                    flex-direction: column;
+                    gap: 12px;
                 }
                 .photo-full {
-                    max-width: 100%;
-                    max-height: 300px;
+                    width: 100%;
                     height: auto;
                     border-radius: 8px;
                     border: 1px solid #e2e8f0;
-                    object-fit: contain;
                 }
 
                 .gps-row {
