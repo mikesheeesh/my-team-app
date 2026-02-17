@@ -872,7 +872,7 @@ export default function ProjectDetailsScreen() {
       // Compress with 70% quality, NO RESIZE (full camera resolution)
       const m = await ImageManipulator.manipulateAsync(
         editedUri,
-        [], // No resize - keep full camera resolution
+        [{ rotate: 0 }], // Apply EXIF orientation to pixel data
         {
           compress: 0.7, // 70% quality
           format: ImageManipulator.SaveFormat.JPEG,
@@ -1353,14 +1353,14 @@ export default function ProjectDetailsScreen() {
             .filter((img: string) => img.startsWith("https://"))
             .map((img: string) => {
               photoIndex++;
-              return `<div class="photo-wrapper"><div class="photo-number">Φωτογραφία ${photoIndex}</div><img src="${img}" class="photo-full" onerror="this.parentElement.style.display='none'" /></div>`;
+              return `<div class="photo-wrapper"><div class="photo-number">Φωτογραφία ${photoIndex}</div><center><img src="${img}" class="photo-full" onerror="this.parentElement.parentElement.style.display='none'" /></center></div>`;
             })
             .join("");
           if (imagesHTML) {
             photoGroupsHTML += `
               <div class="photo-group">
                 <div class="photo-group-title">📷 ${task.title}</div>
-                <div class="photo-grid">${imagesHTML}</div>
+                ${imagesHTML}
               </div>
             `;
           }
@@ -1368,7 +1368,6 @@ export default function ProjectDetailsScreen() {
         if (photoGroupsHTML) {
           photosAppendixHTML = `
             <div class="photos-appendix">
-              <h2 class="section-title">Φωτογραφίες</h2>
               ${photoGroupsHTML}
             </div>
           `;
@@ -1559,29 +1558,19 @@ export default function ProjectDetailsScreen() {
                 .photos-appendix {
                     margin-top: 30px;
                 }
-                .section-title {
-                    font-size: 16px;
-                    color: #0f172a;
-                    border-bottom: 2px solid #2563eb;
-                    padding-bottom: 8px;
-                    margin-bottom: 20px;
-                    text-align: center;
-                }
                 .photo-group {
                     margin-bottom: 24px;
                 }
                 .photo-group-title {
-                    font-size: 13px;
+                    font-size: 14px;
                     font-weight: 700;
                     color: #1e293b;
                     margin-bottom: 14px;
                     background: #f8fafc;
-                    padding: 6px 10px;
+                    padding: 8px 12px;
                     border-radius: 6px;
                     border: 1px solid #e2e8f0;
                     text-align: center;
-                }
-                .photo-grid {
                 }
                 .photo-wrapper {
                     page-break-inside: avoid;
@@ -1594,10 +1583,9 @@ export default function ProjectDetailsScreen() {
                     font-weight: 600;
                     color: #64748b;
                     margin-bottom: 6px;
+                    text-align: center;
                 }
                 .photo-full {
-                    display: block;
-                    margin: 0 auto;
                     max-width: 100%;
                     max-height: 700px;
                     height: auto;
