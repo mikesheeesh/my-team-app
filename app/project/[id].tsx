@@ -1279,19 +1279,6 @@ export default function ProjectDetailsScreen() {
         let mediaHTML = "";
 
         if (task.type === "photo" && task.images.length > 0) {
-          // Photo thumbnails (max 4)
-          const displayImages = task.images.slice(0, 4);
-          const remainingCount = task.images.length - 4;
-
-          let thumbnailsHTML = displayImages
-            .filter(img => img.startsWith("https://")) // Only show remote URLs in PDF
-            .map(img => `<a href="${img}" target="_blank"><img src="${img}" class="thumbnail" onerror="this.style.display='none'" /></a>`)
-            .join("");
-
-          if (remainingCount > 0) {
-            thumbnailsHTML += `<div class="more-badge">+${remainingCount}</div>`;
-          }
-
           // GPS links for photos
           const gpsLinks = task.imageLocations
             .map((loc, i) => {
@@ -1299,13 +1286,12 @@ export default function ProjectDetailsScreen() {
               return url ? `<a href="${url}" class="gps-link" target="_blank">📍 Φωτο ${i + 1}</a>` : null;
             })
             .filter(Boolean)
-            .slice(0, 4) // Max 4 GPS links
+            .slice(0, 4)
             .join(" ");
 
           mediaHTML = `
             <div class="media-section">
               <div class="media-count photo-count">📷 ${task.images.length} Φωτογραφίες</div>
-              ${thumbnailsHTML ? `<div class="thumbnails-row">${thumbnailsHTML}</div>` : ""}
               ${gpsLinks ? `<div class="gps-row">${gpsLinks}</div>` : ""}
             </div>
           `;
@@ -1354,6 +1340,37 @@ export default function ProjectDetailsScreen() {
           </div>
         `;
       });
+
+      // Build photo appendix section - full-size photos grouped by task
+      let photosAppendixHTML = "";
+      const photoTasksForAppendix = combinedTasks.filter(
+        (t) => t.type === "photo" && t.images.length > 0
+      );
+      if (photoTasksForAppendix.length > 0) {
+        let photoGroupsHTML = "";
+        photoTasksForAppendix.forEach((task) => {
+          const imagesHTML = task.images
+            .filter((img: string) => img.startsWith("https://"))
+            .map((img: string) => `<img src="${img}" class="photo-full" onerror="this.style.display='none'" />`)
+            .join("");
+          if (imagesHTML) {
+            photoGroupsHTML += `
+              <div class="photo-group">
+                <div class="photo-group-title">📷 ${task.title}</div>
+                <div class="photo-grid">${imagesHTML}</div>
+              </div>
+            `;
+          }
+        });
+        if (photoGroupsHTML) {
+          photosAppendixHTML = `
+            <div class="photos-appendix">
+              <h2 class="section-title">Φωτογραφίες</h2>
+              ${photoGroupsHTML}
+            </div>
+          `;
+        }
+      }
 
       const html = `
         <!DOCTYPE html>
@@ -1535,30 +1552,43 @@ export default function ProjectDetailsScreen() {
                 .photo-count { color: #db2777; }
                 .video-count { color: #ea580c; }
 
-                .thumbnails-row {
-                    display: flex;
-                    gap: 6px;
-                    flex-wrap: wrap;
-                    margin-bottom: 8px;
+                /* PHOTOS APPENDIX */
+                .photos-appendix {
+                    margin-top: 30px;
+                    page-break-before: always;
                 }
-                .thumbnail {
-                    width: 60px;
-                    height: 60px;
-                    object-fit: cover;
-                    border-radius: 6px;
-                    border: 2px solid #e2e8f0;
+                .section-title {
+                    font-size: 16px;
+                    color: #0f172a;
+                    border-bottom: 2px solid #2563eb;
+                    padding-bottom: 8px;
+                    margin-bottom: 20px;
                 }
-                .more-badge {
-                    width: 60px;
-                    height: 60px;
-                    background: #e2e8f0;
-                    border-radius: 6px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
+                .photo-group {
+                    margin-bottom: 20px;
+                }
+                .photo-group-title {
+                    font-size: 13px;
                     font-weight: 700;
-                    color: #64748b;
-                    font-size: 14px;
+                    color: #1e293b;
+                    margin-bottom: 10px;
+                    background: #f8fafc;
+                    padding: 6px 10px;
+                    border-radius: 6px;
+                    border: 1px solid #e2e8f0;
+                }
+                .photo-grid {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 10px;
+                }
+                .photo-full {
+                    max-width: 100%;
+                    max-height: 300px;
+                    height: auto;
+                    border-radius: 8px;
+                    border: 1px solid #e2e8f0;
+                    object-fit: contain;
                 }
 
                 .gps-row {
@@ -1607,6 +1637,7 @@ export default function ProjectDetailsScreen() {
                 @media print {
                     body { padding: 20px; }
                     .task-card { break-inside: avoid; }
+                    .photo-group { break-inside: avoid; }
                 }
             </style>
         </head>
@@ -1651,6 +1682,8 @@ export default function ProjectDetailsScreen() {
             <div class="tasks-section">
                 ${tasksHTML}
             </div>
+
+            ${photosAppendixHTML}
 
             <div class="footer">
                 <strong>Ergon Work Management</strong> • Αυτόματη Αναφορά • ${new Date().toLocaleString("el-GR")}
