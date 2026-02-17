@@ -1346,31 +1346,30 @@ export default function ProjectDetailsScreen() {
         (t) => t.type === "photo" && t.images.length > 0
       );
       if (photoTasksForAppendix.length > 0) {
-        let photoGroupsHTML = "";
+        let photoPagesHTML = "";
         photoTasksForAppendix.forEach((task) => {
-          let photoIndex = 0;
-          const imagesHTML = task.images
-            .filter((img: string) => img.startsWith("https://"))
-            .map((img: string) => {
-              photoIndex++;
-              return `<div class="photo-wrapper"><div class="photo-number">Φωτογραφία ${photoIndex}</div><center><img src="${img}" class="photo-full" onerror="this.parentElement.parentElement.style.display='none'" /></center></div>`;
-            })
-            .join("");
-          if (imagesHTML) {
-            photoGroupsHTML += `
-              <div class="photo-group">
-                <div class="photo-group-title">📷 ${task.title}</div>
-                ${imagesHTML}
+          const validImages = task.images.filter((img: string) => img.startsWith("https://"));
+          if (validImages.length === 0) return;
+          // First photo: task title + number + photo
+          photoPagesHTML += `
+            <div class="photo-page">
+              <div class="photo-page-title">📷 ${task.title}</div>
+              <div class="photo-page-number">Φωτογραφία 1</div>
+              <center><img src="${validImages[0]}" class="photo-full" onerror="this.parentElement.parentElement.style.display='none'" /></center>
+            </div>
+          `;
+          // Rest: just number + photo (each on own page)
+          for (let i = 1; i < validImages.length; i++) {
+            photoPagesHTML += `
+              <div class="photo-page">
+                <div class="photo-page-number">Φωτογραφία ${i + 1}</div>
+                <center><img src="${validImages[i]}" class="photo-full" onerror="this.parentElement.parentElement.style.display='none'" /></center>
               </div>
             `;
           }
         });
-        if (photoGroupsHTML) {
-          photosAppendixHTML = `
-            <div class="photos-appendix">
-              ${photoGroupsHTML}
-            </div>
-          `;
+        if (photoPagesHTML) {
+          photosAppendixHTML = photoPagesHTML;
         }
       }
 
@@ -1558,36 +1557,31 @@ export default function ProjectDetailsScreen() {
                 .photos-appendix {
                     margin-top: 30px;
                 }
-                .photo-group {
-                    margin-bottom: 24px;
+                .photo-page {
+                    page-break-before: always;
+                    text-align: center;
+                    padding-top: 20px;
                 }
-                .photo-group-title {
-                    font-size: 14px;
+                .photo-page-title {
+                    font-size: 15px;
                     font-weight: 700;
                     color: #1e293b;
-                    margin-bottom: 14px;
+                    margin-bottom: 8px;
                     background: #f8fafc;
                     padding: 8px 12px;
                     border-radius: 6px;
                     border: 1px solid #e2e8f0;
-                    text-align: center;
+                    display: inline-block;
                 }
-                .photo-wrapper {
-                    page-break-inside: avoid;
-                    break-inside: avoid;
-                    margin-bottom: 20px;
-                    text-align: center;
-                }
-                .photo-number {
-                    font-size: 11px;
+                .photo-page-number {
+                    font-size: 12px;
                     font-weight: 600;
                     color: #64748b;
-                    margin-bottom: 6px;
-                    text-align: center;
+                    margin-bottom: 10px;
                 }
                 .photo-full {
                     max-width: 100%;
-                    max-height: 700px;
+                    max-height: 80vh;
                     height: auto;
                     border-radius: 8px;
                     border: 1px solid #e2e8f0;
