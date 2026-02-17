@@ -1351,7 +1351,7 @@ export default function ProjectDetailsScreen() {
         photoTasksForAppendix.forEach((task) => {
           const imagesHTML = task.images
             .filter((img: string) => img.startsWith("https://"))
-            .map((img: string) => `<img src="${img}" class="photo-full" onerror="this.style.display='none'" />`)
+            .map((img: string) => `<div class="photo-wrapper"><img src="${img}" class="photo-full" onerror="this.parentElement.style.display='none'" /></div>`)
             .join("");
           if (imagesHTML) {
             photoGroupsHTML += `
@@ -1580,13 +1580,19 @@ export default function ProjectDetailsScreen() {
                 .photo-grid {
                     display: flex;
                     flex-direction: column;
-                    gap: 12px;
+                }
+                .photo-wrapper {
+                    page-break-inside: avoid;
+                    break-inside: avoid;
+                    margin-bottom: 12px;
                 }
                 .photo-full {
                     width: 100%;
+                    max-height: 700px;
                     height: auto;
                     border-radius: 8px;
                     border: 1px solid #e2e8f0;
+                    object-fit: contain;
                 }
 
                 .gps-row {
