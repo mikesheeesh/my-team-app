@@ -260,6 +260,7 @@ export default function ProjectDetailsScreen() {
   // --- EDITOR STATES ---
   const [editorVisible, setEditorVisible] = useState(false);
   const [tempImageUri, setTempImageUri] = useState<string | null>(null);
+  const [tempImageDims, setTempImageDims] = useState<{ width: number; height: number } | undefined>(undefined);
   const [tempGpsLoc, setTempGpsLoc] = useState<GeoPoint | undefined>(undefined);
   const [taskForEditing, setTaskForEditing] = useState<Task | null>(null);
   const [reEditingIndex, setReEditingIndex] = useState<number | null>(null); // For re-editing existing photos
@@ -789,6 +790,7 @@ export default function ProjectDetailsScreen() {
           // To Drawing Editor
           setTaskForEditing(task);
           setTempImageUri(r.assets[0].uri);
+          setTempImageDims(r.assets[0].width && r.assets[0].height ? { width: r.assets[0].width, height: r.assets[0].height } : undefined);
           setTempGpsLoc(gpsLoc);
           setReEditingIndex(null);
           setEditorVisible(true);
@@ -846,6 +848,7 @@ export default function ProjectDetailsScreen() {
 
           setTaskForEditing(task);
           setTempImageUri(r.assets[0].uri);
+          setTempImageDims(r.assets[0].width && r.assets[0].height ? { width: r.assets[0].width, height: r.assets[0].height } : undefined);
           setTempGpsLoc(gpsLoc);
           setReEditingIndex(null);
           setEditorVisible(true);
@@ -925,6 +928,7 @@ export default function ProjectDetailsScreen() {
     } finally {
       setProcessing(false);
       setTempImageUri(null);
+      setTempImageDims(undefined);
       setTaskForEditing(null);
       setReEditingIndex(null); // Reset re-edit mode
     }
@@ -2072,9 +2076,12 @@ export default function ProjectDetailsScreen() {
         <ImageEditorModal
           visible={editorVisible}
           imageUri={tempImageUri}
+          imageWidth={tempImageDims?.width}
+          imageHeight={tempImageDims?.height}
           onClose={() => {
             setEditorVisible(false);
             setTempImageUri(null);
+            setTempImageDims(undefined);
             setReEditingIndex(null); // Reset re-edit mode to prevent overwriting new photos
           }}
           onSave={handleEditorSave}
