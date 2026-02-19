@@ -595,6 +595,31 @@ export default function TeamProjectsScreen() {
       });
 
       await Promise.all(updatePromises);
+
+      // Ακύρωση Drive πρόσβασης αν demote από Admin/Founder σε χαμηλότερο ρόλο
+      if (
+        action === "demote" &&
+        (targetUser.role === "Admin" || targetUser.role === "Founder")
+      ) {
+        try {
+          const accessToken = await getValidAccessToken(teamId);
+          if (accessToken) {
+            const syncDoc = await getDoc(doc(db, "driveSyncState", teamId));
+            const syncData = syncDoc.data();
+            if (syncData) {
+              const teamFolderId = syncData.folderIds?.[teamName];
+              if (teamFolderId && targetUser.email) {
+                await revokeEmailAccess(teamFolderId, targetUser.email, accessToken);
+              }
+              const sharedWith: string[] = syncData.sharedWith || [];
+              const updated = sharedWith.filter((uid) => uid !== targetUser.id);
+              await updateDoc(doc(db, "driveSyncState", teamId), { sharedWith: updated });
+            }
+          }
+        } catch (e) {
+          console.log("Drive revoke on demote error:", e);
+        }
+      }
     } catch (error) {
       console.error("Role update failed:", error);
       Alert.alert("Σφάλμα", "Η αλλαγή ρόλου απέτυχε.");
