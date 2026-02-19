@@ -9,6 +9,7 @@ import {
   ScrollView,
   StatusBar,
   StyleSheet,
+  Switch,
   Text,
   TouchableOpacity,
   View,
@@ -36,6 +37,35 @@ export default function ProfileScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [editValue, setEditValue] = useState("");
   const [editField, setEditField] = useState<"fullname" | "phone">("fullname");
+  const [cellularEnabled, setCellularEnabled] = useState(false);
+
+  useEffect(() => {
+    AsyncStorage.getItem("cellular_data_enabled").then((val) =>
+      setCellularEnabled(val === "true")
+    );
+  }, []);
+
+  const handleCellularToggle = (value: boolean) => {
+    if (value) {
+      Alert.alert(
+        "Δεδομένα Κινητής Τηλεφωνίας",
+        "Ο αυτόματος συγχρονισμός θα γίνεται και με δεδομένα κινητής τηλεφωνίας. Αυτό μπορεί να επηρεάσει το πλάνο δεδομένων σας. Θέλετε να ενεργοποιήσετε αυτή τη ρύθμιση;",
+        [
+          { text: "Άκυρο", style: "cancel" },
+          {
+            text: "Ενεργοποίηση",
+            onPress: async () => {
+              setCellularEnabled(true);
+              await AsyncStorage.setItem("cellular_data_enabled", "true");
+            },
+          },
+        ]
+      );
+    } else {
+      setCellularEnabled(false);
+      AsyncStorage.setItem("cellular_data_enabled", "false");
+    }
+  };
 
   useEffect(() => {
     const initLoad = async () => {
@@ -245,6 +275,28 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        {/* ΡΥΘΜΙΣΕΙΣ */}
+        <Text style={styles.sectionLabel}>Ρυθμίσεις</Text>
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <View style={[styles.iconCircle, { backgroundColor: "#f0f9ff" }]}>
+              <Ionicons name="cellular" size={18} color="#0284c7" />
+            </View>
+            <View style={styles.rowData}>
+              <Text style={styles.label}>Δεδομένα Κινητής Τηλεφωνίας</Text>
+              <Text style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
+                {cellularEnabled ? "Αυτόματος sync ενεργός σε κινητά δεδομένα" : "Sync μόνο σε WiFi"}
+              </Text>
+            </View>
+            <Switch
+              value={cellularEnabled}
+              onValueChange={handleCellularToggle}
+              trackColor={{ false: "#e2e8f0", true: "#bfdbfe" }}
+              thumbColor={cellularEnabled ? "#2563eb" : "#94a3b8"}
+            />
+          </View>
+        </View>
+
         <TouchableOpacity
           style={styles.logoutBtn}
           onPress={handleLogout}
@@ -375,6 +427,15 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
 
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 10,
+    marginTop: 4,
+  },
   logoutBtn: {
     flexDirection: "row",
     alignItems: "center",

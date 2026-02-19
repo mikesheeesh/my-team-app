@@ -8,6 +8,7 @@
  * - Provides sync status to UI
  */
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo, { NetInfoStateType } from "@react-native-community/netinfo";
 import { onAuthStateChanged } from "firebase/auth";
 import {
@@ -29,6 +30,7 @@ import { isDriveConnected } from "../../utils/driveAuth";
 import { syncTeamToDrive } from "../../utils/driveSyncEngine";
 
 const SYNC_DEBOUNCE_MS = 5_000; // 5 seconds after last change
+const CELLULAR_DATA_KEY = "cellular_data_enabled";
 
 interface SyncProgress {
   current: number;
@@ -87,8 +89,23 @@ export const DriveSyncProvider = ({
 
     const hasWiFi = await isWiFiConnected();
     if (!hasWiFi) {
-      Alert.alert("Drive Sync", "Δεν υπάρχει σύνδεση WiFi");
-      return;
+      const cellularEnabled = (await AsyncStorage.getItem(CELLULAR_DATA_KEY)) === "true";
+      if (!cellularEnabled) {
+        Alert.alert("Drive Sync", "Δεν υπάρχει σύνδεση WiFi.");
+        return;
+      }
+      // Cellular is enabled — ask for confirmation
+      const confirmed = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          "Δεδομένα Κινητής",
+          "Ο συγχρονισμός Drive θα χρησιμοποιήσει δεδομένα κινητής τηλεφωνίας. Συνέχεια;",
+          [
+            { text: "Άκυρο", style: "cancel", onPress: () => resolve(false) },
+            { text: "Ναι, Συνέχεια", onPress: () => resolve(true) },
+          ]
+        );
+      });
+      if (!confirmed) return;
     }
 
     isSyncingRef.current = true;

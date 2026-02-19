@@ -21,6 +21,7 @@ import {
 
 const OFFLINE_QUEUE_PREFIX = "offline_tasks_queue_";
 const MAX_SYNC_RETRIES = 3;
+const CELLULAR_DATA_KEY = "cellular_data_enabled";
 
 interface QueuedTask {
   task: any;
@@ -91,21 +92,24 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  // 1. LISTENER (Αυτόματος συγχρονισμός ΜΟΝΟ σε WiFi)
+  // 1. LISTENER (Αυτόματος συγχρονισμός σε WiFi, ή και cellular αν ενεργοποιημένο)
   useEffect(() => {
-    const unsubscribe = NetInfo.addEventListener((state) => {
-      const hasWiFi = state.isConnected && state.type === NetInfoStateType.wifi;
+    const unsubscribe = NetInfo.addEventListener(async (state) => {
+      const cellularEnabled = (await AsyncStorage.getItem(CELLULAR_DATA_KEY)) === "true";
+      const hasWiFi = state.isConnected === true && state.type === NetInfoStateType.wifi;
+      const hasCellular = state.isConnected === true && state.type === NetInfoStateType.cellular;
+      const hasConnection = hasWiFi || (cellularEnabled && hasCellular);
 
-      if (hasWiFi && !isSyncingRef.current) {
-        // WiFi connected and not syncing → start sync after delay
+      if (hasConnection && !isSyncingRef.current) {
+        // Connected → start sync after delay
         if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
 
         syncTimeoutRef.current = setTimeout(() => {
-          performGlobalSync();
+          performGlobalSync(cellularEnabled && hasCellular);
         }, 1000);
-      } else if (!hasWiFi && isSyncingRef.current && !manualSyncRef.current) {
-        // WiFi dropped while auto-syncing → set abort flag (skip if manual sync with cellular)
-        console.log("⚠️ WiFi dropped during sync, setting abort flag");
+      } else if (!hasConnection && isSyncingRef.current && !manualSyncRef.current) {
+        // Connection dropped while auto-syncing → abort
+        console.log("⚠️ Connection dropped during sync, setting abort flag");
         shouldAbortRef.current = true;
       }
     });
@@ -119,12 +123,15 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
   // 2. Η ΚΥΡΙΑ ΛΟΓΙΚΗ ΤΟΥ SYNC (Εσωτερική συνάρτηση)
   const performGlobalSync = async (allowCellular: boolean = false) => {
     if (isSyncingRef.current) return;
+
+    const cellularEnabled = (await AsyncStorage.getItem(CELLULAR_DATA_KEY)) === "true";
+    const effectiveAllowCellular = allowCellular || cellularEnabled;
     manualSyncRef.current = allowCellular;
 
     // Pre-check: connectivity ανάλογα με mode
-    const hasNetwork = allowCellular ? await isNetworkAvailable() : await isWiFiConnected();
+    const hasNetwork = effectiveAllowCellular ? await isNetworkAvailable() : await isWiFiConnected();
     if (!hasNetwork) {
-      console.log(allowCellular ? "⏸️ No internet, skipping sync" : "⏸️ No WiFi, skipping sync");
+      console.log(effectiveAllowCellular ? "⏸️ No internet, skipping sync" : "⏸️ No WiFi, skipping sync");
       return;
     }
 
@@ -165,7 +172,7 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
         );
 
         // Check connectivity before Firestore operation
-        const checkConn = manualSyncRef.current ? isNetworkAvailable : isWiFiConnected;
+        const checkConn = effectiveAllowCellular ? isNetworkAvailable : isWiFiConnected;
         if (shouldAbortRef.current || !(await checkConn())) {
           console.log("🛑 Sync aborted before getDoc - no connection");
           break;
@@ -412,7 +419,7 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
 
         if (changesMade) {
           // Check connectivity before Firestore update
-          const checkConn2 = manualSyncRef.current ? isNetworkAvailable : isWiFiConnected;
+          const checkConn2 = effectiveAllowCellular ? isNetworkAvailable : isWiFiConnected;
           if (shouldAbortRef.current || !(await checkConn2())) {
             console.log("🛑 Sync aborted before updateDoc - no connection");
             // Save current state to retry later
@@ -500,7 +507,8 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
       // 5. RE-SYNC CHECK: Αν υπάρχουν ακόμα items στο queue, retry μετά από λίγο
       setTimeout(async () => {
         try {
-          const hasNetwork = wasManualSync ? await isNetworkAvailable() : await isWiFiConnected();
+          const cellularEnabledForResync = (await AsyncStorage.getItem(CELLULAR_DATA_KEY)) === "true";
+          const hasNetwork = (wasManualSync || cellularEnabledForResync) ? await isNetworkAvailable() : await isWiFiConnected();
           if (!hasNetwork || isSyncingRef.current) return;
 
           const keys = await AsyncStorage.getAllKeys();
@@ -545,8 +553,13 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
     if (netState.type === NetInfoStateType.wifi) {
       await performGlobalSync(false);
     }
-    // Cellular → ρώτα τον χρήστη, μετά sync με allowCellular=true
+    // Cellular → αν ενεργοποιημένο sync αυτόματα, αλλιώς ρώτα
     else if (netState.type === NetInfoStateType.cellular) {
+      const cellularEnabled = (await AsyncStorage.getItem(CELLULAR_DATA_KEY)) === "true";
+      if (cellularEnabled) {
+        await performGlobalSync(true);
+        return;
+      }
       Alert.alert(
         "Χρήση Δεδομένων",
         "Είστε συνδεδεμένοι με δεδομένα κινητής. Θέλετε να προχωρήσετε σε συγχρονισμό;",
