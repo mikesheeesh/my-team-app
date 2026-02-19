@@ -790,7 +790,7 @@ export default function ProjectDetailsScreen() {
           setTaskForEditing(task);
           setTempImageUri(r.assets[0].uri);
           setTempGpsLoc(gpsLoc);
-          setReEditingIndex(null); // Ensure we're in "add" mode, not "replace" mode
+          setReEditingIndex(null);
           setEditorVisible(true);
         }
       }
