@@ -501,13 +501,16 @@ export default function ProjectDetailsScreen() {
       taskToSave = rest as Task;
     }
 
-    // Check WiFi first
+    // Check connectivity (WiFi or cellular if enabled)
     const net = await Network.getNetworkStateAsync();
     const hasWiFi = net.isConnected && net.type === Network.NetworkStateType.WIFI;
+    const hasCellular = net.isConnected && net.type === Network.NetworkStateType.CELLULAR;
+    const cellularEnabled = (await AsyncStorage.getItem("cellular_data_enabled")) === "true";
+    const canUploadDirectly = hasWiFi || (cellularEnabled && hasCellular);
 
-    if (hasWiFi && teamId) {
-      // WiFi available → Upload directly to Firestore/Storage
-      console.log("📡 WiFi detected - Uploading directly to cloud...");
+    if (canUploadDirectly && teamId) {
+      // Connected → Upload directly to Firestore/Storage
+      console.log(`📡 ${hasWiFi ? "WiFi" : "Cellular"} detected - Uploading directly to cloud...`);
       try {
         let finalTask: any = { ...taskToSave };
 
@@ -573,8 +576,8 @@ export default function ProjectDetailsScreen() {
           setActiveTaskForGallery(taskWithFlag);
       }
     } else {
-      // No WiFi → Save locally
-      console.log("💾 No WiFi - Saving locally...");
+      // No connection or cellular disabled → Save locally
+      console.log("💾 No direct upload available - Saving locally...");
       const taskWithFlag = { ...taskToSave, isLocal: true };
       setLocalTasks((prev) => {
         const newLocalMap = new Map(prev.map((t) => [t.id, t]));
