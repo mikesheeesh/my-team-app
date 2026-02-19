@@ -157,6 +157,9 @@ export default function DashboardScreen() {
             <Text style={styles.linkText}>Εισαγωγή Κωδικού</Text>
           </TouchableOpacity>
         </View>
+
+        {/* VERSION */}
+        <Text style={styles.versionText}>v2.0.1</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -286,5 +289,12 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     fontSize: 16,
     marginLeft: 8,
+  },
+  versionText: {
+    textAlign: "center",
+    fontSize: 12,
+    color: "#94a3b8",
+    marginTop: 24,
+    marginBottom: 8,
   },
 });

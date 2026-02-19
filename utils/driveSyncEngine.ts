@@ -397,11 +397,15 @@ export const syncProjectToDrive = async (
       teamName, groupName, projectName, accessToken, syncState
     );
 
-    // 5b. Auto-share team folder with all team members
+    // 5b. Auto-share team folder with Admins and Founders only
     const teamFolderId = syncState.folderIds[teamName];
     if (teamFolderId && teamData.memberIds?.length > 0) {
       const sharedWith: string[] = syncState.sharedWith || [];
-      const newMembers = (teamData.memberIds as string[]).filter(
+      const eligibleMembers = (teamData.memberIds as string[]).filter((uid: string) => {
+        const role = teamData.roles?.[uid];
+        return role === "Admin" || role === "Founder";
+      });
+      const newMembers = eligibleMembers.filter(
         (uid: string) => !sharedWith.includes(uid)
       );
       if (newMembers.length > 0) {

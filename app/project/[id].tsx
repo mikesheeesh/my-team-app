@@ -775,7 +775,7 @@ export default function ProjectDetailsScreen() {
         // --- PHOTO: Direct to Drawing Editor ---
         const r = await ImagePicker.launchCameraAsync({
           mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          quality: 0.8,
+          quality: 1, // Max resolution - compression handled by ImageManipulator (70%)
         });
 
         if (!r.canceled && r.assets[0].uri) {
@@ -834,7 +834,7 @@ export default function ProjectDetailsScreen() {
       } else {
         const r = await ImagePicker.launchImageLibraryAsync({
           mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          quality: 0.8,
+          quality: 1, // Max resolution - compression handled by ImageManipulator (70%)
         });
 
         if (!r.canceled && r.assets[0].uri) {

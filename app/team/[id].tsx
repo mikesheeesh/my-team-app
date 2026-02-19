@@ -26,7 +26,9 @@ import { useDriveSync } from "../context/DriveSyncContext";
 import {
   connectGoogleDrive,
   disconnectGoogleDrive,
+  getValidAccessToken,
 } from "../../utils/driveAuth";
+import { revokeEmailAccess } from "../../utils/driveApi";
 import { deleteProjectMedia } from "../../utils/storageUtils";
 
 // FIREBASE - Προστέθηκε το arrayUnion εδώ
@@ -495,6 +497,31 @@ export default function TeamProjectsScreen() {
               });
 
               await Promise.all(updatePromises);
+
+              // 3. ΑΚΥΡΩΣΗ DRIVE ΠΡΟΣΒΑΣΗΣ (μόνο αν ήταν Admin ή Founder)
+              if (targetUser.role === "Admin" || targetUser.role === "Founder") {
+                try {
+                  const accessToken = await getValidAccessToken(teamId);
+                  if (accessToken) {
+                    const syncDoc = await getDoc(doc(db, "driveSyncState", teamId));
+                    const syncData = syncDoc.data();
+                    if (syncData) {
+                      const teamSnap = await getDoc(doc(db, "teams", teamId));
+                      const tName = teamSnap.data()?.name;
+                      const teamFolderId = tName ? syncData.folderIds?.[tName] : null;
+                      if (teamFolderId && targetUser.email) {
+                        await revokeEmailAccess(teamFolderId, targetUser.email, accessToken);
+                      }
+                      // Remove from sharedWith list
+                      const sharedWith: string[] = syncData.sharedWith || [];
+                      const updated = sharedWith.filter((uid) => uid !== targetUser.id);
+                      await updateDoc(doc(db, "driveSyncState", teamId), { sharedWith: updated });
+                    }
+                  }
+                } catch (e) {
+                  console.log("Drive revoke error:", e);
+                }
+              }
             } catch (e) {
               console.log("Error removing user from projects:", e);
               Alert.alert(

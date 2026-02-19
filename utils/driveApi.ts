@@ -270,6 +270,36 @@ export const shareFolderWithEmail = async (
 };
 
 /**
+ * Revoke a user's access to a folder by email
+ * Lists permissions, finds the one matching the email, and deletes it
+ */
+export const revokeEmailAccess = async (
+  folderId: string,
+  email: string,
+  accessToken: string
+): Promise<void> => {
+  try {
+    const response = await fetch(
+      `${DRIVE_API}/files/${folderId}/permissions?fields=permissions(id,emailAddress)`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!response.ok) return;
+    const data = await response.json();
+    const perm = (data.permissions || []).find(
+      (p: any) => p.emailAddress?.toLowerCase() === email.toLowerCase()
+    );
+    if (!perm) return;
+    await fetch(`${DRIVE_API}/files/${folderId}/permissions/${perm.id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    console.log(`Drive: revoked access for ${email}`);
+  } catch (e) {
+    console.log(`Drive: revoke failed for ${email}:`, e);
+  }
+};
+
+/**
  * Delete a file from Google Drive
  */
 export const deleteFile = async (
