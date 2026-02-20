@@ -159,7 +159,7 @@ export default function DashboardScreen() {
         </View>
 
         {/* VERSION */}
-        <Text style={styles.versionText}>v2.2.0</Text>
+        <Text style={styles.versionText}>v2.2.2</Text>
       </ScrollView>
     </SafeAreaView>
   );
