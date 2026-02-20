@@ -18,6 +18,8 @@
 15. [Project Search & Filter](#15-project-search--filter-flow)
 16. [3-Stage Project Status](#16-3-stage-project-status-flow)
 17. [Role Change Cleanup](#17-role-change-cleanup-flow)
+18. [Google Drive Sync](#18-google-drive-sync-flow)
+19. [Open in Drive](#19-open-in-drive-flow)
 
 ---
 
@@ -52,10 +54,10 @@
 1. Fetch myRole → Determine availableRoles (Founder/Admin → all, Supervisor → User only)
 2. Generate 6-char code (excluded: 0, O, I, 1, L)
 3. Create invite doc: `{ code, teamId, teamName, role, createdBy, status: "active" }`
-4. Generate web URL: `https://ergon-work-management.vercel.app/join?code=X&team=Y`
+4. Generate web URL: `https://ergon-work.web.app/join?code=X&team=Y`
 5. Share message με clickable link + κωδικός + expiration (2 min)
 
-### Web Landing Page (`public/invite/index.html`)
+### Web Landing Page (`static/invite/index.html` → `dist/invite/`)
 - Hosted on Firebase Hosting
 - Mobile: Auto-redirect via `ergonwork://join?inviteCode=X`
 - Desktop: "Άνοιξε από κινητό" message
@@ -184,15 +186,24 @@
 
 ---
 
-## 13. PDF GENERATION FLOW
+## 13. PDF GENERATION FLOW (v2.0.1)
 
 ### `app/project/[id].tsx` → `generatePDF()`
 
 1. Calculate stats (total, completed, progress %)
-2. Build HTML: Header (gradient) + Summary cards (4) + Task cards (with thumbnails, GPS links, completion dates) + Footer
-3. `Print.printToFileAsync({ html })` → `Sharing.shareAsync(uri)`
+2. Preprocess photos: `ImageManipulator.manipulateAsync(url, [{ rotate: 0 }])` → bakes EXIF orientation into pixels
+3. Build HTML:
+   - Header (gradient) + Summary cards (4) + Task cards (GPS links για όλες φωτογραφίες, completion dates)
+   - **Photo Appendix** (μετά τα video tasks): Μία φωτογραφία ανά σελίδα (`page-break-before: always`)
+     - Πρώτη φωτογραφία κάθε task: τίτλος task + "Φωτογραφία 1" + `<center><img></center>`
+     - Υπόλοιπες: μόνο "Φωτογραφία N" + `<center><img></center>`
+   - Footer
+4. `Print.printToFileAsync({ html })` → `Sharing.shareAsync(uri)`
 
-**Features (v2.1.2):** Photo thumbnails 60x60px, clickable GPS links, completion dates, card-based layout, print-friendly
+**CSS tricks για WebKit PDF:**
+- `page-break-before: always` για photo pages
+- `<center>` tag (πιο надежний από CSS `margin:auto` στο WebKit)
+- `max-width: 100%; max-height: 80vh` για φωτογραφίες
 
 ---
 
@@ -254,6 +265,85 @@ Permission checks: Supervisor can only manage Users, Founder cannot be changed.
 
 ---
 
+## 18. GOOGLE DRIVE SYNC FLOW (v2.0.1)
+
+### Αρχεία
+- `utils/driveAuth.ts` — OAuth2, token refresh, connect/disconnect
+- `utils/driveApi.ts` — Drive REST API wrapper (folders, upload, share, delete, permissions)
+- `utils/driveSyncEngine.ts` — Sync orchestration
+- `utils/driveExcelGenerator.ts` — Excel generation
+- `app/context/DriveSyncContext.tsx` — Auto-sync context
+- `app/team/[id].tsx` — Drive Sync Modal UI
+
+### 18a. Connect Google Drive
+
+1. User πατάει "Σύνδεση Google Drive" στο Drive Sync Modal
+2. `connectGoogleDrive(teamId)` → Open OAuth2 URL (Google Auth)
+3. Callback: `https://ergon-work.web.app/auth/callback/` → Extract `code`
+4. Exchange code → `{ access_token, refresh_token, expires_in }`
+5. Save στο Firestore: `driveConfig/{teamId}` `{ refreshToken, accessToken, tokenExpiry, connectedEmail, connectedAt }`
+6. Modal ενημερώνεται: "Συνδεδεμένο" + email + ημερομηνία
+
+**Σημείωση:** `static/auth/callback/index.html` → `dist/auth/callback/index.html` (πρέπει να αντιγράφεται πριν κάθε Firebase deploy, γιατί το EAS update διαγράφει το `dist/`)
+
+### 18b. Auto-Sync on App Open
+
+### `app/context/DriveSyncContext.tsx`
+1. onSnapshot στο `projects/{projectId}` → `docChanges().length > 0` → trigger sync
+2. `triggerDriveSync(teamId)` → queue sync ανά project
+3. Αποφεύγει concurrent syncs με `isSyncingRef`
+
+### 18c. Sync Process (`syncProjectToDrive`)
+
+1. `getValidAccessToken(teamId)` — refresh αν `tokenExpiry < now`
+2. Load project data + team data + group info
+3. **Hash check:** `computeTasksHash(tasks)` (με normalized URLs — χωρίς token params) vs saved hash → skip αν ίδιο
+4. `ensureFolderStructure(teamName, groupName, projectName)`:
+   - Root: "Ergon Work Management" (στο "root" Drive)
+   - Level 1: `{teamName}/`
+   - Level 2: `{teamName}/{groupName}/`
+   - Level 3: `{teamName}/{groupName}/{projectName}/`
+   - Level 4: `Φωτογραφίες/` + `Βίντεο/`
+   - Folder IDs cached στο `syncState.folderIds`
+5. **Auto-share:** Για κάθε νέο μέλος (που δεν είναι στο `sharedWith`):
+   - Fetch email από `users/{uid}`
+   - `shareFolderWithEmail(teamFolderId, email, "writer")` με `sendNotificationEmail=false`
+   - Save UID στο `syncState.sharedWith`
+6. **Upload photos:** Firebase Storage URL → fetch blob → `uploadFileResumable` στο Drive Photos folder
+7. **Upload videos:** Firebase Storage URL → fetch blob → `uploadFileResumable` στο Drive Videos folder
+8. **Excel generation:** `generateProjectExcel(tasks)` → upload/update `.xlsx` στο project folder
+9. Save hash + `saveSyncState(teamId, syncState)`
+
+### 18d. Hash-based Change Detection
+
+```typescript
+computeTasksHash(tasks):
+  - Για κάθε task: id + title + status + type-specific data
+  - Φωτογραφίες: normalizeStorageUrl(url) → αφαιρεί ?token=... params
+  - SHA-256 → hex string
+```
+
+**Σκοπός:** Αποφυγή re-upload όταν αλλάζει μόνο το token στο Firebase Storage URL.
+
+### 18e. Disconnect
+
+`disconnectGoogleDrive(teamId)` → Delete `driveConfig/{teamId}` doc → Modal επιστρέφει σε "Μη Συνδεδεμένο"
+
+---
+
+## 19. OPEN IN DRIVE FLOW (v2.0.1)
+
+### `app/team/[id].tsx` — "Άνοιγμα στο Drive" button
+
+1. User πατάει "Άνοιγμα στο Drive" (πράσινο κουμπί στο Drive Sync Modal)
+2. Fetch `driveSyncState/{teamId}` → `folderIds`
+3. `folderId = folderIds[teamName] || folderIds["root"]`
+4. `Linking.openURL("https://drive.google.com/drive/folders/{folderId}")`
+
+**Errors:** Αν δεν έχει γίνει ακόμα sync → Alert "Κάντε πρώτα συγχρονισμό"
+
+---
+
 ## APPENDIX: STATE & STORAGE
 
 ### AsyncStorage Keys
@@ -265,11 +355,18 @@ Permission checks: Supervisor can only manage Users, Founder cannot be changed.
 
 ### Firebase Collections
 - `users/{userId}`, `teams/{teamId}`, `projects/{projectId}`, `invites/{inviteId}`
+- `driveConfig/{teamId}` — Google Drive OAuth credentials
+- `driveSyncState/{teamId}` — Folder IDs, sync hashes, shared members
 
 ### Firebase Storage
 - `teams/{teamId}/projects/{projectId}/tasks/{taskId}/{mediaId}.{jpg|mp4}`
 
+### Google Drive Structure
+- `Ergon Work Management/{teamName}/{groupName}/{projectName}/Φωτογραφίες/`
+- `Ergon Work Management/{teamName}/{groupName}/{projectName}/Βίντεο/`
+- `Ergon Work Management/{teamName}/{groupName}/{projectName}/{projectName}.xlsx`
+
 ---
 
-**Version**: 2.2.0
+**Version**: 2.0.1
 **Last Updated**: Φεβρουάριος 2026

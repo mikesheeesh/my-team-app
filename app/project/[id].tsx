@@ -260,7 +260,6 @@ export default function ProjectDetailsScreen() {
   // --- EDITOR STATES ---
   const [editorVisible, setEditorVisible] = useState(false);
   const [tempImageUri, setTempImageUri] = useState<string | null>(null);
-  const [tempImageDims, setTempImageDims] = useState<{ width: number; height: number } | undefined>(undefined);
   const [tempGpsLoc, setTempGpsLoc] = useState<GeoPoint | undefined>(undefined);
   const [taskForEditing, setTaskForEditing] = useState<Task | null>(null);
   const [reEditingIndex, setReEditingIndex] = useState<number | null>(null); // For re-editing existing photos
@@ -790,7 +789,6 @@ export default function ProjectDetailsScreen() {
           // To Drawing Editor
           setTaskForEditing(task);
           setTempImageUri(r.assets[0].uri);
-          setTempImageDims(r.assets[0].width && r.assets[0].height ? { width: r.assets[0].width, height: r.assets[0].height } : undefined);
           setTempGpsLoc(gpsLoc);
           setReEditingIndex(null);
           setEditorVisible(true);
@@ -848,7 +846,6 @@ export default function ProjectDetailsScreen() {
 
           setTaskForEditing(task);
           setTempImageUri(r.assets[0].uri);
-          setTempImageDims(r.assets[0].width && r.assets[0].height ? { width: r.assets[0].width, height: r.assets[0].height } : undefined);
           setTempGpsLoc(gpsLoc);
           setReEditingIndex(null);
           setEditorVisible(true);
@@ -928,7 +925,6 @@ export default function ProjectDetailsScreen() {
     } finally {
       setProcessing(false);
       setTempImageUri(null);
-      setTempImageDims(undefined);
       setTaskForEditing(null);
       setReEditingIndex(null); // Reset re-edit mode
     }
@@ -1350,7 +1346,7 @@ export default function ProjectDetailsScreen() {
       // Build photo appendix section - full-size photos grouped by task
       let photosAppendixHTML = "";
       const photoTasksForAppendix = combinedTasks.filter(
-        (t): t is PhotoTask => t.type === "photo" && (t as PhotoTask).images.length > 0
+        (t) => t.type === "photo" && t.images.length > 0
       );
       if (photoTasksForAppendix.length > 0) {
         let photoPagesHTML = "";
@@ -2071,17 +2067,14 @@ export default function ProjectDetailsScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* CUSTOM IMAGE EDITOR (Only show when image is ready - prevents useImage(null) crash) */}
-      {Platform.OS !== "web" && tempImageUri && (
+      {/* CUSTOM IMAGE EDITOR (Only show if not web) */}
+      {Platform.OS !== "web" && (
         <ImageEditorModal
           visible={editorVisible}
           imageUri={tempImageUri}
-          imageWidth={tempImageDims?.width}
-          imageHeight={tempImageDims?.height}
           onClose={() => {
             setEditorVisible(false);
             setTempImageUri(null);
-            setTempImageDims(undefined);
             setReEditingIndex(null); // Reset re-edit mode to prevent overwriting new photos
           }}
           onSave={handleEditorSave}
@@ -2297,7 +2290,7 @@ export default function ProjectDetailsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f8fafc", marginTop: 20 },
-  center: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#f8fafc" },
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
   header: {
     flexDirection: "row",
     alignItems: "center",

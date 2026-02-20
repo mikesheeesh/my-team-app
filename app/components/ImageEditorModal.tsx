@@ -22,8 +22,6 @@ interface ImageEditorModalProps {
   imageUri: string | null;
   onClose: () => void;
   onSave: (editedUri: string) => void;
-  imageWidth?: number;
-  imageHeight?: number;
 }
 
 type DrawnPath = {
@@ -52,8 +50,6 @@ export default function ImageEditorModal({
   imageUri,
   onClose,
   onSave,
-  imageWidth,
-  imageHeight,
 }: ImageEditorModalProps) {
   // --- STATE ---
   const [paths, setPaths] = useState<DrawnPath[]>([]);
@@ -368,12 +364,7 @@ export default function ImageEditorModal({
   const handleSave = async () => {
     if (viewShotRef.current && viewShotRef.current.capture) {
       try {
-        const captureOptions: any = { format: "jpg", quality: 1 };
-        if (imageWidth && imageHeight) {
-          captureOptions.width = imageWidth;
-          captureOptions.height = imageHeight;
-        }
-        const uri = await viewShotRef.current.capture(captureOptions);
+        const uri = await viewShotRef.current.capture();
         onSave(uri);
         // Reset μετά από λίγο
         setTimeout(() => {
@@ -442,7 +433,7 @@ export default function ImageEditorModal({
         >
           <ViewShot
             ref={viewShotRef}
-            options={{ format: "jpg", quality: 1 }}
+            options={{ format: "jpg", quality: 0.9 }}
             style={{
               width: width,
               height: measuredCanvasHeight,
