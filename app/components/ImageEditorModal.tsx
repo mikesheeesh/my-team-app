@@ -1,6 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import * as FileSystem from "expo-file-system/legacy";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -16,14 +15,7 @@ import {
   View,
 } from "react-native";
 import Svg, { Path } from "react-native-svg";
-import {
-  Skia,
-  useImage,
-  PaintStyle,
-  StrokeCap,
-  StrokeJoin,
-  ImageFormat,
-} from "@shopify/react-native-skia";
+import ViewShot from "react-native-view-shot";
 
 interface ImageEditorModalProps {
   visible: boolean;
@@ -34,12 +26,10 @@ interface ImageEditorModalProps {
   imageHeight?: number;
 }
 
-type Point = { x: number; y: number };
-
 type DrawnPath = {
-  points: Point[];
+  d: string;
   color: string;
-  strokeWidth: number;
+  width: number;
 };
 
 const COLORS = [
@@ -51,15 +41,11 @@ const COLORS = [
   "#000000",
 ];
 const STROKE_WIDTHS = [3, 6, 10];
-const PAN_DAMPING = 1.5;
 
-// Convert point array to SVG path string for display
-const pointsToSvgD = (points: Point[]): string => {
-  if (points.length === 0) return "";
-  return points.reduce((d, pt, i) => {
-    return d + (i === 0 ? `M${pt.x},${pt.y}` : ` L${pt.x},${pt.y}`);
-  }, "");
-};
+// --- ΡΥΘΜΙΣΗ ΕΥΑΙΣΘΗΣΙΑΣ ---
+// Όσο μεγαλύτερο το νούμερο, τόσο πιο αργά/ομαλά κινείται το χέρι.
+// Το 1.5 είναι μια καλή μέση λύση. Αν το θες πιο αργό, βάλε 2.
+const PAN_DAMPING = 1.5;
 
 export default function ImageEditorModal({
   visible,
@@ -71,45 +57,66 @@ export default function ImageEditorModal({
 }: ImageEditorModalProps) {
   // --- STATE ---
   const [paths, setPaths] = useState<DrawnPath[]>([]);
-  const [currentPoints, setCurrentPoints] = useState<Point[]>([]);
+  const [currentPath, setCurrentPath] = useState<string>("");
 
   // Tools
   const [activeTool, setActiveTool] = useState<"pen" | "move">("pen");
   const [selectedColor, setSelectedColor] = useState("#ef4444");
   const [selectedWidth, setSelectedWidth] = useState(5);
-  const [scale, setScale] = useState(1);
-  const [showHint, setShowHint] = useState(true);
-  const [saving, setSaving] = useState(false);
 
-  // Animated pan values
+  // Zoom State (Παραμένει state γιατί γίνεται με κλικ, όχι gesture)
+  const [scale, setScale] = useState(1);
+
+  // Hint visibility state
+  const [showHint, setShowHint] = useState(true);
+
+  // --- NEW: ANIMATED VALUES FOR PANNING (Για ομαλή κίνηση) ---
+  // Αντί για useState, χρησιμοποιούμε Animated.Value που δεν προκαλεί re-renders
   const panX = useRef(new Animated.Value(0)).current;
   const panY = useRef(new Animated.Value(0)).current;
+  // Κρατάμε την τελευταία θέση για να προσθέτουμε το νέο gesture πάνω της
   const lastPan = useRef({ x: 0, y: 0 });
 
-  // Refs for stale closure prevention
+  // Refs για να αποφύγουμε τα stale closures
   const colorRef = useRef(selectedColor);
   const widthRef = useRef(selectedWidth);
   const toolRef = useRef(activeTool);
   const scaleRef = useRef(scale);
+
+  // Track if last drawing point was in bounds to prevent jump lines
   const wasInBounds = useRef(true);
+  // Track last valid drawing position to detect jumps
   const lastValidPos = useRef({ x: 0, y: 0 });
 
+  // Dimensions πρέπει να δηλωθούν ΠΡΙΝ τα canvas refs που τα χρησιμοποιούν
+  const viewShotRef = useRef<ViewShot>(null);
   const { width, height } = Dimensions.get("window");
+
+  // Canvas layout measurement (absolute screen coordinates)
   const canvasLayoutRef = useRef({ top: 100, bottom: height - 110, left: 0, right: width });
   const canvasContainerRef = useRef<View>(null);
   const canvasHeightRef = useRef(height - 210);
   const [measuredCanvasHeight, setMeasuredCanvasHeight] = useState(height - 210);
 
-  // Load image into Skia for high-res export
-  const skiaImage = useImage(imageUri);
+  useEffect(() => {
+    colorRef.current = selectedColor;
+  }, [selectedColor]);
+  useEffect(() => {
+    widthRef.current = selectedWidth;
+  }, [selectedWidth]);
+  useEffect(() => {
+    toolRef.current = activeTool;
+  }, [activeTool]);
+  useEffect(() => {
+    scaleRef.current = scale;
+  }, [scale]);
 
-  // Sync refs
-  useEffect(() => { colorRef.current = selectedColor; }, [selectedColor]);
-  useEffect(() => { widthRef.current = selectedWidth; }, [selectedWidth]);
-  useEffect(() => { toolRef.current = activeTool; }, [activeTool]);
-  useEffect(() => { scaleRef.current = scale; }, [scale]);
-  useEffect(() => { canvasHeightRef.current = measuredCanvasHeight; }, [measuredCanvasHeight]);
+  // Keep canvasHeightRef in sync with state
+  useEffect(() => {
+    canvasHeightRef.current = measuredCanvasHeight;
+  }, [measuredCanvasHeight]);
 
+  // Re-measure canvas when tool changes (footer size changes with paintRow)
   useEffect(() => {
     const timer = setTimeout(() => {
       canvasContainerRef.current?.measureInWindow((x: number, y: number, w: number, h: number) => {
@@ -125,9 +132,12 @@ export default function ImageEditorModal({
     return () => clearTimeout(timer);
   }, [activeTool]);
 
+  // Auto-hide hint after 2 seconds when tool changes
   useEffect(() => {
     setShowHint(true);
-    const timer = setTimeout(() => setShowHint(false), 2000);
+    const timer = setTimeout(() => {
+      setShowHint(false);
+    }, 2000);
     return () => clearTimeout(timer);
   }, [activeTool]);
 
@@ -136,13 +146,17 @@ export default function ImageEditorModal({
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
+      // CRITICAL: Επέτρεψε termination όταν το touch πάει σε άλλα UI elements
       onPanResponderTerminationRequest: () => true,
 
       onPanResponderGrant: (evt) => {
         const { locationX, locationY, pageX, pageY } = evt.nativeEvent;
         if (toolRef.current === "pen") {
+          // Έλεγχος αν το αρχικό touch είναι μέσα στα όρια
           const EDGE_MARGIN = 15;
           const { top: canvasTop, bottom: canvasBottom, left: canvasLeft, right: canvasRight } = canvasLayoutRef.current;
+
+          // Compute actual image bounds in screen coords (accounting for pan + scale)
           const s = scaleRef.current;
           const tx = lastPan.current.x;
           const ty = lastPan.current.y;
@@ -153,31 +167,39 @@ export default function ImageEditorModal({
           const imgTop = canvasTop + cy * (1 - s) + s * ty;
           const imgBottom = canvasTop + cy * (1 + s) + s * ty;
 
+          // Visible area = intersection of canvas bounds and image bounds
           const isOutsideVisible =
             pageX < Math.max(canvasLeft, imgLeft) || pageX > Math.min(canvasRight, imgRight) ||
             pageY < Math.max(canvasTop, imgTop) || pageY > Math.min(canvasBottom, imgBottom);
 
           const isInBounds =
             !isOutsideVisible &&
-            locationX >= EDGE_MARGIN && locationX <= width - EDGE_MARGIN &&
-            locationY >= EDGE_MARGIN && locationY <= canvasHeightRef.current - EDGE_MARGIN;
+            locationX >= EDGE_MARGIN &&
+            locationX <= width - EDGE_MARGIN &&
+            locationY >= EDGE_MARGIN &&
+            locationY <= canvasHeightRef.current - EDGE_MARGIN;
 
           if (isInBounds) {
-            setCurrentPoints([{ x: locationX, y: locationY }]);
+            setCurrentPath(`M${locationX},${locationY}`);
             lastValidPos.current = { x: locationX, y: locationY };
             wasInBounds.current = true;
           } else {
+            // Αν ξεκίνησε εκτός, μην κάνεις τίποτα
             wasInBounds.current = false;
           }
         }
+        // Στο 'move' δεν χρειάζεται να κάνουμε κάτι στο grant πλέον
       },
 
       onPanResponderMove: (evt, gestureState) => {
         const { locationX, locationY, pageX, pageY } = evt.nativeEvent;
 
         if (toolRef.current === "pen") {
+          // ΖΩΓΡΑΦΙΣΜΑ - ΑΥΣΤΗΡΟΣ ΕΛΕΓΧΟΣ ΟΡΙΩΝ
           const EDGE_MARGIN = 15;
           const { top: canvasTop, bottom: canvasBottom, left: canvasLeft, right: canvasRight } = canvasLayoutRef.current;
+
+          // Compute actual image bounds in screen coords (accounting for pan + scale)
           const s = scaleRef.current;
           const tx = lastPan.current.x;
           const ty = lastPan.current.y;
@@ -188,36 +210,85 @@ export default function ImageEditorModal({
           const imgTop = canvasTop + cy * (1 - s) + s * ty;
           const imgBottom = canvasTop + cy * (1 + s) + s * ty;
 
+          // Visible area = intersection of canvas (with 20px header/footer buffer) and image bounds
           const isOutsideVisible =
             pageX < Math.max(canvasLeft, imgLeft) || pageX > Math.min(canvasRight, imgRight) ||
             pageY < Math.max(canvasTop + 20, imgTop) || pageY > Math.min(canvasBottom - 20, imgBottom);
 
-          if (isOutsideVisible) { wasInBounds.current = false; return; }
+          if (isOutsideVisible) {
+            // Το δάχτυλο είναι εκτός ορατής εικόνας - σταμάτα
+            wasInBounds.current = false;
+            return;
+          }
+
+          // Strict bounds check με locationX/Y
+          const minX = EDGE_MARGIN;
+          const maxX = width - EDGE_MARGIN;
+          const minY = EDGE_MARGIN;
+          const maxY = canvasHeightRef.current - EDGE_MARGIN;
 
           const isInBounds =
-            locationX >= EDGE_MARGIN && locationX <= width - EDGE_MARGIN &&
-            locationY >= EDGE_MARGIN && locationY <= canvasHeightRef.current - EDGE_MARGIN;
+            locationX >= minX &&
+            locationX <= maxX &&
+            locationY >= minY &&
+            locationY <= maxY;
 
+          // Έλεγχος για wild values ή μεγάλα jumps
           const isWildValue =
-            locationX < -20 || locationX > width + 20 ||
-            locationY < -20 || locationY > canvasHeightRef.current + 50 ||
-            Math.abs(locationX) > 2000 || Math.abs(locationY) > 2000;
+            locationX < -20 ||
+            locationX > width + 20 ||
+            locationY < -20 ||
+            locationY > canvasHeightRef.current + 50 ||
+            Math.abs(locationX) > 2000 ||
+            Math.abs(locationY) > 2000;
 
+          // Έλεγχος για JUMP: αν η νέα θέση είναι πολύ μακριά από την τελευταία έγκυρη
           const distanceFromLast = Math.sqrt(
             Math.pow(locationX - lastValidPos.current.x, 2) +
             Math.pow(locationY - lastValidPos.current.y, 2)
           );
-          const isJump = wasInBounds.current && distanceFromLast > 150;
+          const isJump = wasInBounds.current && distanceFromLast > 150; // >150px = jump
 
-          if (isWildValue || isJump) { wasInBounds.current = false; return; }
-          if (!isInBounds) { wasInBounds.current = false; return; }
+          if (isWildValue || isJump) {
+            // Wild value ή jump - αγνόησε
+            wasInBounds.current = false;
+            return;
+          }
 
+          if (!isInBounds) {
+            // Εκτός ορίων - σταμάτα να σχεδιάζεις
+            wasInBounds.current = false;
+            return;
+          }
+
+          // Μέσα στα όρια - σχεδίασε
+          const needsNewSegment = !wasInBounds.current;
           wasInBounds.current = true;
+
+          // Ενημέρωση τελευταίας έγκυρης θέσης
           lastValidPos.current = { x: locationX, y: locationY };
-          setCurrentPoints(prev => [...prev, { x: locationX, y: locationY }]);
+
+          setCurrentPath((prev) => {
+            if (needsNewSegment) {
+              // Μόλις γυρίσαμε στα όρια - ξεκίνα νέο segment
+              return `${prev} M${locationX},${locationY}`;
+            }
+            // Συνέχισε τη γραμμή κανονικά
+            return `${prev} L${locationX},${locationY}`;
+          });
         } else {
-          const newX = lastPan.current.x + gestureState.dx / scaleRef.current / PAN_DAMPING;
-          const newY = lastPan.current.y + gestureState.dy / scaleRef.current / PAN_DAMPING;
+          // ΜΕΤΑΚΙΝΗΣΗ (Framing) - ΟΜΑΛΗ ΕΚΔΟΣΗ
+          // Υπολογίζουμε τη νέα θέση βασισμένοι στην παλιά + την κίνηση του δαχτύλου.
+          // Διαιρούμε με το scaleRef.current για να μένει σταθερό στο zoom.
+          // Διαιρούμε με το PAN_DAMPING για να μειώσουμε την ευαισθησία.
+          const newX =
+            lastPan.current.x +
+            gestureState.dx / scaleRef.current / PAN_DAMPING;
+          const newY =
+            lastPan.current.y +
+            gestureState.dy / scaleRef.current / PAN_DAMPING;
+
+          // Ενημερώνουμε απευθείας τα Animated Values (ΔΕΝ προκαλεί re-render React)
           panX.setValue(newX);
           panY.setValue(newY);
         }
@@ -225,51 +296,65 @@ export default function ImageEditorModal({
 
       onPanResponderRelease: () => {
         if (toolRef.current === "pen") {
-          setCurrentPoints(prevPoints => {
-            if (prevPoints.length > 2) {
-              setPaths(prev => [...prev, {
-                points: prevPoints,
-                color: colorRef.current,
-                strokeWidth: widthRef.current,
-              }]);
+          setCurrentPath((prevPath) => {
+            // Αποθήκευσε μόνο αν υπάρχει πραγματικό path (τουλάχιστον M και L)
+            if (prevPath && prevPath.length > 15 && prevPath.includes("L")) {
+              setPaths((prev) => [
+                ...prev,
+                {
+                  d: prevPath,
+                  color: colorRef.current,
+                  width: widthRef.current,
+                },
+              ]);
             }
-            return [];
+            return "";
           });
           wasInBounds.current = true;
         } else {
+          // Μόλις αφήσει το δάχτυλο, αποθηκεύουμε την τελική θέση
+          // για να ξεκινήσει από εκεί την επόμενη φορά.
+          // (Χρησιμοποιούμε ένα 'hack' για να διαβάσουμε την τρέχουσα τιμή του animated value)
           lastPan.current.x = (panX as any)._value;
           lastPan.current.y = (panY as any)._value;
         }
       },
 
+      // CRITICAL: Χειρισμός termination όταν το gesture ακυρώνεται
+      // (π.χ. όταν το δάχτυλο πάει σε scrollable content ή άλλα UI elements)
       onPanResponderTerminate: () => {
         if (toolRef.current === "pen") {
-          setCurrentPoints(prevPoints => {
-            if (prevPoints.length > 2) {
-              setPaths(prev => [...prev, {
-                points: prevPoints,
-                color: colorRef.current,
-                strokeWidth: widthRef.current,
-              }]);
+          // Αποθήκευσε μόνο αν υπάρχει πραγματικό path
+          setCurrentPath((prevPath) => {
+            if (prevPath && prevPath.length > 15 && prevPath.includes("L")) {
+              setPaths((prev) => [
+                ...prev,
+                {
+                  d: prevPath,
+                  color: colorRef.current,
+                  width: widthRef.current,
+                },
+              ]);
             }
-            return [];
+            return "";
           });
           wasInBounds.current = true;
         } else {
+          // Για move tool, απλά αποθήκευσε την τελική θέση
           lastPan.current.x = (panX as any)._value;
           lastPan.current.y = (panY as any)._value;
         }
       },
-    })
+    }),
   ).current;
 
   // --- ACTIONS ---
-  const handleUndo = () => setPaths(prev => prev.slice(0, -1));
+  const handleUndo = () => setPaths((prev) => prev.slice(0, -1));
 
   const handleClearAll = () => {
     setPaths([]);
-    setCurrentPoints([]);
     setScale(1);
+    // Reset animated values
     panX.setValue(0);
     panY.setValue(0);
     lastPan.current = { x: 0, y: 0 };
@@ -277,94 +362,26 @@ export default function ImageEditorModal({
     lastValidPos.current = { x: 0, y: 0 };
   };
 
-  const handleZoomIn = () => setScale(s => Math.min(s + 0.2, 3));
-  const handleZoomOut = () => setScale(s => Math.max(s - 0.2, 1));
+  const handleZoomIn = () => setScale((s) => Math.min(s + 0.2, 3));
+  const handleZoomOut = () => setScale((s) => Math.max(s - 0.2, 1));
 
-  // --- SAVE with Skia offscreen surface (full original resolution) ---
   const handleSave = async () => {
-    if (!skiaImage) {
-      console.log("⏳ Skia image not ready yet");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const imgW = imageWidth || skiaImage.width();
-      const imgH = imageHeight || skiaImage.height();
-
-      // How the image is displayed with "contain" fitting on screen
-      const containScale = Math.min(width / imgW, measuredCanvasHeight / imgH);
-      const displayW = imgW * containScale;
-      const displayH = imgH * containScale;
-      const containX = (width - displayW) / 2;
-      const containY = (measuredCanvasHeight - displayH) / 2;
-
-      // Scale factors from screen coords → image coords
-      const scaleX = imgW / displayW;
-      const scaleY = imgH / displayH;
-
-      // Create offscreen Skia surface at ORIGINAL image resolution
-      const surface = Skia.Surface.MakeOffscreen(imgW, imgH);
-      if (!surface) throw new Error("Failed to create Skia surface");
-
-      const skCanvas = surface.getCanvas();
-
-      // Draw original full-res image
-      const imgPaint = Skia.Paint();
-      skCanvas.drawImageRect(
-        skiaImage,
-        Skia.XYWHRect(0, 0, skiaImage.width(), skiaImage.height()),
-        Skia.XYWHRect(0, 0, imgW, imgH),
-        imgPaint
-      );
-
-      // Draw all annotation paths at image resolution
-      for (const pathData of paths) {
-        if (pathData.points.length < 2) continue;
-
-        const strokePaint = Skia.Paint();
-        strokePaint.setStyle(PaintStyle.Stroke);
-        strokePaint.setColor(Skia.Color(pathData.color));
-        strokePaint.setStrokeWidth(pathData.strokeWidth * scaleX);
-        strokePaint.setStrokeCap(StrokeCap.Round);
-        strokePaint.setStrokeJoin(StrokeJoin.Round);
-        strokePaint.setAntiAlias(true);
-
-        const skPath = Skia.Path.Make();
-        let started = false;
-
-        for (const pt of pathData.points) {
-          // Convert screen canvas coords → image coords
-          const imgX = (pt.x - containX) * scaleX;
-          const imgY = (pt.y - containY) * scaleY;
-          if (!started) {
-            skPath.moveTo(imgX, imgY);
-            started = true;
-          } else {
-            skPath.lineTo(imgX, imgY);
-          }
+    if (viewShotRef.current && viewShotRef.current.capture) {
+      try {
+        const captureOptions: any = { format: "jpg", quality: 1 };
+        if (imageWidth && imageHeight) {
+          captureOptions.width = imageWidth;
+          captureOptions.height = imageHeight;
         }
-
-        if (started) skCanvas.drawPath(skPath, strokePaint);
+        const uri = await viewShotRef.current.capture(captureOptions);
+        onSave(uri);
+        // Reset μετά από λίγο
+        setTimeout(() => {
+          handleClearAll();
+        }, 500);
+      } catch (e) {
+        console.log("Capture failed", e);
       }
-
-      // Export as JPEG at 90% quality
-      const snapshot = surface.makeImageSnapshot();
-      const base64 = snapshot.encodeToBase64(ImageFormat.JPEG, 90);
-
-      const fileUri = (FileSystem.cacheDirectory || "") + "skia_edited_" + Date.now() + ".jpg";
-      await FileSystem.writeAsStringAsync(fileUri, base64, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
-      console.log(`✅ Skia export: ${imgW}×${imgH} → ${fileUri}`);
-      onSave(fileUri);
-
-      setTimeout(() => handleClearAll(), 500);
-    } catch (e: any) {
-      console.error("Skia save failed:", e);
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -383,14 +400,18 @@ export default function ImageEditorModal({
 
           <View style={styles.headerActions}>
             <TouchableOpacity onPress={handleClearAll} style={styles.textBtn}>
-              <Text style={{ color: "#ef4444", fontWeight: "bold" }}>Reset</Text>
+              <Text style={{ color: "#ef4444", fontWeight: "bold" }}>
+                Reset
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               onPress={handleSave}
-              disabled={saving}
-              style={[styles.iconBtn, { backgroundColor: saving ? "#555" : "#22c55e", borderRadius: 20, padding: 4 }]}
+              style={[
+                styles.iconBtn,
+                { backgroundColor: "#22c55e", borderRadius: 20, padding: 4 },
+              ]}
             >
-              <Ionicons name={saving ? "hourglass" : "checkmark"} size={24} color="white" />
+              <Ionicons name="checkmark" size={24} color="white" />
             </TouchableOpacity>
           </View>
         </View>
@@ -411,49 +432,72 @@ export default function ImageEditorModal({
               });
             });
           }}
-          style={{ flex: 1, overflow: "hidden", backgroundColor: "#111", justifyContent: "center", alignItems: "center" }}
+          style={{
+            flex: 1,
+            overflow: "hidden",
+            backgroundColor: "#111",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
         >
-          <Animated.View
+          <ViewShot
+            ref={viewShotRef}
+            options={{ format: "jpg", quality: 1 }}
             style={{
               width: width,
               height: measuredCanvasHeight,
               backgroundColor: "black",
               overflow: "hidden",
-              transform: [{ scale }, { translateX: panX }, { translateY: panY }],
             }}
           >
-            <Image
-              source={{ uri: imageUri }}
-              style={{ width: "100%", height: "100%" }}
-              contentFit="contain"
-            />
+            {/* Χρησιμοποιούμε Animated.View για τη μετακίνηση */}
+            <Animated.View
+              style={{
+                width: "100%",
+                height: "100%",
+                transform: [
+                  { scale: scale }, // Το Zoom παραμένει με state (είναι ΟΚ γιατί δεν είναι συνεχές gesture)
+                  { translateX: panX }, // Η μετακίνηση Χ με Animated Value
+                  { translateY: panY }, // Η μετακίνηση Y με Animated Value
+                ],
+              }}
+            >
+              <Image
+                source={{ uri: imageUri }}
+                style={{ width: "100%", height: "100%" }}
+                contentFit="contain"
+              />
 
-            <View style={StyleSheet.absoluteFill} {...panResponder.panHandlers}>
-              <Svg height="100%" width="100%">
-                {paths.map((p, index) => (
-                  <Path
-                    key={index}
-                    d={pointsToSvgD(p.points)}
-                    stroke={p.color}
-                    strokeWidth={p.strokeWidth / scale}
-                    fill="none"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                ))}
-                {currentPoints.length > 0 && (
-                  <Path
-                    d={pointsToSvgD(currentPoints)}
-                    stroke={selectedColor}
-                    strokeWidth={selectedWidth / scale}
-                    fill="none"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                )}
-              </Svg>
-            </View>
-          </Animated.View>
+              <View
+                style={StyleSheet.absoluteFill}
+                {...panResponder.panHandlers}
+              >
+                <Svg height="100%" width="100%">
+                  {paths.map((p, index) => (
+                    <Path
+                      key={index}
+                      d={p.d}
+                      stroke={p.color}
+                      strokeWidth={p.width / scale}
+                      fill="none"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  ))}
+                  {currentPath ? (
+                    <Path
+                      d={currentPath}
+                      stroke={selectedColor}
+                      strokeWidth={selectedWidth / scale}
+                      fill="none"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  ) : null}
+                </Svg>
+              </View>
+            </Animated.View>
+          </ViewShot>
 
           {showHint && (
             <View style={styles.overlayGuide}>
@@ -474,15 +518,29 @@ export default function ImageEditorModal({
             <View style={styles.modeSwitch}>
               <TouchableOpacity
                 onPress={() => setActiveTool("move")}
-                style={[styles.modeBtn, activeTool === "move" && styles.modeBtnActive]}
+                style={[
+                  styles.modeBtn,
+                  activeTool === "move" && styles.modeBtnActive,
+                ]}
               >
-                <Ionicons name="hand-left" size={22} color={activeTool === "move" ? "white" : "#999"} />
+                <Ionicons
+                  name="hand-left"
+                  size={22}
+                  color={activeTool === "move" ? "white" : "#999"}
+                />
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => setActiveTool("pen")}
-                style={[styles.modeBtn, activeTool === "pen" && styles.modeBtnActive]}
+                style={[
+                  styles.modeBtn,
+                  activeTool === "pen" && styles.modeBtnActive,
+                ]}
               >
-                <Ionicons name="pencil" size={22} color={activeTool === "pen" ? "white" : "#999"} />
+                <Ionicons
+                  name="pencil"
+                  size={22}
+                  color={activeTool === "pen" ? "white" : "#999"}
+                />
               </TouchableOpacity>
             </View>
 
@@ -508,18 +566,30 @@ export default function ImageEditorModal({
                       styles.strokeOption,
                       { width: w + 8, height: w + 8, borderRadius: 20 },
                       selectedWidth === w
-                        ? { borderColor: "white", borderWidth: 1, backgroundColor: selectedColor }
+                        ? {
+                            borderColor: "white",
+                            borderWidth: 1,
+                            backgroundColor: selectedColor,
+                          }
                         : { backgroundColor: "#555" },
                     ]}
                   />
                 ))}
               </View>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.colorScroll}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.colorScroll}
+              >
                 {COLORS.map((color) => (
                   <TouchableOpacity
                     key={color}
                     onPress={() => setSelectedColor(color)}
-                    style={[styles.colorCircle, { backgroundColor: color }, selectedColor === color && styles.selectedColor]}
+                    style={[
+                      styles.colorCircle,
+                      { backgroundColor: color },
+                      selectedColor === color && styles.selectedColor,
+                    ]}
                   />
                 ))}
               </ScrollView>
@@ -565,20 +635,53 @@ const styles = StyleSheet.create({
   },
   toolBtn: { padding: 10, backgroundColor: "#333", borderRadius: 8 },
 
-  modeSwitch: { flexDirection: "row", backgroundColor: "#222", borderRadius: 12, padding: 2 },
+  modeSwitch: {
+    flexDirection: "row",
+    backgroundColor: "#222",
+    borderRadius: 12,
+    padding: 2,
+  },
   modeBtn: { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 10 },
   modeBtnActive: { backgroundColor: "#3b82f6" },
 
   zoomControls: { flexDirection: "row", gap: 10, alignItems: "center" },
-  zoomHint: { color: "#999", fontSize: 12, fontWeight: "600", marginRight: 8 },
-  zoomBtn: { width: 40, height: 40, backgroundColor: "#333", borderRadius: 20, justifyContent: "center", alignItems: "center" },
+  zoomHint: {
+    color: "#999",
+    fontSize: 12,
+    fontWeight: "600",
+    marginRight: 8,
+  },
+  zoomBtn: {
+    width: 40,
+    height: 40,
+    backgroundColor: "#333",
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+  },
   zoomText: { color: "white", fontSize: 24, fontWeight: "bold", marginTop: -2 },
 
-  paintRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, marginTop: 5 },
-  strokeSelector: { flexDirection: "row", alignItems: "center", gap: 10, marginRight: 15 },
+  paintRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    marginTop: 5,
+  },
+  strokeSelector: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginRight: 15,
+  },
   strokeOption: {},
   colorScroll: { alignItems: "center", gap: 12 },
-  colorCircle: { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: "transparent" },
+  colorCircle: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
   selectedColor: { borderColor: "white", transform: [{ scale: 1.1 }] },
 
   overlayGuide: {
