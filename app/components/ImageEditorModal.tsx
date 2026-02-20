@@ -22,6 +22,17 @@ interface ImageEditorModalProps {
   imageUri: string | null;
   onClose: () => void;
   onSave: (editedUri: string) => void;
+  imageNaturalWidth?: number;
+  imageNaturalHeight?: number;
+}
+
+// totalScale = (hiResDownScale / letterImgScale): maps container-space coords to hi-res image space
+function transformPath(d: string, offsetX: number, offsetY: number, totalScale: number): string {
+  return d.replace(/([ML])\s*(-?[\d.]+),(-?[\d.]+)/g, (_, cmd, x, y) => {
+    const hx = ((+x - offsetX) * totalScale).toFixed(1);
+    const hy = ((+y - offsetY) * totalScale).toFixed(1);
+    return `${cmd}${hx},${hy}`;
+  });
 }
 
 type DrawnPath = {
@@ -50,6 +61,8 @@ export default function ImageEditorModal({
   imageUri,
   onClose,
   onSave,
+  imageNaturalWidth,
+  imageNaturalHeight,
 }: ImageEditorModalProps) {
   // --- STATE ---
   const [paths, setPaths] = useState<DrawnPath[]>([]);
@@ -65,6 +78,9 @@ export default function ImageEditorModal({
 
   // Hint visibility state
   const [showHint, setShowHint] = useState(true);
+
+  // Triggers on-demand off-screen hi-res capture
+  const [isCapturing, setIsCapturing] = useState(false);
 
   // --- NEW: ANIMATED VALUES FOR PANNING (Για ομαλή κίνηση) ---
   // Αντί για useState, χρησιμοποιούμε Animated.Value που δεν προκαλεί re-renders
@@ -86,6 +102,7 @@ export default function ImageEditorModal({
 
   // Dimensions πρέπει να δηλωθούν ΠΡΙΝ τα canvas refs που τα χρησιμοποιούν
   const viewShotRef = useRef<ViewShot>(null);
+  const hiResViewShotRef = useRef<ViewShot>(null);
   const { width, height } = Dimensions.get("window");
 
   // Canvas layout measurement (absolute screen coordinates)
@@ -111,6 +128,34 @@ export default function ImageEditorModal({
   useEffect(() => {
     canvasHeightRef.current = measuredCanvasHeight;
   }, [measuredCanvasHeight]);
+
+  // On-demand hi-res capture: renders off-screen ViewShot only during save
+  useEffect(() => {
+    if (!isCapturing) return;
+    const timer = setTimeout(async () => {
+      try {
+        if (hiResViewShotRef.current && (hiResViewShotRef.current as any).capture) {
+          const uri = await (hiResViewShotRef.current as any).capture({ quality: 1.0 });
+          onSave(uri);
+          setTimeout(() => handleClearAll(), 500);
+        }
+      } catch (e) {
+        console.log("Hi-res capture failed, falling back", e);
+        try {
+          if (viewShotRef.current && (viewShotRef.current as any).capture) {
+            const uri = await (viewShotRef.current as any).capture({ quality: 1.0 });
+            onSave(uri);
+            setTimeout(() => handleClearAll(), 500);
+          }
+        } catch (e2) {
+          console.log("Fallback capture failed", e2);
+        }
+      } finally {
+        setIsCapturing(false);
+      }
+    }, 150); // Wait 150ms for the off-screen component to render
+    return () => clearTimeout(timer);
+  }, [isCapturing]);
 
   // Re-measure canvas when tool changes (footer size changes with paintRow)
   useEffect(() => {
@@ -362,19 +407,40 @@ export default function ImageEditorModal({
   const handleZoomOut = () => setScale((s) => Math.max(s - 0.2, 1));
 
   const handleSave = async () => {
-    if (viewShotRef.current && viewShotRef.current.capture) {
-      try {
-        const uri = await viewShotRef.current.capture();
-        onSave(uri);
-        // Reset μετά από λίγο
-        setTimeout(() => {
-          handleClearAll();
-        }, 500);
-      } catch (e) {
-        console.log("Capture failed", e);
+    if (imageNaturalWidth && imageNaturalHeight) {
+      // Trigger on-demand off-screen hi-res render → captured in useEffect
+      setIsCapturing(true);
+    } else {
+      // No natural dims (e.g. re-edit from Firebase URL) → capture visible ViewShot
+      if (viewShotRef.current && (viewShotRef.current as any).capture) {
+        try {
+          const uri = await (viewShotRef.current as any).capture({ quality: 1.0 });
+          onSave(uri);
+          setTimeout(() => handleClearAll(), 500);
+        } catch (e) {
+          console.log("Capture failed", e);
+        }
       }
     }
   };
+
+  // Letterbox transform: map container-space stroke coords → hi-res image space
+  const containerW = width;
+  const containerH = measuredCanvasHeight;
+  const letterImgScale = (imageNaturalWidth && imageNaturalHeight)
+    ? Math.min(containerW / imageNaturalWidth, containerH / imageNaturalHeight)
+    : 1;
+  const letterOffsetX = imageNaturalWidth ? (containerW - imageNaturalWidth * letterImgScale) / 2 : 0;
+  const letterOffsetY = imageNaturalHeight ? (containerH - imageNaturalHeight * letterImgScale) / 2 : 0;
+  // Cap hi-res output at 2048px to avoid OOM — still far exceeds screen resolution
+  const MAX_HI_RES = 2048;
+  const hiResDownScale = (imageNaturalWidth && imageNaturalHeight)
+    ? Math.min(1, MAX_HI_RES / Math.max(imageNaturalWidth, imageNaturalHeight))
+    : 1;
+  const hiResW = imageNaturalWidth ? Math.round(imageNaturalWidth * hiResDownScale) : 0;
+  const hiResH = imageNaturalHeight ? Math.round(imageNaturalHeight * hiResDownScale) : 0;
+  // Combined scale: container → hi-res space (accounts for letterbox + downscale)
+  const hiResTotalScale = letterImgScale > 0 ? hiResDownScale / letterImgScale : 1;
 
   if (!imageUri) return null;
 
@@ -587,6 +653,42 @@ export default function ImageEditorModal({
             </View>
           )}
         </View>
+        {/* Off-screen hi-res ViewShot — only rendered during save (on-demand) */}
+        {isCapturing && imageNaturalWidth && imageNaturalHeight && (
+          <View
+            pointerEvents="none"
+            style={{ position: "absolute", opacity: 0, top: 0, left: 0 }}
+          >
+            <ViewShot
+              ref={hiResViewShotRef}
+              options={{ format: "jpg", quality: 1.0 }}
+              style={{ width: hiResW, height: hiResH }}
+            >
+              <Image
+                source={{ uri: imageUri }}
+                style={{ width: "100%", height: "100%" }}
+                contentFit="fill"
+              />
+              <Svg
+                style={StyleSheet.absoluteFill}
+                width={hiResW}
+                height={hiResH}
+              >
+                {paths.map((p, i) => (
+                  <Path
+                    key={i}
+                    d={transformPath(p.d, letterOffsetX, letterOffsetY, hiResTotalScale)}
+                    stroke={p.color}
+                    strokeWidth={p.width * hiResTotalScale}
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                ))}
+              </Svg>
+            </ViewShot>
+          </View>
+        )}
       </SafeAreaView>
     </Modal>
   );

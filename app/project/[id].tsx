@@ -123,9 +123,42 @@ function normalizeVideoTask(task: any): Task {
 const OFFLINE_QUEUE_KEY = "offline_tasks_queue_";
 const PROJECT_CACHE_KEY_PREFIX = "cached_project_tasks_";
 
+// --- GALLERY PHOTO TILE (with error state for deleted/unavailable files) ---
+const GalleryPhotoTile = ({ uri, onPress }: { uri: string; onPress: () => void }) => {
+  const [hasError, setHasError] = useState(false);
+  useEffect(() => { setHasError(false); }, [uri]);
+  return (
+    <TouchableOpacity style={styles.photoTile} onPress={onPress}>
+      {hasError ? (
+        <View style={{ width: "100%", height: "100%", backgroundColor: "#1e293b", justifyContent: "center", alignItems: "center" }}>
+          <Ionicons name="image-outline" size={28} color="#475569" />
+          <Text style={{ color: "#475569", fontSize: 10, marginTop: 4 }}>Μη διαθέσιμο</Text>
+        </View>
+      ) : (
+        <Image
+          source={{ uri }}
+          style={{ width: "100%", height: "100%" }}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          onError={() => setHasError(true)}
+        />
+      )}
+    </TouchableOpacity>
+  );
+};
+
 // --- TASK ITEM ---
 const TaskItem = ({ item, onPress, onLongPress, isSyncing }: any) => {
   if (!item) return null;
+  const [thumbError, setThumbError] = useState(false);
+
+  // Reset error when URI changes (e.g. file:// temp → Firebase URL after sync)
+  const lastImageUri = item.type === "photo" && item.images?.length > 0
+    ? item.images[item.images.length - 1]
+    : null;
+  useEffect(() => {
+    setThumbError(false);
+  }, [lastImageUri]);
 
   let iconName: any = "document-text";
   if (item.type === "photo") iconName = "camera";
@@ -185,10 +218,17 @@ const TaskItem = ({ item, onPress, onLongPress, isSyncing }: any) => {
           {item.type === "photo" ? (
             item.images.length > 0 ? (
               <View style={styles.thumbnailBox}>
-                <Image
-                  source={{ uri: item.images[item.images.length - 1] }}
-                  style={styles.thumbImage}
-                />
+                {thumbError ? (
+                  <View style={[styles.thumbImage, { backgroundColor: "#1e293b", justifyContent: "center", alignItems: "center" }]}>
+                    <Ionicons name="image-outline" size={20} color="#475569" />
+                  </View>
+                ) : (
+                  <Image
+                    source={{ uri: item.images[item.images.length - 1] }}
+                    style={styles.thumbImage}
+                    onError={() => setThumbError(true)}
+                  />
+                )}
                 <View style={styles.badge}>
                   <Text style={styles.badgeText}>{item.images.length}</Text>
                 </View>
@@ -260,6 +300,7 @@ export default function ProjectDetailsScreen() {
   // --- EDITOR STATES ---
   const [editorVisible, setEditorVisible] = useState(false);
   const [tempImageUri, setTempImageUri] = useState<string | null>(null);
+  const [tempImageDims, setTempImageDims] = useState<{ w: number; h: number } | null>(null);
   const [tempGpsLoc, setTempGpsLoc] = useState<GeoPoint | undefined>(undefined);
   const [taskForEditing, setTaskForEditing] = useState<Task | null>(null);
   const [reEditingIndex, setReEditingIndex] = useState<number | null>(null); // For re-editing existing photos
@@ -285,6 +326,8 @@ export default function ProjectDetailsScreen() {
   const [selectedMediaForView, setSelectedMediaForView] = useState<
     string | null
   >(null);
+  const [mediaViewError, setMediaViewError] = useState(false);
+  const [mediaLoaded, setMediaLoaded] = useState(false);
 
   const videoRef = useRef<Video>(null);
 
@@ -402,6 +445,12 @@ export default function ProjectDetailsScreen() {
       updateProjectStatus(newStatus);
     }
   }, [combinedTasks]); // Τρέχει όποτε αλλάξει κάτι στα tasks
+
+  // Reset media states when switching to a different file
+  useEffect(() => {
+    setMediaViewError(false);
+    setMediaLoaded(false);
+  }, [selectedMediaForView]);
 
   // --- AUTO-REFRESH GALLERY ---
   useEffect(() => {
@@ -789,6 +838,7 @@ export default function ProjectDetailsScreen() {
           // To Drawing Editor
           setTaskForEditing(task);
           setTempImageUri(r.assets[0].uri);
+          setTempImageDims({ w: r.assets[0].width, h: r.assets[0].height });
           setTempGpsLoc(gpsLoc);
           setReEditingIndex(null);
           setEditorVisible(true);
@@ -846,6 +896,7 @@ export default function ProjectDetailsScreen() {
 
           setTaskForEditing(task);
           setTempImageUri(r.assets[0].uri);
+          setTempImageDims({ w: r.assets[0].width, h: r.assets[0].height });
           setTempGpsLoc(gpsLoc);
           setReEditingIndex(null);
           setEditorVisible(true);
@@ -925,6 +976,7 @@ export default function ProjectDetailsScreen() {
     } finally {
       setProcessing(false);
       setTempImageUri(null);
+      setTempImageDims(null);
       setTaskForEditing(null);
       setReEditingIndex(null); // Reset re-edit mode
     }
@@ -1072,6 +1124,7 @@ export default function ProjectDetailsScreen() {
     // Set up for re-editing
     setReEditingIndex(index);
     setTempImageUri(selectedMediaForView);
+    setTempImageDims(null); // Firebase URL — natural dims not available
     setTaskForEditing(activeTaskForGallery);
     setSelectedMediaForView(null); // Close the viewer
     setEditorVisible(true);
@@ -2072,9 +2125,12 @@ export default function ProjectDetailsScreen() {
         <ImageEditorModal
           visible={editorVisible}
           imageUri={tempImageUri}
+          imageNaturalWidth={tempImageDims?.w}
+          imageNaturalHeight={tempImageDims?.h}
           onClose={() => {
             setEditorVisible(false);
             setTempImageUri(null);
+            setTempImageDims(null);
             setReEditingIndex(null); // Reset re-edit mode to prevent overwriting new photos
           }}
           onSave={handleEditorSave}
@@ -2152,42 +2208,31 @@ export default function ProjectDetailsScreen() {
                     />
                     <Text style={styles.addPhotoText}>Προσθήκη</Text>
                   </TouchableOpacity>
-                ) : (
+                ) : activeTaskForGallery?.type === "video" ? (
                   <TouchableOpacity
                     style={styles.photoTile}
                     onPress={() => setSelectedMediaForView(item)}
                   >
-                    {activeTaskForGallery?.type === "video" ? (
-                      <View
-                        style={{
-                          width: "100%",
-                          height: "100%",
-                          justifyContent: "center",
-                          alignItems: "center",
-                          backgroundColor: "#111",
-                        }}
-                      >
-                        <Ionicons name="play-circle" size={40} color="white" />
-                        <Text
-                          style={{
-                            color: "white",
-                            fontSize: 10,
-                            position: "absolute",
-                            bottom: 5,
-                          }}
-                        >
-                          VIDEO
-                        </Text>
-                      </View>
-                    ) : (
-                      <Image
-                        source={{ uri: item }}
-                        style={{ width: "100%", height: "100%" }}
-                        contentFit="cover"
-                        cachePolicy="memory-disk"
-                      />
-                    )}
+                    <View
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        justifyContent: "center",
+                        alignItems: "center",
+                        backgroundColor: "#111",
+                      }}
+                    >
+                      <Ionicons name="play-circle" size={40} color="white" />
+                      <Text style={{ color: "white", fontSize: 10, position: "absolute", bottom: 5 }}>
+                        VIDEO
+                      </Text>
+                    </View>
                   </TouchableOpacity>
+                ) : (
+                  <GalleryPhotoTile
+                    uri={item}
+                    onPress={() => setSelectedMediaForView(item)}
+                  />
                 )
               }
               keyExtractor={(item, index) => index.toString()}
@@ -2208,7 +2253,17 @@ export default function ProjectDetailsScreen() {
           },
         ]}>
           {/* Show Video component for video tasks (file://, data:video, Storage URLs) */}
-          {(selectedMediaForView?.startsWith("data:video") ||
+          {mediaViewError ? (
+            <View style={[styles.fullImage, { justifyContent: "center", alignItems: "center" }]}>
+              <Ionicons name="image-outline" size={64} color="#475569" />
+              <Text style={{ color: "#94a3b8", marginTop: 16, fontSize: 16, fontWeight: "600" }}>
+                Αρχείο μη διαθέσιμο
+              </Text>
+              <Text style={{ color: "#64748b", marginTop: 6, fontSize: 13, textAlign: "center", paddingHorizontal: 40 }}>
+                Το αρχείο ενδέχεται να έχει διαγραφεί από το storage
+              </Text>
+            </View>
+          ) : (selectedMediaForView?.startsWith("data:video") ||
             activeTaskForGallery?.type === "video") ? (
             <Video
               ref={videoRef}
@@ -2218,12 +2273,16 @@ export default function ProjectDetailsScreen() {
               resizeMode={ResizeMode.CONTAIN}
               isLooping
               shouldPlay
+              onReadyForDisplay={() => setMediaLoaded(true)}
+              onError={() => setMediaViewError(true)}
             />
           ) : (
             <Image
               source={{ uri: selectedMediaForView || "" }}
               style={styles.fullImage}
               contentFit="contain"
+              onLoad={() => setMediaLoaded(true)}
+              onError={() => setMediaViewError(true)}
             />
           )}
           <TouchableOpacity
@@ -2232,56 +2291,58 @@ export default function ProjectDetailsScreen() {
           >
             <Ionicons name="arrow-back" size={30} color="white" />
           </TouchableOpacity>
-          <View
-            style={[
-              styles.toolBar,
-              // Move toolbar higher for videos to stay above native video controls
-              (selectedMediaForView?.startsWith("data:video") ||
-                activeTaskForGallery?.type === "video") && {
-                bottom: insets.bottom + 120,
-              },
-            ]}
-          >
-            <TouchableOpacity
-              style={styles.toolBtn}
-              onPress={openMediaLocation}
+          {mediaLoaded && (
+            <View
+              style={[
+                styles.toolBar,
+                // Move toolbar higher for videos to stay above native video controls
+                (selectedMediaForView?.startsWith("data:video") ||
+                  activeTaskForGallery?.type === "video") && {
+                  bottom: insets.bottom + 120,
+                },
+              ]}
             >
-              <Ionicons name="map" size={24} color="#3b82f6" />
-              <Text style={[styles.toolText, { color: "#3b82f6" }]}>
-                Χάρτης
-              </Text>
-            </TouchableOpacity>
-            {/* Edit button - only for photos, not videos */}
-            {activeTaskForGallery?.type === "photo" && Platform.OS !== "web" && (
               <TouchableOpacity
                 style={styles.toolBtn}
-                onPress={handleOpenReEdit}
+                onPress={openMediaLocation}
               >
-                <Ionicons name="brush" size={24} color="#10b981" />
-                <Text style={[styles.toolText, { color: "#10b981" }]}>
-                  Σχεδίαση
+                <Ionicons name="map" size={24} color="#3b82f6" />
+                <Text style={[styles.toolText, { color: "#3b82f6" }]}>
+                  Χάρτης
                 </Text>
               </TouchableOpacity>
-            )}
-            <TouchableOpacity
-              style={styles.toolBtn}
-              onPress={() => confirmDeleteMedia()}
-            >
-              <Ionicons name="trash-outline" size={24} color="#ef4444" />
-              <Text style={[styles.toolText, { color: "#ef4444" }]}>
-                Διαγραφή
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.toolBtn}
-              onPress={() =>
-                selectedMediaForView && handleShare(selectedMediaForView)
-              }
-            >
-              <Ionicons name="share-outline" size={24} color="white" />
-              <Text style={styles.toolText}>Κοινοποίηση</Text>
-            </TouchableOpacity>
-          </View>
+              {/* Edit button - only for photos, not videos */}
+              {activeTaskForGallery?.type === "photo" && Platform.OS !== "web" && (
+                <TouchableOpacity
+                  style={styles.toolBtn}
+                  onPress={handleOpenReEdit}
+                >
+                  <Ionicons name="brush" size={24} color="#10b981" />
+                  <Text style={[styles.toolText, { color: "#10b981" }]}>
+                    Σχεδίαση
+                  </Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={styles.toolBtn}
+                onPress={() => confirmDeleteMedia()}
+              >
+                <Ionicons name="trash-outline" size={24} color="#ef4444" />
+                <Text style={[styles.toolText, { color: "#ef4444" }]}>
+                  Διαγραφή
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.toolBtn}
+                onPress={() =>
+                  selectedMediaForView && handleShare(selectedMediaForView)
+                }
+              >
+                <Ionicons name="share-outline" size={24} color="white" />
+                <Text style={styles.toolText}>Κοινοποίηση</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       </Modal>
     </View>
