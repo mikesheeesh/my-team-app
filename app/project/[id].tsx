@@ -1350,7 +1350,7 @@ export default function ProjectDetailsScreen() {
       // Build photo appendix section - full-size photos grouped by task
       let photosAppendixHTML = "";
       const photoTasksForAppendix = combinedTasks.filter(
-        (t) => t.type === "photo" && t.images.length > 0
+        (t): t is PhotoTask => t.type === "photo" && (t as PhotoTask).images.length > 0
       );
       if (photoTasksForAppendix.length > 0) {
         let photoPagesHTML = "";
@@ -2071,8 +2071,8 @@ export default function ProjectDetailsScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* CUSTOM IMAGE EDITOR (Only show if not web) */}
-      {Platform.OS !== "web" && (
+      {/* CUSTOM IMAGE EDITOR (Only show when image is ready - prevents useImage(null) crash) */}
+      {Platform.OS !== "web" && tempImageUri && (
         <ImageEditorModal
           visible={editorVisible}
           imageUri={tempImageUri}
@@ -2297,7 +2297,7 @@ export default function ProjectDetailsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f8fafc", marginTop: 20 },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  center: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#f8fafc" },
   header: {
     flexDirection: "row",
     alignItems: "center",

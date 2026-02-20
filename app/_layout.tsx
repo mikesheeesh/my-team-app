@@ -14,7 +14,7 @@ export default function Layout() {
     <UserProvider>
       <SyncProvider>
         <DriveSyncProvider>
-          <Stack screenOptions={{ headerShown: false }}>
+          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "#f8fafc" } }}>
             <Stack.Screen name="index" />
             <Stack.Screen name="login" />
             <Stack.Screen name="onboarding/invite" />
