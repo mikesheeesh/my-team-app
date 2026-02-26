@@ -3,6 +3,9 @@
     "target": "app",
     "public": "dist",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "predeploy": [
+      "node scripts/copy-static.js"
+    ],
     "rewrites": [
       {
         "source": "**",

@@ -1167,6 +1167,23 @@ export default function TeamProjectsScreen() {
                   <Text style={styles.optionText}>Ρυθμίσεις</Text>
                 </TouchableOpacity>
               )}
+
+              {(myRole === "Founder" || myRole === "Admin") && (
+                <TouchableOpacity
+                  style={styles.optionCard}
+                  onPress={() => {
+                    setMenuVisible(false);
+                    Linking.openURL("https://ergon-work.web.app/admin/");
+                  }}
+                >
+                  <View
+                    style={[styles.optionIcon, { backgroundColor: "#eff6ff" }]}
+                  >
+                    <Ionicons name="globe-outline" size={28} color="#3b82f6" />
+                  </View>
+                  <Text style={styles.optionText}>Admin Panel</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             {myRole === "Founder" && (

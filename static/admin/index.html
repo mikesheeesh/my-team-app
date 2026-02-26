@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ergon Admin Panel</title>
+  <style>
+    :root {
+      --bg: #0f172a; --card: #1e293b; --card2: #273549;
+      --border: #334155; --text: #e2e8f0; --text2: #94a3b8;
+      --accent: #3b82f6; --accent-h: #2563eb;
+      --danger: #ef4444; --danger-h: #dc2626;
+      --success: #22c55e; --warning: #f59e0b;
+      --founder: #f97316; --admin: #3b82f6;
+      --supervisor: #22c55e; --user-col: #64748b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+    .screen { display: none; min-height: 100vh; }
+    .screen.active { display: flex; flex-direction: column; }
+
+    /* Header */
+    .header { background: var(--card); border-bottom: 1px solid var(--border); padding: 14px 20px; display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 10; }
+    .header-titles { flex: 1; }
+    .header-title { font-size: 17px; font-weight: 700; }
+    .header-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
+    .back-btn { background: none; border: none; color: var(--text2); cursor: pointer; font-size: 24px; padding: 0; line-height: 1; display: flex; align-items: center; }
+    .back-btn:hover { color: var(--text); }
+
+    /* Buttons */
+    .btn { padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; font-weight: 500; transition: background .15s; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-h); }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-danger:hover { background: var(--danger-h); }
+    .btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
+    .btn-ghost:hover { background: var(--card2); }
+    .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 6px; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* Login */
+    #login-screen { justify-content: center; align-items: center; }
+    .login-box { background: var(--card); border-radius: 16px; padding: 32px; border: 1px solid var(--border); width: 100%; max-width: 380px; margin: 20px; }
+    .login-logo { text-align: center; margin-bottom: 28px; }
+    .login-logo h1 { font-size: 26px; font-weight: 800; color: var(--accent); }
+    .login-logo p { color: var(--text2); font-size: 13px; margin-top: 4px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 13px; color: var(--text2); margin-bottom: 5px; }
+    .form-group input { width: 100%; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; outline: none; }
+    .form-group input:focus { border-color: var(--accent); }
+    .error-msg { color: var(--danger); font-size: 13px; margin-top: 10px; text-align: center; min-height: 18px; }
+
+    /* Content area */
+    .content { max-width: 780px; width: 100%; margin: 0 auto; padding: 20px; flex: 1; }
+
+    /* Cards */
+    .card { background: var(--card); border-radius: 12px; border: 1px solid var(--border); margin-bottom: 10px; overflow: hidden; }
+    .card-click { cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 16px; transition: background .12s; }
+    .card-click:hover { background: var(--card2); }
+    .card-body { padding: 16px; border-top: 1px solid var(--border); }
+
+    /* Badges */
+    .badge { padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+    .badge-Founder { background: rgba(249,115,22,.15); color: var(--founder); border: 1px solid rgba(249,115,22,.3); }
+    .badge-Admin { background: rgba(59,130,246,.15); color: var(--admin); border: 1px solid rgba(59,130,246,.3); }
+    .badge-Supervisor { background: rgba(34,197,94,.15); color: var(--supervisor); border: 1px solid rgba(34,197,94,.3); }
+    .badge-User { background: var(--card2); color: var(--user-col); border: 1px solid var(--border); }
+    .badge-active { background: rgba(34,197,94,.15); color: var(--success); border: 1px solid rgba(34,197,94,.3); }
+    .badge-pending { background: rgba(245,158,11,.15); color: var(--warning); border: 1px solid rgba(245,158,11,.3); }
+    .badge-completed { background: var(--card2); color: var(--text2); border: 1px solid var(--border); }
+
+    /* Tabs */
+    .tabs { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+    .tab { padding: 12px 18px; cursor: pointer; font-size: 14px; font-weight: 500; color: var(--text2); border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color .15s; }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+
+    /* Members */
+    .member-row { display: flex; align-items: flex-start; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+    .member-row:last-child { border-bottom: none; }
+    .avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--card2); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: var(--accent); flex-shrink: 0; margin-top: 2px; }
+    .member-info { flex: 1; min-width: 0; }
+    .member-name-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .member-name { font-size: 14px; font-weight: 500; }
+    .member-email { font-size: 12px; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+    .member-edit-row { display: flex; gap: 6px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+
+    /* Projects */
+    .group-label { font-size: 11px; font-weight: 700; color: var(--text2); text-transform: uppercase; letter-spacing: .06em; padding: 14px 0 6px; }
+    .project-row { display: flex; align-items: center; justify-content: space-between; padding: 12px; background: var(--card2); border-radius: 8px; margin-bottom: 6px; cursor: pointer; border: 1px solid var(--border); transition: border-color .12s; }
+    .project-row:hover { border-color: var(--accent); }
+    .project-name { font-size: 14px; font-weight: 500; }
+    .project-meta { font-size: 12px; color: var(--text2); margin-top: 2px; }
+
+    /* Tasks */
+    .task-row { padding: 12px; background: var(--card2); border-radius: 8px; margin-bottom: 6px; cursor: pointer; border: 1px solid var(--border); transition: border-color .12s; }
+    .task-row:hover { border-color: var(--accent); }
+    .task-title { font-size: 14px; font-weight: 500; margin-bottom: 4px; }
+    .task-meta { font-size: 12px; color: var(--text2); display: flex; gap: 8px; flex-wrap: wrap; }
+
+    /* Storage */
+    .file-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .file-row:last-child { border-bottom: none; }
+    .file-thumb { width: 44px; height: 44px; border-radius: 6px; object-fit: cover; background: var(--card2); flex-shrink: 0; }
+    .file-icon { width: 44px; height: 44px; border-radius: 6px; background: var(--card2); display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+    .file-info { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+    .file-name { font-size: 12px; word-break: break-all; flex: 1; }
+    .file-path { font-size: 11px; color: var(--text2); margin-top: 2px; word-break: break-all; }
+    .storage-project { margin-bottom: 12px; }
+    .storage-proj-header { padding: 10px 12px; background: var(--card2); border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; margin-bottom: 0; border: 1px solid var(--border); }
+    .storage-proj-header:hover { border-color: var(--accent); }
+    .storage-proj-files { padding: 0 4px; display: none; }
+    .storage-proj-files.open { display: block; }
+
+    /* Modal */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 100; display: none; align-items: center; justify-content: center; padding: 20px; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: var(--card); border-radius: 16px; border: 1px solid var(--border); width: 100%; max-width: 480px; max-height: 90vh; overflow-y: auto; }
+    .modal-header { padding: 18px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+    .modal-title { font-size: 15px; font-weight: 700; }
+    .close-btn { background: none; border: none; color: var(--text2); cursor: pointer; font-size: 22px; line-height: 1; padding: 0; }
+    .close-btn:hover { color: var(--text); }
+    .modal-body { padding: 20px; }
+    .modal-body .form-group { margin-bottom: 14px; }
+    .modal-footer { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* Confirm dialog */
+    .confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 200; display: none; align-items: center; justify-content: center; padding: 20px; }
+    .confirm-overlay.open { display: flex; }
+    .confirm-box { background: var(--card); border-radius: 12px; border: 1px solid var(--border); padding: 24px; max-width: 340px; width: 100%; }
+    .confirm-title { font-size: 15px; font-weight: 700; margin-bottom: 8px; }
+    .confirm-msg { font-size: 14px; color: var(--text2); margin-bottom: 20px; line-height: 1.5; }
+    .confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* Misc */
+    select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 6px 8px; border-radius: 6px; font-size: 12px; cursor: pointer; outline: none; }
+    select:focus { border-color: var(--accent); }
+    textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 10px 12px; border-radius: 8px; font-size: 14px; outline: none; resize: vertical; min-height: 70px; font-family: inherit; }
+    textarea:focus { border-color: var(--accent); }
+    .spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 40px; color: var(--text2); font-size: 14px; }
+    .empty { text-align: center; padding: 40px; color: var(--text2); font-size: 14px; }
+    @media (max-width: 540px) { .content { padding: 12px; } }
+  </style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading-screen" class="screen active" style="justify-content:center;align-items:center;">
+  <div style="text-align:center;">
+    <div class="spinner" style="width:32px;height:32px;border-width:3px;"></div>
+    <p style="color:var(--text2);margin-top:14px;font-size:14px;">Φόρτωση...</p>
+  </div>
+</div>
+
+<!-- Login -->
+<div id="login-screen" class="screen">
+  <div class="login-box">
+    <div class="login-logo">
+      <h1>Ergon</h1>
+      <p>Admin Panel</p>
+    </div>
+    <div class="form-group">
+      <label>Email</label>
+      <input type="email" id="login-email" placeholder="admin@example.com" autocomplete="email" />
+    </div>
+    <div class="form-group">
+      <label>Κωδικός</label>
+      <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" />
+    </div>
+    <button class="btn btn-primary" style="width:100%;margin-top:4px;" id="login-btn" onclick="doLogin()">Σύνδεση</button>
+    <div class="error-msg" id="login-error"></div>
+  </div>
+</div>
+
+<!-- Teams List -->
+<div id="teams-screen" class="screen">
+  <div class="header">
+    <div class="header-titles">
+      <div class="header-title">Ergon Admin</div>
+      <div class="header-sub" id="teams-user-email"></div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="doLogout()">Αποσύνδεση</button>
+  </div>
+  <div class="content">
+    <div id="teams-list"></div>
+  </div>
+</div>
+
+<!-- Team Detail -->
+<div id="team-screen" class="screen">
+  <div class="header">
+    <button class="back-btn" onclick="showTeams()">‹</button>
+    <div class="header-titles">
+      <div class="header-title" id="team-title"></div>
+      <div class="header-sub" id="team-role-label"></div>
+    </div>
+  </div>
+  <div class="content">
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('members')">Μέλη</div>
+      <div class="tab" onclick="switchTab('projects')">Έργα</div>
+      <div class="tab" onclick="switchTab('storage')">Storage</div>
+    </div>
+    <!-- Members -->
+    <div class="tab-pane active" id="tab-members">
+      <div id="members-list"></div>
+    </div>
+    <!-- Projects -->
+    <div class="tab-pane" id="tab-projects">
+      <div id="projects-list"></div>
+    </div>
+    <!-- Storage -->
+    <div class="tab-pane" id="tab-storage">
+      <div id="storage-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Project Detail -->
+<div id="project-screen" class="screen">
+  <div class="header">
+    <button class="back-btn" onclick="showTeamScreen()">‹</button>
+    <div class="header-titles">
+      <div class="header-title" id="project-title"></div>
+      <div class="header-sub" id="project-status-label"></div>
+    </div>
+    <button class="btn btn-danger btn-sm" onclick="confirmDeleteProject()">Διαγραφή</button>
+  </div>
+  <div class="content">
+    <div id="tasks-list"></div>
+  </div>
+</div>
+
+<!-- Edit Task Modal -->
+<div class="modal-overlay" id="task-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Επεξεργασία Task</span>
+      <button class="close-btn" onclick="closeTaskModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Τίτλος</label>
+        <input type="text" id="task-edit-title" style="width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px;outline:none;" />
+      </div>
+      <div class="form-group">
+        <label>Περιγραφή</label>
+        <textarea id="task-edit-desc"></textarea>
+      </div>
+      <div class="form-group" id="task-edit-value-group" style="display:none;">
+        <label id="task-edit-value-label">Τιμή</label>
+        <textarea id="task-edit-value" style="min-height:50px;"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Κατάσταση</label>
+        <select id="task-edit-status" style="width:100%;padding:10px 12px;font-size:14px;">
+          <option value="pending">Σε αναμονή</option>
+          <option value="active">Ενεργό</option>
+          <option value="completed">Ολοκληρωμένο</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeTaskModal()">Ακύρωση</button>
+      <button class="btn btn-primary" id="task-save-btn" onclick="saveTask()">Αποθήκευση</button>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm Dialog -->
+<div class="confirm-overlay" id="confirm-overlay">
+  <div class="confirm-box">
+    <div class="confirm-title" id="confirm-title"></div>
+    <div class="confirm-msg" id="confirm-msg"></div>
+    <div class="confirm-actions">
+      <button class="btn btn-ghost" onclick="closeConfirm()">Ακύρωση</button>
+      <button class="btn btn-danger" id="confirm-ok-btn">Επιβεβαίωση</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
+import {
+  getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged
+} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
+import {
+  getFirestore, collection, query, where, getDocs,
+  doc, getDoc, updateDoc, deleteDoc, arrayRemove
+} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
+import {
+  getStorage, ref, listAll, deleteObject, getDownloadURL
+} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js';
+
+// ─── Firebase Init ───────────────────────────────────────────
+const app = initializeApp({
+  apiKey: "AIzaSyCASV17VUlZ8zjmkf8yJIb9LqiLDqB6BH4",
+  authDomain: "teamcameraapp.firebaseapp.com",
+  projectId: "teamcameraapp",
+  storageBucket: "teamcameraapp.firebasestorage.app",
+  messagingSenderId: "1066934665062",
+  appId: "1:1066934665062:web:63a4241fd930aa13f7d2a7"
+});
+const auth = getAuth(app);
+const db = getFirestore(app);
+const storage = getStorage(app);
+
+// ─── State ───────────────────────────────────────────────────
+let currentUser = null;
+let currentTeam = null;   // { id, data, myRole }
+let currentProject = null; // { id, data, groupTitle }
+let editingTaskIdx = null;
+let confirmCallback = null;
+let membersCache = {};     // uid → { fullname, email }
+
+// ─── Screens ─────────────────────────────────────────────────
+function show(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+window.showTeams = () => { show('teams-screen'); loadTeams(); };
+window.showTeamScreen = () => { show('team-screen'); };
+
+// ─── Auth ────────────────────────────────────────────────────
+onAuthStateChanged(auth, user => {
+  if (user) {
+    currentUser = user;
+    document.getElementById('teams-user-email').textContent = user.email;
+    show('teams-screen');
+    loadTeams();
+  } else {
+    currentUser = null;
+    show('login-screen');
+  }
+});
+
+window.doLogin = async () => {
+  const email = document.getElementById('login-email').value.trim();
+  const pwd   = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  const btn   = document.getElementById('login-btn');
+  errEl.textContent = '';
+  if (!email || !pwd) { errEl.textContent = 'Συμπλήρωσε email και κωδικό.'; return; }
+  btn.disabled = true;
+  btn.textContent = 'Σύνδεση...';
+  try {
+    await signInWithEmailAndPassword(auth, email, pwd);
+  } catch (e) {
+    errEl.textContent = e.code === 'auth/invalid-credential'
+      ? 'Λάθος email ή κωδικός.' : 'Σφάλμα σύνδεσης. Δοκίμασε ξανά.';
+    btn.disabled = false;
+    btn.textContent = 'Σύνδεση';
+  }
+};
+
+document.getElementById('login-password').addEventListener('keydown', e => {
+  if (e.key === 'Enter') window.doLogin();
+});
+
+window.doLogout = async () => {
+  await signOut(auth);
+};
+
+// ─── Teams List ───────────────────────────────────────────────
+async function loadTeams() {
+  const el = document.getElementById('teams-list');
+  el.innerHTML = '<div class="loading"><span class="spinner"></span> Φόρτωση ομάδων...</div>';
+  try {
+    const uid = currentUser.uid;
+    const snap = await getDocs(query(collection(db, 'teams'), where('memberIds', 'array-contains', uid)));
+    const myTeams = snap.docs.filter(d => {
+      const role = d.data().roles?.[uid];
+      return role === 'Founder' || role === 'Admin';
+    });
+    if (myTeams.length === 0) {
+      el.innerHTML = '<div class="empty">Δεν είσαι Founder ή Admin σε καμία ομάδα.</div>';
+      return;
+    }
+    el.innerHTML = myTeams.map(d => {
+      const td = d.data();
+      const role = td.roles?.[uid] || 'User';
+      const memberCount = td.memberIds?.length || 0;
+      return `<div class="card">
+        <div class="card-click" onclick="openTeam('${d.id}')">
+          <div>
+            <div style="font-size:15px;font-weight:600;">${esc(td.name)}</div>
+            <div style="font-size:12px;color:var(--text2);margin-top:3px;">${memberCount} μέλη</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <span class="badge badge-${role}">${role}</span>
+            <span style="color:var(--text2);">›</span>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = `<div class="empty">Σφάλμα: ${esc(e.message)}</div>`;
+  }
+}
+
+window.openTeam = async (teamId) => {
+  show('team-screen');
+  document.getElementById('team-title').textContent = '...';
+  document.getElementById('team-role-label').textContent = '';
+  document.getElementById('members-list').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+  document.getElementById('projects-list').innerHTML = '';
+  document.getElementById('storage-list').innerHTML = '';
+  // Reset tabs
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', i===0));
+  document.querySelectorAll('.tab-pane').forEach((p,i) => p.classList.toggle('active', i===0));
+
+  const snap = await getDoc(doc(db, 'teams', teamId));
+  const td = snap.data();
+  currentTeam = { id: teamId, data: td, myRole: td.roles?.[currentUser.uid] };
+  document.getElementById('team-title').textContent = td.name;
+  document.getElementById('team-role-label').textContent = currentTeam.myRole;
+  loadMembers();
+};
+
+// ─── Tab switching ────────────────────────────────────────────
+window.switchTab = (name) => {
+  const tabs = ['members','projects','storage'];
+  tabs.forEach((t,i) => {
+    document.querySelectorAll('.tab')[i].classList.toggle('active', t===name);
+    document.getElementById('tab-'+t).classList.toggle('active', t===name);
+  });
+  if (name==='projects' && !document.getElementById('projects-list').hasChildNodes()) loadProjects();
+  if (name==='storage' && !document.getElementById('storage-list').hasChildNodes()) loadStorage();
+};
+
+// ─── Members Tab ──────────────────────────────────────────────
+async function loadMembers() {
+  const el = document.getElementById('members-list');
+  el.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+  const { data, myRole } = currentTeam;
+  const memberIds = data.memberIds || [];
+
+  // Fetch user profiles
+  const profiles = await Promise.all(memberIds.map(uid => fetchUser(uid)));
+  membersCache = {};
+  memberIds.forEach((uid, i) => { membersCache[uid] = profiles[i]; });
+
+  if (memberIds.length === 0) { el.innerHTML = '<div class="empty">Δεν υπάρχουν μέλη.</div>'; return; }
+
+  const roles = data.roles || {};
+  const sorted = [...memberIds].sort((a,b) => {
+    const order = { Founder:0, Admin:1, Supervisor:2, User:3 };
+    return (order[roles[a]]||3) - (order[roles[b]]||3);
+  });
+
+  el.innerHTML = `<div class="card"><div class="card-body">` +
+    sorted.map(uid => {
+      const u = membersCache[uid] || {};
+      const role = roles[uid] || 'User';
+      const isMe = uid === currentUser.uid;
+      const isFounder = role === 'Founder';
+      const canEdit = !isMe && !isFounder && (myRole === 'Founder' || (myRole === 'Admin' && role !== 'Admin'));
+      const initials = (u.fullname||'?').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+
+      const editRowHtml = canEdit ? `
+        <div class="member-edit-row">
+          <select onchange="changeMemberRole('${uid}', this.value)">${buildRoleOptions(myRole, role)}</select>
+          <button class="btn btn-danger btn-sm" onclick="confirmKick('${uid}')">Αφαίρεση</button>
+        </div>` : '';
+
+      return `<div class="member-row">
+        <div class="avatar">${esc(initials)}</div>
+        <div class="member-info">
+          <div class="member-name-row">
+            <span class="member-name">${esc(u.fullname||'Άγνωστο')}</span>
+            <span class="badge badge-${role}">${role}</span>
+            ${isMe ? '<span style="color:var(--text2);font-size:11px;">(εγώ)</span>' : ''}
+          </div>
+          <div class="member-email">${esc(u.email||uid)}</div>
+          ${editRowHtml}
+        </div>
+      </div>`;
+    }).join('') + `</div></div>`;
+}
+
+function buildRoleOptions(myRole, currentRole) {
+  const allRoles = ['Admin','Supervisor','User'];
+  return allRoles.map(r => {
+    const allowed = myRole === 'Founder' ? true : (r !== 'Admin' && r !== 'Founder');
+    if (!allowed) return '';
+    return `<option value="${r}" ${r===currentRole?'selected':''}>${r}</option>`;
+  }).join('');
+}
+
+async function fetchUser(uid) {
+  try {
+    const s = await getDoc(doc(db, 'users', uid));
+    return s.exists() ? s.data() : {};
+  } catch { return {}; }
+}
+
+window.changeMemberRole = async (uid, newRole) => {
+  if (!currentTeam) return;
+  const { id, data } = currentTeam;
+  const oldRole = data.roles?.[uid] || 'User';
+  if (newRole === oldRole) return;
+
+  const updates = { [`roles.${uid}`]: newRole };
+
+  // Remove from project arrays when role changes
+  const groups = data.groups || [];
+  for (const g of groups) {
+    for (const p of (g.projects||[])) {
+      if (oldRole === 'Supervisor' && (newRole === 'User' || newRole === 'Admin')) {
+        updates[`groups`] = undefined; // handled separately below
+      }
+    }
+  }
+
+  try {
+    await updateDoc(doc(db, 'teams', id), updates);
+    // Also update project supervisors/members if needed
+    if (oldRole === 'Supervisor' && newRole === 'User') {
+      // Move from supervisors to members in projects
+    }
+    // Reload
+    const snap = await getDoc(doc(db, 'teams', id));
+    currentTeam.data = snap.data();
+    loadMembers();
+  } catch(e) {
+    alert('Σφάλμα: ' + e.message);
+    loadMembers();
+  }
+};
+
+window.confirmKick = (uid) => {
+  const u = membersCache[uid] || {};
+  showConfirm(
+    'Αφαίρεση μέλους',
+    `Θέλεις σίγουρα να αφαιρέσεις τον/ην ${u.fullname||uid} από την ομάδα;`,
+    () => kickMember(uid)
+  );
+};
+
+async function kickMember(uid) {
+  const { id, data } = currentTeam;
+  try {
+    const updates = {
+      memberIds: arrayRemove(uid),
+      [`roles.${uid}`]: deleteField_()
+    };
+    // Remove from project arrays too
+    const newGroups = (data.groups||[]).map(g => ({
+      ...g,
+      projects: (g.projects||[]).map(p => ({
+        ...p,
+        members: (p.members||[]).filter(m => m !== uid),
+        supervisors: (p.supervisors||[]).filter(s => s !== uid)
+      }))
+    }));
+    await updateDoc(doc(db, 'teams', id), {
+      memberIds: arrayRemove(uid),
+      [`roles.${uid}`]: null,
+      groups: newGroups
+    });
+    const snap = await getDoc(doc(db, 'teams', id));
+    currentTeam.data = snap.data();
+    loadMembers();
+  } catch(e) {
+    alert('Σφάλμα: ' + e.message);
+  }
+}
+
+// Firestore deleteField workaround for inline usage
+function deleteField_() {
+  return null; // we'll set to null (field remains but nulled)
+}
+
+// ─── Projects Tab ─────────────────────────────────────────────
+function loadProjects() {
+  const el = document.getElementById('projects-list');
+  const { data } = currentTeam;
+  const groups = data.groups || [];
+  if (groups.length === 0 || groups.every(g => !g.projects?.length)) {
+    el.innerHTML = '<div class="empty">Δεν υπάρχουν έργα.</div>';
+    return;
+  }
+  el.innerHTML = groups.map(g => {
+    const projects = g.projects || [];
+    if (!projects.length) return '';
+    return `<div class="group-label">${esc(g.title)}</div>` +
+      projects.map(p => `
+        <div class="project-row" onclick="openProject('${esc(p.id)}','${esc(g.title)}')">
+          <div>
+            <div class="project-name">${esc(p.title)}</div>
+            <div class="project-meta">${(p.members||[]).length} μέλη</div>
+          </div>
+          <span class="badge badge-${p.status||'pending'}">${statusLabel(p.status)}</span>
+        </div>`).join('');
+  }).join('');
+}
+
+window.openProject = async (projectId, groupTitle) => {
+  show('project-screen');
+  document.getElementById('project-title').textContent = '...';
+  document.getElementById('project-status-label').textContent = '';
+  document.getElementById('tasks-list').innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+
+  const snap = await getDoc(doc(db, 'projects', projectId));
+  if (!snap.exists()) {
+    document.getElementById('tasks-list').innerHTML = '<div class="empty">Το έργο δεν βρέθηκε.</div>';
+    return;
+  }
+  const pd = snap.data();
+  currentProject = { id: projectId, data: pd, groupTitle };
+  document.getElementById('project-title').textContent = pd.title;
+  document.getElementById('project-status-label').textContent = statusLabel(pd.status);
+  renderTasks(pd.tasks || []);
+};
+
+function renderTasks(tasks) {
+  const el = document.getElementById('tasks-list');
+  if (!tasks.length) { el.innerHTML = '<div class="empty">Δεν υπάρχουν tasks.</div>'; return; }
+  el.innerHTML = tasks.map((t, i) => {
+    const hasValue = (t.type === 'measurement' || t.type === 'general') && t.value;
+    return `<div class="task-row" onclick="openTaskEdit(${i})">
+      <div class="task-title">${esc(t.title||'(χωρίς τίτλο)')}</div>
+      <div class="task-meta">
+        <span class="badge badge-${t.status||'pending'}">${statusLabel(t.status)}</span>
+        <span>${typeLabel(t.type)}</span>
+        ${t.description ? `<span>📝</span>` : ''}
+      </div>
+      ${hasValue ? `<div style="margin-top:6px;font-size:13px;color:var(--text);background:var(--bg);border-radius:6px;padding:6px 8px;border:1px solid var(--border);white-space:pre-wrap;">${esc(t.value)}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+// ─── Task Edit Modal ──────────────────────────────────────────
+window.openTaskEdit = (idx) => {
+  editingTaskIdx = idx;
+  const t = currentProject.data.tasks[idx];
+  document.getElementById('task-edit-title').value = t.title || '';
+  document.getElementById('task-edit-desc').value = t.description || '';
+  document.getElementById('task-edit-status').value = t.status || 'pending';
+
+  const valueGroup = document.getElementById('task-edit-value-group');
+  const valueEl = document.getElementById('task-edit-value');
+  const valueLabel = document.getElementById('task-edit-value-label');
+  if (t.type === 'measurement' || t.type === 'general') {
+    valueGroup.style.display = '';
+    valueLabel.textContent = t.type === 'measurement' ? 'Μέτρηση' : 'Κείμενο';
+    valueEl.value = t.value || '';
+  } else {
+    valueGroup.style.display = 'none';
+  }
+  document.getElementById('task-modal').classList.add('open');
+};
+
+window.closeTaskModal = () => {
+  document.getElementById('task-modal').classList.remove('open');
+  editingTaskIdx = null;
+};
+
+window.saveTask = async () => {
+  if (editingTaskIdx === null || !currentProject) return;
+  const btn = document.getElementById('task-save-btn');
+  btn.disabled = true;
+  btn.textContent = 'Αποθήκευση...';
+
+  const tasks = [...currentProject.data.tasks];
+  const t = { ...tasks[editingTaskIdx] };
+  t.title = document.getElementById('task-edit-title').value.trim();
+  t.description = document.getElementById('task-edit-desc').value.trim();
+  t.status = document.getElementById('task-edit-status').value;
+  if (t.type === 'measurement' || t.type === 'general') {
+    t.value = document.getElementById('task-edit-value').value.trim();
+  }
+  tasks[editingTaskIdx] = t;
+
+  try {
+    await updateDoc(doc(db, 'projects', currentProject.id), { tasks });
+    currentProject.data = { ...currentProject.data, tasks };
+    renderTasks(tasks);
+    closeTaskModal();
+  } catch(e) {
+    alert('Σφάλμα αποθήκευσης: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Αποθήκευση';
+  }
+};
+
+// ─── Delete Project ───────────────────────────────────────────
+window.confirmDeleteProject = () => {
+  showConfirm(
+    'Διαγραφή έργου',
+    `Θέλεις σίγουρα να διαγράψεις το έργο "${currentProject?.data?.title||''}";\nΔεν μπορεί να αναιρεθεί.`,
+    deleteProject
+  );
+};
+
+async function deleteProject() {
+  if (!currentProject || !currentTeam) return;
+  try {
+    // Remove from team groups
+    const newGroups = (currentTeam.data.groups||[]).map(g => ({
+      ...g,
+      projects: (g.projects||[]).filter(p => p.id !== currentProject.id)
+    }));
+    await Promise.all([
+      deleteDoc(doc(db, 'projects', currentProject.id)),
+      updateDoc(doc(db, 'teams', currentTeam.id), { groups: newGroups })
+    ]);
+    currentTeam.data = { ...currentTeam.data, groups: newGroups };
+    currentProject = null;
+    show('team-screen');
+    switchTab('projects');
+    loadProjects();
+  } catch(e) {
+    alert('Σφάλμα διαγραφής: ' + e.message);
+  }
+}
+
+// ─── Storage Tab ──────────────────────────────────────────────
+async function loadStorage() {
+  const el = document.getElementById('storage-list');
+  el.innerHTML = '<div class="loading"><span class="spinner"></span> Φόρτωση...</div>';
+  const { data, id: teamId } = currentTeam;
+  const groups = data.groups || [];
+  const projects = groups.flatMap(g => (g.projects||[]).map(p => ({ ...p, groupTitle: g.title })));
+
+  if (!projects.length) {
+    el.innerHTML = '<div class="empty">Δεν υπάρχουν έργα.</div>';
+    return;
+  }
+
+  el.innerHTML = projects.map(p =>
+    `<div class="storage-project">
+      <div class="storage-proj-header" onclick="toggleStorageProject('${esc(p.id)}','${esc(teamId)}')">
+        <span>${esc(p.title)}</span>
+        <span id="stor-arrow-${esc(p.id)}">›</span>
+      </div>
+      <div class="storage-proj-files" id="stor-files-${esc(p.id)}">
+        <div class="loading" id="stor-loading-${esc(p.id)}" style="display:none;"><span class="spinner"></span></div>
+        <div id="stor-content-${esc(p.id)}"></div>
+      </div>
+    </div>`
+  ).join('');
+}
+
+const loadedStorageProjects = new Set();
+window.toggleStorageProject = async (projectId, teamId) => {
+  const filesEl = document.getElementById(`stor-files-${projectId}`);
+  const arrowEl = document.getElementById(`stor-arrow-${projectId}`);
+  const isOpen = filesEl.classList.contains('open');
+  filesEl.classList.toggle('open', !isOpen);
+  arrowEl.textContent = isOpen ? '›' : '⌄';
+
+  if (!isOpen && !loadedStorageProjects.has(projectId)) {
+    loadedStorageProjects.add(projectId);
+    const loadingEl = document.getElementById(`stor-loading-${projectId}`);
+    const contentEl = document.getElementById(`stor-content-${projectId}`);
+    loadingEl.style.display = 'flex';
+    try {
+      const projectRef = ref(storage, `teams/${teamId}/projects/${projectId}/tasks`);
+      const result = await listAll(projectRef);
+      const allFiles = [];
+      for (const taskRef of result.prefixes) {
+        const taskFiles = await listAll(taskRef);
+        allFiles.push(...taskFiles.items);
+      }
+      if (!allFiles.length) {
+        contentEl.innerHTML = '<div style="padding:12px 0;color:var(--text2);font-size:13px;">Δεν υπάρχουν αρχεία.</div>';
+      } else {
+        contentEl.innerHTML = allFiles.map(f => {
+          const name = f.name;
+          const isImg = /\.(jpg|jpeg|png|gif|webp)$/i.test(name);
+          const isVid = /\.(mp4|mov|avi|mkv)$/i.test(name);
+          const icon = isImg ? '🖼️' : isVid ? '🎬' : '📄';
+          return `<div class="file-row">
+            <div class="file-icon">${icon}</div>
+            <div class="file-info">
+              <div class="file-name">${esc(name)}</div>
+              <button class="btn btn-danger btn-sm" onclick="confirmDeleteFile('${esc(f.fullPath)}','${esc(name)}')">Διαγραφή</button>
+            </div>
+          </div>`;
+        }).join('');
+      }
+    } catch(e) {
+      contentEl.innerHTML = `<div style="padding:12px 0;color:var(--danger);font-size:13px;">Σφάλμα: ${esc(e.message)}</div>`;
+    } finally {
+      loadingEl.style.display = 'none';
+    }
+  }
+};
+
+window.confirmDeleteFile = (fullPath, name) => {
+  showConfirm(
+    'Διαγραφή αρχείου',
+    `Θέλεις σίγουρα να διαγράψεις το αρχείο "${name}";`,
+    () => deleteFile(fullPath)
+  );
+};
+
+async function deleteFile(fullPath) {
+  try {
+    await deleteObject(ref(storage, fullPath));
+    // Reload the project's storage section
+    const projectId = fullPath.split('/')[3];
+    loadedStorageProjects.delete(projectId);
+    const filesEl = document.getElementById(`stor-files-${projectId}`);
+    if (filesEl?.classList.contains('open')) {
+      filesEl.classList.remove('open');
+      document.getElementById(`stor-arrow-${projectId}`).textContent = '›';
+    }
+  } catch(e) {
+    alert('Σφάλμα διαγραφής: ' + e.message);
+  }
+}
+
+// ─── Confirm Dialog ───────────────────────────────────────────
+function showConfirm(title, msg, onOk) {
+  document.getElementById('confirm-title').textContent = title;
+  document.getElementById('confirm-msg').textContent = msg;
+  confirmCallback = onOk;
+  document.getElementById('confirm-overlay').classList.add('open');
+  document.getElementById('confirm-ok-btn').onclick = () => { closeConfirm(); onOk(); };
+}
+window.closeConfirm = () => {
+  document.getElementById('confirm-overlay').classList.remove('open');
+  confirmCallback = null;
+};
+
+// ─── Helpers ──────────────────────────────────────────────────
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function statusLabel(s) {
+  return { active:'Ενεργό', pending:'Σε αναμονή', completed:'Ολοκληρωμένο' }[s] || s || '';
+}
+function typeLabel(t) {
+  return { photo:'📷 Φωτογραφία', video:'🎬 Βίντεο', measurement:'📏 Μέτρηση', general:'📝 Κείμενο' }[t] || t || '';
+}
+</script>
+</body>
+</html>
