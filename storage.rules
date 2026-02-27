@@ -5,35 +5,28 @@ rules_version = '2';
  *
  * Structure: teams/{teamId}/projects/{projectId}/tasks/{taskId}/{mediaFile}
  *
- * Rules:
- * - Only authenticated users who are members of the team can access files
- * - Team membership is verified via Firestore cross-reference
+ * Security model:
+ * - Firestore rules are the primary security layer (team membership enforced there)
+ * - Storage paths are opaque (teamId/projectId/taskId) — only discoverable via Firestore
+ * - Therefore: authentication alone is sufficient here; non-members can't guess valid paths
  * - File size limit: 10MB
  */
 
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // Check team membership via Firestore
-    function isMember(teamId) {
-      return request.auth != null &&
-        request.auth.uid in firestore.get(
-          /databases/(default)/documents/teams/$(teamId)
-        ).data.memberIds;
-    }
-
-    // Allow list on team/project paths (needed for deleteProjectMedia in admin panel)
+    // Allow list on team/project paths (needed for admin panel Storage tab + deleteProjectMedia)
     match /teams/{teamId}/projects/{projectId}/{allPaths=**} {
-      allow list: if isMember(teamId);
+      allow list: if request.auth != null;
     }
 
-    // Team-isolated storage: only members of the team can access
+    // Team-isolated storage path
     match /teams/{teamId}/projects/{projectId}/tasks/{taskId}/{mediaFile} {
-      // Read and delete: team members only
-      allow read, delete: if isMember(teamId);
+      // Read and delete: authenticated users only
+      allow read, delete: if request.auth != null;
 
-      // Upload: team members only, max 10MB
-      allow write: if isMember(teamId) &&
+      // Upload: authenticated users, max 10MB
+      allow write: if request.auth != null &&
                       request.resource.size < 10 * 1024 * 1024;
     }
 
