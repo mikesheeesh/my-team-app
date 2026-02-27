@@ -32,7 +32,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // FIREBASE
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, onSnapshot, updateDoc } from "firebase/firestore";
+import { collection, doc, getDoc, limit, onSnapshot, orderBy, query, updateDoc } from "firebase/firestore";
 import { auth, db } from "../../firebaseConfig";
 
 // STORAGE UTILITIES
@@ -53,6 +53,8 @@ import { embedVideoGps } from "../../utils/mp4GpsUtils";
 import ImageEditorModal from "../components/ImageEditorModal";
 import InputModal from "../components/InputModal";
 import { useSync } from "../context/SyncContext";
+import { useUser } from "../context/UserContext";
+import { logActivity } from "../../utils/activityLog";
 
 // --- TYPES ---
 type GeoPoint = { lat: number; lng: number };
@@ -277,6 +279,7 @@ export default function ProjectDetailsScreen() {
   const projectId = id as string;
   const insets = useSafeAreaInsets();
   const { isSyncing, syncNow, justSyncedProjectId } = useSync();
+  const { user: currentUser } = useUser();
 
   const CACHE_KEY = PROJECT_CACHE_KEY_PREFIX + projectId;
   const QUEUE_KEY = OFFLINE_QUEUE_KEY + projectId;
@@ -290,6 +293,10 @@ export default function ProjectDetailsScreen() {
   const [teamId, setTeamId] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
+
+  // Activity Log
+  const [logVisible, setLogVisible] = useState(false);
+  const [activityLog, setActivityLog] = useState<any[]>([]);
 
   // UI States
   const [inputModalVisible, setInputModalVisible] = useState(false);
@@ -401,6 +408,20 @@ export default function ProjectDetailsScreen() {
       AsyncStorage.removeItem(QUEUE_KEY);
     }
   }, [justSyncedProjectId, projectId]);
+
+  // --- ACTIVITY LOG LISTENER ---
+  useEffect(() => {
+    if (!logVisible || !projectId) return;
+    const q = query(
+      collection(db, "projects", projectId, "activity"),
+      orderBy("timestamp", "desc"),
+      limit(50),
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      setActivityLog(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    });
+    return () => unsub();
+  }, [logVisible, projectId]);
 
   // --- MERGE LISTS ---
   const combinedTasks = useMemo(() => {
@@ -702,6 +723,9 @@ export default function ProjectDetailsScreen() {
     setNewTaskDescription("");
     setEditingTaskId(null);
     await saveTaskLocal(taskToSave);
+    if (!editingTaskId && currentUser) {
+      logActivity(projectId, currentUser.uid, currentUser.fullname, "task_added", taskToSave.id, taskToSave.title);
+    }
   };
 
   const handleLongPressTask = (task: Task) => {
@@ -757,6 +781,9 @@ export default function ProjectDetailsScreen() {
             updateDoc(doc(db, "projects", projectId), { tasks: updated }).catch(
               (e) => {},
             );
+          }
+          if (currentUser) {
+            logActivity(projectId, currentUser.uid, currentUser.fullname, "task_deleted", task.id, task.title);
           }
         },
       },
@@ -1001,6 +1028,10 @@ export default function ProjectDetailsScreen() {
         imageLocations: locs,
         status: "completed",
       });
+      if (currentUser) {
+        logActivity(projectId, currentUser.uid, currentUser.fullname, "media_added", t.id, t.title, "photo");
+        if (t.status !== "completed") logActivity(projectId, currentUser.uid, currentUser.fullname, "task_completed", t.id, t.title);
+      }
     } else if (t.type === "video") {
       const vids = [...t.videos, uri];
       const newLoc = location || { lat: 0, lng: 0 };
@@ -1012,6 +1043,10 @@ export default function ProjectDetailsScreen() {
         videoLocations: locs,
         status: "completed",
       });
+      if (currentUser) {
+        logActivity(projectId, currentUser.uid, currentUser.fullname, "media_added", t.id, t.title, "video");
+        if (t.status !== "completed") logActivity(projectId, currentUser.uid, currentUser.fullname, "task_completed", t.id, t.title);
+      }
     }
   };
 
@@ -1091,6 +1126,9 @@ export default function ProjectDetailsScreen() {
           imageLocations: newLocs,
           status: st as "completed" | "pending",
         });
+        if (currentUser) {
+          logActivity(projectId, currentUser.uid, currentUser.fullname, "media_deleted", activeTaskForGallery.id, activeTaskForGallery.title, "photo");
+        }
       }
     } else if (activeTaskForGallery.type === "video") {
       const idx = activeTaskForGallery.videos.findIndex((v: string) => v === uri);
@@ -1107,6 +1145,9 @@ export default function ProjectDetailsScreen() {
           videoLocations: newLocs,
           status: newVideos.length > 0 ? "completed" : "pending",
         });
+        if (currentUser) {
+          logActivity(projectId, currentUser.uid, currentUser.fullname, "media_deleted", activeTaskForGallery.id, activeTaskForGallery.title, "video");
+        }
       }
     }
   };
@@ -1136,17 +1177,31 @@ export default function ProjectDetailsScreen() {
       const t = combinedTasks.find((x) => x.id === currentTaskId);
       if (t && (t.type === "measurement" || t.type === "general")) {
         await saveTaskLocal({ ...t, value: inputValue, status: "completed" });
+        if (currentUser) {
+          logActivity(projectId, currentUser.uid, currentUser.fullname, "value_saved", t.id, t.title, t.type);
+          if (t.status !== "completed") logActivity(projectId, currentUser.uid, currentUser.fullname, "task_completed", t.id, t.title);
+        }
       }
     }
   };
-  const handleClearValue = async () => {
-    setInputModalVisible(false);
-    if (currentTaskId) {
-      const t = combinedTasks.find((x) => x.id === currentTaskId);
-      if (t && (t.type === "measurement" || t.type === "general")) {
-        await saveTaskLocal({ ...t, value: "", status: "pending" });
-      }
-    }
+  const handleClearValue = () => {
+    if (!currentTaskId) return;
+    const t = combinedTasks.find((x) => x.id === currentTaskId);
+    if (!t || (t.type !== "measurement" && t.type !== "general")) return;
+    Alert.alert("Διαγραφή τιμής", "Είσαι σίγουρος ότι θέλεις να διαγράψεις την τιμή;", [
+      { text: "Άκυρο", style: "cancel" },
+      {
+        text: "Διαγραφή",
+        style: "destructive",
+        onPress: async () => {
+          setInputModalVisible(false);
+          await saveTaskLocal({ ...t, value: "", status: "pending" });
+          if (currentUser) {
+            logActivity(projectId, currentUser.uid, currentUser.fullname, "value_cleared", t.id, t.title);
+          }
+        },
+      },
+    ]);
   };
   const confirmDeleteMedia = () => {
     if (!selectedMediaForView) return;
@@ -1832,6 +1887,9 @@ export default function ProjectDetailsScreen() {
               <Ionicons name="cloud-upload" size={18} color="#fff" />
             </TouchableOpacity>
           )}
+          <TouchableOpacity style={styles.iconBtn} onPress={() => setLogVisible(true)}>
+            <Ionicons name="time-outline" size={20} color="#2563eb" />
+          </TouchableOpacity>
           <TouchableOpacity style={styles.iconBtn} onPress={generatePDF}>
             <Ionicons name="print-outline" size={20} color="#2563eb" />
           </TouchableOpacity>
@@ -2345,9 +2403,87 @@ export default function ProjectDetailsScreen() {
           )}
         </View>
       </Modal>
+
+      {/* --- ACTIVITY LOG MODAL --- */}
+      <Modal visible={logVisible} animationType="slide" transparent onRequestClose={() => setLogVisible(false)}>
+        <View style={logStyles.overlay}>
+          <View style={[logStyles.sheet, { paddingBottom: insets.bottom + 16 }]}>
+            <View style={logStyles.header}>
+              <Text style={logStyles.title}>Ιστορικό</Text>
+              <TouchableOpacity onPress={() => setLogVisible(false)}>
+                <Ionicons name="close" size={24} color="#64748b" />
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={activityLog}
+              keyExtractor={(i) => i.id}
+              contentContainerStyle={{ padding: 16 }}
+              renderItem={({ item }) => {
+                const initials = (item.userName || "?").split(" ").map((w: string) => w[0]).slice(0, 2).join("").toUpperCase();
+                const ts = item.timestamp?.toDate ? item.timestamp.toDate() : null;
+                const timeStr = ts ? relativeTime(ts) : "";
+                return (
+                  <View style={logStyles.entry}>
+                    <View style={logStyles.avatar}>
+                      <Text style={logStyles.avatarText}>{initials}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={logStyles.userName}>{item.userName}</Text>
+                      <Text style={logStyles.actionText}>{logActionLabel(item.action, item.taskTitle, item.details)}</Text>
+                      {timeStr ? <Text style={logStyles.timeText}>{timeStr}</Text> : null}
+                    </View>
+                  </View>
+                );
+              }}
+              ListEmptyComponent={
+                <Text style={{ color: "#94a3b8", textAlign: "center", marginTop: 40 }}>
+                  Δεν υπάρχει ιστορικό ακόμα.
+                </Text>
+              }
+            />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
+
+function logActionLabel(action: string, taskTitle: string, details?: string): string {
+  const t = `«${taskTitle}»`;
+  switch (action) {
+    case "task_added":    return `Πρόσθεσε task ${t}`;
+    case "task_deleted":  return `Διέγραψε task ${t}`;
+    case "task_completed":return `Ολοκλήρωσε ${t}`;
+    case "status_changed":return `Άλλαξε κατάσταση ${t}`;
+    case "media_added":   return `Πρόσθεσε ${details === "video" ? "βίντεο" : "φωτογραφία"} στο ${t}`;
+    case "media_deleted": return `Διέγραψε ${details === "video" ? "βίντεο" : "φωτογραφία"} από το ${t}`;
+    case "value_saved":   return `Κατέχωρισε τιμή στο ${t}`;
+    case "value_cleared": return `Διέγραψε τιμή από το ${t}`;
+    default:              return action;
+  }
+}
+
+function relativeTime(date: Date): string {
+  const diff = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (diff < 60) return "μόλις τώρα";
+  if (diff < 3600) return `πριν ${Math.floor(diff / 60)} λ.`;
+  if (diff < 86400) return `πριν ${Math.floor(diff / 3600)} ώ.`;
+  if (diff < 172800) return "χθες";
+  return date.toLocaleDateString("el-GR", { day: "numeric", month: "short" });
+}
+
+const logStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  sheet: { backgroundColor: "#fff", borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: "80%" },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 20, borderBottomWidth: 1, borderBottomColor: "#f1f5f9" },
+  title: { fontSize: 17, fontWeight: "700", color: "#0f172a" },
+  entry: { flexDirection: "row", gap: 12, marginBottom: 16, alignItems: "flex-start" },
+  avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#eff6ff", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  avatarText: { fontSize: 13, fontWeight: "700", color: "#2563eb" },
+  userName: { fontSize: 13, fontWeight: "600", color: "#0f172a" },
+  actionText: { fontSize: 13, color: "#475569", marginTop: 1 },
+  timeText: { fontSize: 11, color: "#94a3b8", marginTop: 3 },
+});
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f8fafc", marginTop: 20 },

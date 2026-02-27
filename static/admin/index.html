@@ -94,14 +94,20 @@
     .project-meta { font-size: 12px; color: var(--text2); margin-top: 2px; }
 
     /* Tasks */
-    .task-row { padding: 12px; background: var(--card2); border-radius: 8px; margin-bottom: 6px; cursor: pointer; border: 1px solid var(--border); transition: border-color .12s; }
+    .task-row { padding: 12px; background: var(--card2); border-radius: 8px; margin-bottom: 6px; cursor: pointer; border: 1px solid var(--border); transition: border-color .12s; display: flex; align-items: flex-start; gap: 10px; }
     .task-row:hover { border-color: var(--accent); }
+    .task-row.selected { border-color: var(--accent); background: #1e3a5f; }
+    .task-check { width: 18px; height: 18px; cursor: pointer; accent-color: var(--accent); flex-shrink: 0; margin-top: 2px; }
+    .task-row-content { flex: 1; min-width: 0; }
     .task-title { font-size: 14px; font-weight: 500; margin-bottom: 4px; }
     .task-meta { font-size: 12px; color: var(--text2); display: flex; gap: 8px; flex-wrap: wrap; }
+    .task-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 8px 0 10px; gap: 8px; flex-wrap: wrap; }
+    .task-select-all { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); cursor: pointer; user-select: none; }
 
     /* Storage */
-    .file-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .file-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
     .file-row:last-child { border-bottom: none; }
+    .file-check { width: 18px; height: 18px; cursor: pointer; accent-color: var(--accent); flex-shrink: 0; }
     .file-thumb { width: 44px; height: 44px; border-radius: 6px; object-fit: cover; background: var(--card2); flex-shrink: 0; }
     .file-icon { width: 44px; height: 44px; border-radius: 6px; background: var(--card2); display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
     .file-info { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
@@ -112,6 +118,8 @@
     .storage-proj-header:hover { border-color: var(--accent); }
     .storage-proj-files { padding: 0 4px; display: none; }
     .storage-proj-files.open { display: block; }
+    .storage-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); margin-bottom: 2px; gap: 8px; flex-wrap: wrap; }
+    .storage-select-all { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); cursor: pointer; user-select: none; }
 
     /* Modal */
     .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 100; display: none; align-items: center; justify-content: center; padding: 20px; }
@@ -620,18 +628,29 @@ window.openProject = async (projectId, groupTitle) => {
 function renderTasks(tasks) {
   const el = document.getElementById('tasks-list');
   if (!tasks.length) { el.innerHTML = '<div class="empty">Δεν υπάρχουν tasks.</div>'; return; }
-  el.innerHTML = tasks.map((t, i) => {
-    const hasValue = (t.type === 'measurement' || t.type === 'general') && t.value;
-    return `<div class="task-row" onclick="openTaskEdit(${i})">
-      <div class="task-title">${esc(t.title||'(χωρίς τίτλο)')}</div>
-      <div class="task-meta">
-        <span class="badge badge-${t.status||'pending'}">${statusLabel(t.status)}</span>
-        <span>${typeLabel(t.type)}</span>
-        ${t.description ? `<span>📝</span>` : ''}
-      </div>
-      ${hasValue ? `<div style="margin-top:6px;font-size:13px;color:var(--text);background:var(--bg);border-radius:6px;padding:6px 8px;border:1px solid var(--border);white-space:pre-wrap;">${esc(t.value)}</div>` : ''}
-    </div>`;
-  }).join('');
+  el.innerHTML =
+    `<div class="task-toolbar">
+      <label class="task-select-all">
+        <input type="checkbox" id="task-selectall" onchange="toggleSelectAllTasks()">
+        Επιλογή όλων
+      </label>
+      <button class="btn btn-danger btn-sm" id="task-delbtn" onclick="deleteSelectedTasks()" disabled style="opacity:0.4">Διαγραφή επιλεγμένων (0)</button>
+    </div>` +
+    tasks.map((t, i) => {
+      const hasValue = (t.type === 'measurement' || t.type === 'general') && t.value;
+      return `<div class="task-row" id="task-row-${i}" onclick="openTaskEdit(${i})">
+        <input type="checkbox" class="task-check" data-idx="${i}" onclick="event.stopPropagation()" onchange="onTaskCheckChange()">
+        <div class="task-row-content">
+          <div class="task-title">${esc(t.title||'(χωρίς τίτλο)')}</div>
+          <div class="task-meta">
+            <span class="badge badge-${t.status||'pending'}">${statusLabel(t.status)}</span>
+            <span>${typeLabel(t.type)}</span>
+            ${t.description ? `<span>📝</span>` : ''}
+          </div>
+          ${hasValue ? `<div style="margin-top:6px;font-size:13px;color:var(--text);background:var(--bg);border-radius:6px;padding:6px 8px;border:1px solid var(--border);white-space:pre-wrap;">${esc(t.value)}</div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
 }
 
 // ─── Task Edit Modal ──────────────────────────────────────────
@@ -687,6 +706,48 @@ window.saveTask = async () => {
     btn.disabled = false;
     btn.textContent = 'Αποθήκευση';
   }
+};
+
+// ─── Task Multi-Select ────────────────────────────────────────
+window.onTaskCheckChange = () => {
+  const checkboxes = document.querySelectorAll('.task-check');
+  const selected = [...checkboxes].filter(cb => cb.checked);
+  const btn = document.getElementById('task-delbtn');
+  const sa = document.getElementById('task-selectall');
+  btn.textContent = `Διαγραφή επιλεγμένων (${selected.length})`;
+  btn.disabled = selected.length === 0;
+  btn.style.opacity = selected.length === 0 ? '0.4' : '1';
+  sa.indeterminate = selected.length > 0 && selected.length < checkboxes.length;
+  sa.checked = checkboxes.length > 0 && selected.length === checkboxes.length;
+  checkboxes.forEach((cb, i) => {
+    document.getElementById(`task-row-${i}`)?.classList.toggle('selected', cb.checked);
+  });
+};
+
+window.toggleSelectAllTasks = () => {
+  const sa = document.getElementById('task-selectall');
+  document.querySelectorAll('.task-check').forEach(cb => { cb.checked = sa.checked; });
+  onTaskCheckChange();
+};
+
+window.deleteSelectedTasks = () => {
+  const selected = [...document.querySelectorAll('.task-check')].filter(cb => cb.checked);
+  if (!selected.length) return;
+  const indices = selected.map(cb => parseInt(cb.dataset.idx));
+  showConfirm(
+    'Διαγραφή tasks',
+    `Θέλεις σίγουρα να διαγράψεις ${indices.length} task${indices.length > 1 ? 's' : ''};`,
+    async () => {
+      const tasks = (currentProject.data.tasks || []).filter((_, i) => !indices.includes(i));
+      try {
+        await updateDoc(doc(db, 'projects', currentProject.id), { tasks });
+        currentProject.data = { ...currentProject.data, tasks };
+        renderTasks(tasks);
+      } catch(e) {
+        alert('Σφάλμα διαγραφής: ' + e.message);
+      }
+    }
+  );
 };
 
 // ─── Delete Project ───────────────────────────────────────────
@@ -771,19 +832,29 @@ window.toggleStorageProject = async (projectId, teamId) => {
       if (!allFiles.length) {
         contentEl.innerHTML = '<div style="padding:12px 0;color:var(--text2);font-size:13px;">Δεν υπάρχουν αρχεία.</div>';
       } else {
-        contentEl.innerHTML = allFiles.map(f => {
-          const name = f.name;
-          const isImg = /\.(jpg|jpeg|png|gif|webp)$/i.test(name);
-          const isVid = /\.(mp4|mov|avi|mkv)$/i.test(name);
-          const icon = isImg ? '🖼️' : isVid ? '🎬' : '📄';
-          return `<div class="file-row">
-            <div class="file-icon">${icon}</div>
-            <div class="file-info">
-              <div class="file-name">${esc(name)}</div>
-              <button class="btn btn-danger btn-sm" onclick="confirmDeleteFile('${esc(f.fullPath)}','${esc(name)}')">Διαγραφή</button>
-            </div>
-          </div>`;
-        }).join('');
+        storageSelection[projectId] = new Set();
+        contentEl.innerHTML =
+          `<div class="storage-toolbar">
+            <label class="storage-select-all">
+              <input type="checkbox" id="stor-selectall-${esc(projectId)}" onchange="toggleSelectAllFiles('${esc(projectId)}')">
+              Επιλογή όλων
+            </label>
+            <button class="btn btn-danger btn-sm" id="stor-delbtn-${esc(projectId)}" onclick="deleteSelectedFiles('${esc(projectId)}')" disabled style="opacity:0.4">Διαγραφή επιλεγμένων (0)</button>
+          </div>` +
+          allFiles.map(f => {
+            const name = f.name;
+            const isImg = /\.(jpg|jpeg|png|gif|webp)$/i.test(name);
+            const isVid = /\.(mp4|mov|avi|mkv)$/i.test(name);
+            const icon = isImg ? '🖼️' : isVid ? '🎬' : '📄';
+            return `<div class="file-row">
+              <input type="checkbox" class="file-check" data-path="${esc(f.fullPath)}" data-project="${esc(projectId)}" onchange="onFileCheckChange('${esc(projectId)}')">
+              <div class="file-icon">${icon}</div>
+              <div class="file-info">
+                <div class="file-name">${esc(name)}</div>
+                <button class="btn btn-danger btn-sm" onclick="confirmDeleteFile('${esc(f.fullPath)}','${esc(name)}')">Διαγραφή</button>
+              </div>
+            </div>`;
+          }).join('');
       }
     } catch(e) {
       contentEl.innerHTML = `<div style="padding:12px 0;color:var(--danger);font-size:13px;">Σφάλμα: ${esc(e.message)}</div>`;
@@ -791,6 +862,48 @@ window.toggleStorageProject = async (projectId, teamId) => {
       loadingEl.style.display = 'none';
     }
   }
+};
+
+const storageSelection = {};
+
+window.onFileCheckChange = (projectId) => {
+  const checkboxes = document.querySelectorAll(`.file-check[data-project="${projectId}"]`);
+  const sel = storageSelection[projectId] = new Set();
+  checkboxes.forEach(cb => { if (cb.checked) sel.add(cb.dataset.path); });
+  const btn = document.getElementById(`stor-delbtn-${projectId}`);
+  const sa = document.getElementById(`stor-selectall-${projectId}`);
+  btn.textContent = `Διαγραφή επιλεγμένων (${sel.size})`;
+  btn.disabled = sel.size === 0;
+  btn.style.opacity = sel.size === 0 ? '0.4' : '1';
+  sa.indeterminate = sel.size > 0 && sel.size < checkboxes.length;
+  sa.checked = checkboxes.length > 0 && sel.size === checkboxes.length;
+};
+
+window.toggleSelectAllFiles = (projectId) => {
+  const sa = document.getElementById(`stor-selectall-${projectId}`);
+  document.querySelectorAll(`.file-check[data-project="${projectId}"]`).forEach(cb => { cb.checked = sa.checked; });
+  onFileCheckChange(projectId);
+};
+
+window.deleteSelectedFiles = (projectId) => {
+  const sel = storageSelection[projectId];
+  if (!sel || sel.size === 0) return;
+  showConfirm(
+    'Διαγραφή επιλεγμένων',
+    `Θέλεις σίγουρα να διαγράψεις ${sel.size} αρχεία;`,
+    async () => {
+      for (const path of [...sel]) {
+        try { await deleteObject(ref(storage, path)); } catch {}
+      }
+      delete storageSelection[projectId];
+      loadedStorageProjects.delete(projectId);
+      const filesEl = document.getElementById(`stor-files-${projectId}`);
+      if (filesEl?.classList.contains('open')) {
+        filesEl.classList.remove('open');
+        document.getElementById(`stor-arrow-${projectId}`).textContent = '›';
+      }
+    }
+  );
 };
 
 window.confirmDeleteFile = (fullPath, name) => {
@@ -804,8 +917,8 @@ window.confirmDeleteFile = (fullPath, name) => {
 async function deleteFile(fullPath) {
   try {
     await deleteObject(ref(storage, fullPath));
-    // Reload the project's storage section
     const projectId = fullPath.split('/')[3];
+    delete storageSelection[projectId];
     loadedStorageProjects.delete(projectId);
     const filesEl = document.getElementById(`stor-files-${projectId}`);
     if (filesEl?.classList.contains('open')) {

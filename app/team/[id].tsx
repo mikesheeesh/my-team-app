@@ -306,12 +306,12 @@ export default function TeamProjectsScreen() {
             const freshData = freshProjectsMap.get(proj.id);
             if (freshData) {
               const tasks = freshData.tasks || [];
-              let derivedStatus: "active" | "pending" | "completed" = "active";
+              let derivedStatus: "active" | "pending" | "completed" = "pending";
               if (tasks.length > 0) {
                 const done = tasks.filter((t: any) => t.status === "completed").length;
                 if (done === tasks.length) derivedStatus = "completed";
-                else if (done > 0) derivedStatus = "pending";
-                else derivedStatus = "active";
+                else if (done > 0) derivedStatus = "active";
+                else derivedStatus = "pending";
               }
               if (proj.status !== derivedStatus) hasChanges = true;
               return {
@@ -1171,7 +1171,12 @@ export default function TeamProjectsScreen() {
               {(myRole === "Founder" || myRole === "Admin") && (
                 <TouchableOpacity
                   style={styles.optionCard}
-                  onPress={() => {
+                  onPress={async () => {
+                    const net = await Network.getNetworkStateAsync();
+                    if (!net.isConnected) {
+                      Alert.alert("Offline", "Δεν υπάρχει σύνδεση στο διαδίκτυο.");
+                      return;
+                    }
                     setMenuVisible(false);
                     Linking.openURL("https://ergon-work.web.app/admin/");
                   }}
@@ -1294,7 +1299,14 @@ export default function TeamProjectsScreen() {
 
                     <TouchableOpacity
                       style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", backgroundColor: "#4285f4", padding: 14, borderRadius: 10, marginBottom: 10 }}
-                      onPress={() => triggerDriveSync(teamId)}
+                      onPress={async () => {
+                        const net = await Network.getNetworkStateAsync();
+                        if (!net.isConnected) {
+                          Alert.alert("Offline", "Δεν υπάρχει σύνδεση στο διαδίκτυο.");
+                          return;
+                        }
+                        triggerDriveSync(teamId);
+                      }}
                       disabled={isDriveSyncing}
                     >
                       <Ionicons name="sync-outline" size={18} color="white" />
@@ -1306,6 +1318,11 @@ export default function TeamProjectsScreen() {
                     <TouchableOpacity
                       style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", backgroundColor: "#34a853", padding: 14, borderRadius: 10, marginBottom: 10 }}
                       onPress={async () => {
+                        const net = await Network.getNetworkStateAsync();
+                        if (!net.isConnected) {
+                          Alert.alert("Offline", "Δεν υπάρχει σύνδεση στο διαδίκτυο.");
+                          return;
+                        }
                         try {
                           const syncDoc = await getDoc(doc(db, "driveSyncState", teamId));
                           const folderIds = syncDoc.data()?.folderIds;
@@ -1333,6 +1350,11 @@ export default function TeamProjectsScreen() {
                     <TouchableOpacity
                       style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", padding: 14, borderRadius: 10, borderWidth: 1, borderColor: "#ef4444" }}
                       onPress={async () => {
+                        const net = await Network.getNetworkStateAsync();
+                        if (!net.isConnected) {
+                          Alert.alert("Offline", "Δεν υπάρχει σύνδεση στο διαδίκτυο.");
+                          return;
+                        }
                         Alert.alert(
                           "Αποσύνδεση Drive",
                           "Θέλετε να αποσυνδέσετε το Google Drive;",
@@ -1376,6 +1398,11 @@ export default function TeamProjectsScreen() {
                     <TouchableOpacity
                       style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", backgroundColor: "#4285f4", padding: 14, borderRadius: 10 }}
                       onPress={async () => {
+                        const net = await Network.getNetworkStateAsync();
+                        if (!net.isConnected) {
+                          Alert.alert("Offline", "Δεν υπάρχει σύνδεση στο διαδίκτυο.");
+                          return;
+                        }
                         setDriveConnecting(true);
                         const result = await connectGoogleDrive(teamId);
                         setDriveConnecting(false);
