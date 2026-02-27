@@ -18,12 +18,13 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ── Helper functions ────────────────────────────────────────────────────
+    // Used for cross-collection checks (projects, invites, activityLog, driveSyncState).
+    // For team rules, use resource.data directly (avoids extra get() calls).
 
     function isAuth() {
       return request.auth != null;
     }
 
-    // Reads the team document once (Firebase caches within same evaluation)
     function teamDoc(teamId) {
       return get(/databases/$(database)/documents/teams/$(teamId)).data;
     }
@@ -32,16 +33,14 @@ service cloud.firestore {
       return isAuth() && request.auth.uid in teamDoc(teamId).memberIds;
     }
 
-    function myRole(teamId) {
-      return teamDoc(teamId).roles[request.auth.uid];
+    function isSupervisorOrAbove(teamId) {
+      return isMember(teamId) &&
+        teamDoc(teamId).roles[request.auth.uid] in ['Founder', 'Admin', 'Supervisor'];
     }
 
     function isAdminOrAbove(teamId) {
-      return isMember(teamId) && myRole(teamId) in ['Founder', 'Admin'];
-    }
-
-    function isSupervisorOrAbove(teamId) {
-      return isMember(teamId) && myRole(teamId) in ['Founder', 'Admin', 'Supervisor'];
+      return isMember(teamId) &&
+        teamDoc(teamId).roles[request.auth.uid] in ['Founder', 'Admin'];
     }
 
     // ── Users ───────────────────────────────────────────────────────────────
@@ -55,30 +54,31 @@ service cloud.firestore {
 
     // ── Teams ───────────────────────────────────────────────────────────────
     match /teams/{teamId} {
-      // Only members can read their team
-      allow read: if isAuth() && request.auth.uid in resource.data.memberIds;
+      // Any authenticated user can read team info.
+      // Needed for: invite join flow (non-member reads team to check membership),
+      // and for get() calls from other collection rules (project, invite, etc.)
+      allow read: if isAuth();
 
-      // Any authenticated user can create a team (they become Founder)
+      // Create: any user can create a team — they must set themselves as Founder
       allow create: if isAuth() &&
         request.auth.uid in request.resource.data.memberIds &&
         request.resource.data.roles[request.auth.uid] == 'Founder';
 
-      // Admins/Founders can update team settings
-      // Also: allow a non-member to add ONLY themselves (join flow)
-      allow update: if isAdminOrAbove(teamId) ||
-        (
-          // Join flow: user not yet a member, adds only themselves
-          isAuth() &&
-          !(request.auth.uid in resource.data.memberIds) &&
-          // Only memberIds and roles may change
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'roles']) &&
-          // Existing members preserved (can't remove others)
-          request.resource.data.memberIds.hasAll(resource.data.memberIds) &&
-          // The joining user's role must not be Founder
-          request.resource.data.roles[request.auth.uid] in ['Admin', 'Supervisor', 'User']
-        );
+      // Update — two cases (uses resource.data directly, no extra get() needed):
+      allow update: if isAuth() && (
+        // Case 1: Admin or Founder modifying team settings / managing members
+        (request.auth.uid in resource.data.memberIds &&
+         resource.data.roles[request.auth.uid] in ['Founder', 'Admin']) ||
 
-      // Only Founder can delete the team
+        // Case 2: Join flow — non-member adding only themselves via invite
+        (!(request.auth.uid in resource.data.memberIds) &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'roles']) &&
+         request.resource.data.memberIds.hasAll(resource.data.memberIds) &&
+         request.resource.data.roles[request.auth.uid] in ['Admin', 'Supervisor', 'User']
+        )
+      );
+
+      // Delete: only the Founder
       allow delete: if isAuth() && resource.data.roles[request.auth.uid] == 'Founder';
     }
 
@@ -87,7 +87,7 @@ service cloud.firestore {
       // Any team member can read
       allow read: if isAuth() && isMember(resource.data.teamId);
 
-      // Supervisor and above can create projects
+      // Supervisor and above can create
       allow create: if isAuth() && isSupervisorOrAbove(request.resource.data.teamId);
 
       // Members can update tasks & status only
@@ -97,24 +97,22 @@ service cloud.firestore {
         isSupervisorOrAbove(resource.data.teamId)
       );
 
-      // Only Founder/Admin can delete
+      // Only Admin/Founder can delete
       allow delete: if isAuth() && isAdminOrAbove(resource.data.teamId);
     }
 
     // ── Invites ─────────────────────────────────────────────────────────────
     match /invites/{inviteId} {
-      // Any authenticated user can read invites (needed to validate a code on join)
+      // Any authenticated user can read invites (to validate a code on join)
       allow read: if isAuth();
 
-      // Only team members can create invites
-      // Role being assigned must match the creator's permission level
-      // Nobody can create a "Founder" invite
+      // Only team members can create invites, with role matching their permissions
       allow create: if isAuth() &&
         request.resource.data.createdBy == request.auth.uid &&
         request.resource.data.role in ['Admin', 'Supervisor', 'User'] &&
         isMember(request.resource.data.teamId) && (
           // Supervisors can only invite Users
-          (myRole(request.resource.data.teamId) == 'Supervisor' &&
+          (teamDoc(request.resource.data.teamId).roles[request.auth.uid] == 'Supervisor' &&
             request.resource.data.role == 'User') ||
           // Admins and Founders can invite any non-Founder role
           isAdminOrAbove(request.resource.data.teamId)
