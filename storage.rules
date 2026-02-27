@@ -1,37 +1,43 @@
 rules_version = '2';
 
 /**
- * Firebase Storage Security Rules
+ * Firebase Storage Security Rules — Ergon Work Management
  *
- * Purpose: Enforce team-isolated storage access
  * Structure: teams/{teamId}/projects/{projectId}/tasks/{taskId}/{mediaFile}
  *
  * Rules:
- * - Only authenticated users can access storage
- * - Users can only access files from their own teams
+ * - Only authenticated users who are members of the team can access files
+ * - Team membership is verified via Firestore cross-reference
  * - File size limit: 10MB
- * - Allowed types: images (image/*) and videos (video/*)
  */
 
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // Allow list on team/project paths (needed for deleteProjectMedia)
-    match /teams/{teamId}/projects/{projectId}/{allPaths=**} {
-      allow list: if request.auth != null;
+    // Check team membership via Firestore
+    function isMember(teamId) {
+      return request.auth != null &&
+        request.auth.uid in firestore.get(
+          /databases/(default)/documents/teams/$(teamId)
+        ).data.memberIds;
     }
 
-    // Team-isolated storage path
-    match /teams/{teamId}/projects/{projectId}/tasks/{taskId}/{mediaFile} {
-      // Allow authenticated users (team check via Firestore is complex)
-      allow read, delete: if request.auth != null;
+    // Allow list on team/project paths (needed for deleteProjectMedia in admin panel)
+    match /teams/{teamId}/projects/{projectId}/{allPaths=**} {
+      allow list: if isMember(teamId);
+    }
 
-      // Upload with size limit (10MB)
-      allow write: if request.auth != null &&
+    // Team-isolated storage: only members of the team can access
+    match /teams/{teamId}/projects/{projectId}/tasks/{taskId}/{mediaFile} {
+      // Read and delete: team members only
+      allow read, delete: if isMember(teamId);
+
+      // Upload: team members only, max 10MB
+      allow write: if isMember(teamId) &&
                       request.resource.size < 10 * 1024 * 1024;
     }
 
-    // Deny all other paths by default
+    // Deny all other paths
     match /{allPaths=**} {
       allow read, write: if false;
     }

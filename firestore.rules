@@ -1,0 +1,158 @@
+rules_version = '2';
+
+/**
+ * Firestore Security Rules — Ergon Work Management
+ *
+ * Hierarchy:
+ *   users/{userId}
+ *   teams/{teamId}              ← groups + project references embedded
+ *   projects/{projectId}        ← tasks array embedded
+ *   invites/{inviteId}
+ *   activityLog/{projectId}/entries/{entryId}
+ *   driveSyncState/{teamId}
+ *
+ * Role levels: Founder > Admin > Supervisor > User (Μέλος)
+ */
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ────────────────────────────────────────────────────
+
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    // Reads the team document once (Firebase caches within same evaluation)
+    function teamDoc(teamId) {
+      return get(/databases/$(database)/documents/teams/$(teamId)).data;
+    }
+
+    function isMember(teamId) {
+      return isAuth() && request.auth.uid in teamDoc(teamId).memberIds;
+    }
+
+    function myRole(teamId) {
+      return teamDoc(teamId).roles[request.auth.uid];
+    }
+
+    function isAdminOrAbove(teamId) {
+      return isMember(teamId) && myRole(teamId) in ['Founder', 'Admin'];
+    }
+
+    function isSupervisorOrAbove(teamId) {
+      return isMember(teamId) && myRole(teamId) in ['Founder', 'Admin', 'Supervisor'];
+    }
+
+    // ── Users ───────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      // Any authenticated user can read profiles (needed to show member names/emails)
+      allow read: if isAuth();
+      // Only the user can write their own profile
+      allow create, update: if isAuth() && request.auth.uid == userId;
+      allow delete: if false;
+    }
+
+    // ── Teams ───────────────────────────────────────────────────────────────
+    match /teams/{teamId} {
+      // Only members can read their team
+      allow read: if isAuth() && request.auth.uid in resource.data.memberIds;
+
+      // Any authenticated user can create a team (they become Founder)
+      allow create: if isAuth() &&
+        request.auth.uid in request.resource.data.memberIds &&
+        request.resource.data.roles[request.auth.uid] == 'Founder';
+
+      // Admins/Founders can update team settings
+      // Also: allow a non-member to add ONLY themselves (join flow)
+      allow update: if isAdminOrAbove(teamId) ||
+        (
+          // Join flow: user not yet a member, adds only themselves
+          isAuth() &&
+          !(request.auth.uid in resource.data.memberIds) &&
+          // Only memberIds and roles may change
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'roles']) &&
+          // Existing members preserved (can't remove others)
+          request.resource.data.memberIds.hasAll(resource.data.memberIds) &&
+          // The joining user's role must not be Founder
+          request.resource.data.roles[request.auth.uid] in ['Admin', 'Supervisor', 'User']
+        );
+
+      // Only Founder can delete the team
+      allow delete: if isAuth() && resource.data.roles[request.auth.uid] == 'Founder';
+    }
+
+    // ── Projects ────────────────────────────────────────────────────────────
+    match /projects/{projectId} {
+      // Any team member can read
+      allow read: if isAuth() && isMember(resource.data.teamId);
+
+      // Supervisor and above can create projects
+      allow create: if isAuth() && isSupervisorOrAbove(request.resource.data.teamId);
+
+      // Members can update tasks & status only
+      // Supervisor+ can update any project field (title, supervisors, members)
+      allow update: if isAuth() && isMember(resource.data.teamId) && (
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['tasks', 'status']) ||
+        isSupervisorOrAbove(resource.data.teamId)
+      );
+
+      // Only Founder/Admin can delete
+      allow delete: if isAuth() && isAdminOrAbove(resource.data.teamId);
+    }
+
+    // ── Invites ─────────────────────────────────────────────────────────────
+    match /invites/{inviteId} {
+      // Any authenticated user can read invites (needed to validate a code on join)
+      allow read: if isAuth();
+
+      // Only team members can create invites
+      // Role being assigned must match the creator's permission level
+      // Nobody can create a "Founder" invite
+      allow create: if isAuth() &&
+        request.resource.data.createdBy == request.auth.uid &&
+        request.resource.data.role in ['Admin', 'Supervisor', 'User'] &&
+        isMember(request.resource.data.teamId) && (
+          // Supervisors can only invite Users
+          (myRole(request.resource.data.teamId) == 'Supervisor' &&
+            request.resource.data.role == 'User') ||
+          // Admins and Founders can invite any non-Founder role
+          isAdminOrAbove(request.resource.data.teamId)
+        );
+
+      // Invite deleted on use (by the joiner) or manually
+      allow delete: if isAuth();
+
+      // Invites are immutable after creation
+      allow update: if false;
+    }
+
+    // ── Activity Log ────────────────────────────────────────────────────────
+    match /activityLog/{projectId}/entries/{entryId} {
+      // Team members of the project's team can read the log
+      allow read: if isAuth() &&
+        isMember(get(/databases/$(database)/documents/projects/$(projectId)).data.teamId);
+
+      // Team members can write log entries (only for themselves)
+      allow create: if isAuth() &&
+        request.resource.data.userId == request.auth.uid &&
+        isMember(get(/databases/$(database)/documents/projects/$(projectId)).data.teamId);
+
+      // Audit log is immutable
+      allow update, delete: if false;
+    }
+
+    // ── Drive Sync State ────────────────────────────────────────────────────
+    match /driveSyncState/{teamId} {
+      // All members can read (e.g. "Open in Drive" needs folder IDs)
+      allow read: if isAuth() && isMember(teamId);
+      // Only Admins/Founders can write (they manage Drive connection)
+      allow write: if isAuth() && isAdminOrAbove(teamId);
+    }
+
+    // ── Deny everything else ────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
