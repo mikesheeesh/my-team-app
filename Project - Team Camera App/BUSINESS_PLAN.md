@@ -3,15 +3,17 @@
 ## 1. ΕΚΤΕΛΕΣΤΙΚΗ ΠΕΡΙΛΗΨΗ
 
 ### Περιγραφή
-Cross-platform mobile εφαρμογή (iOS, Android, Web) για διαχείριση ομάδων εργασίας, projects και tasks. Σχεδιάστηκε για field work management (κατασκευαστικές, αρχιτεκτονικά γραφεία, τεχνικές υπηρεσίες, facility management).
+Cross-platform mobile εφαρμογή (iOS, Android) για διαχείριση ομάδων εργασίας, projects και tasks. Σχεδιάστηκε για field work management (κατασκευαστικές, αρχιτεκτονικά γραφεία, τεχνικές υπηρεσίες, facility management).
 
 ### Value Proposition
 - **Offline-First**: Πλήρης λειτουργικότητα χωρίς internet
-- **Real-Time Sync**: Αυτόματος συγχρονισμός σε WiFi
-- **Ρόλοι & Δικαιώματα**: 4-level ιεραρχία (Founder → Admin → Supervisor → User)
-- **Φωτογραφική Τεκμηρίωση**: Camera + GPS + annotations
-- **PDF Reports**: Αυτόματη δημιουργία αναφορών
+- **Real-Time Sync**: Αυτόματος συγχρονισμός μέσω onSnapshot (Firestore)
+- **Ρόλοι & Δικαιώματα**: 4-level ιεραρχία (Founder → Admin → Supervisor → Μέλος)
+- **Φωτογραφική Τεκμηρίωση**: Camera + GPS + annotations (drawing editor)
+- **PDF Reports**: Αυτόματη δημιουργία αναφορών ανά project
 - **Google Drive Backup**: Αυτόματο backup φωτογραφιών, βίντεο και Excel αναφορών
+- **Activity Log**: Ιστορικό ενεργειών ανά project σε real-time
+- **Admin Panel (Web)**: Διαχείριση μελών, tasks και αρχείων μέσω browser
 
 ---
 
@@ -19,29 +21,31 @@ Cross-platform mobile εφαρμογή (iOS, Android, Web) για διαχείρ
 
 | Τεχνολογία | Χρήση |
 |------------|-------|
-| React Native (Expo SDK 54) | Cross-platform |
+| React Native (Expo SDK 54) | Cross-platform mobile |
 | TypeScript | Type-safe code |
-| Firebase Auth/Firestore/Storage | Backend |
-| AsyncStorage | Offline cache & queue |
+| Firebase Auth / Firestore / Storage | Backend |
+| AsyncStorage | Offline cache & sync queue |
 | Expo Router | File-based navigation |
-| React Native SVG + View Shot | Drawing & capture |
+| React Native SVG + ViewShot | Drawing editor & capture |
 | Expo Location | GPS |
 | Expo AV | Video playback |
 | react-native-compressor | Video compression |
-| Expo Print/Sharing | PDF generation |
+| Expo Print / Sharing | PDF generation |
 | Expo Image Manipulator | EXIF orientation fix |
-| Google Drive API v3 (REST) | Cloud backup & sharing |
+| Expo Network | Online/offline detection |
+| Google Drive API v3 (REST) | Cloud backup |
 | ExcelJS | Excel αρχεία για Drive sync |
+| Firebase Hosting | Invite landing page + Admin Panel web app |
 
 ---
 
 ## 3. FIRESTORE DATABASE SCHEMA
 
 ### `users/{userId}`
-`fullname`, `email`, `phone`, `avatar`, `createdAt`
+`fullname`, `email`, `phone`, `createdAt`
 
 ### `teams/{teamId}`
-`name`, `type`, `contactEmail`, `logo`, `createdAt`, `memberIds[]`, `roles: { [userId]: Role }`, `groups: [{ id, title, projects: [{ id, title, status, supervisors[], members[] }] }]`
+`name`, `type`, `contactEmail`, `createdAt`, `memberIds[]`, `roles: { [userId]: Role }`, `groups: [{ id, title, projects: [{ id, title, status, supervisors[], members[] }] }]`
 
 ### `projects/{projectId}`
 `title`, `status` (active|pending|completed), `teamId`, `supervisors[]`, `members[]`, `createdBy`, `createdAt`, `tasks: Task[]`
@@ -57,65 +61,89 @@ Common fields: `id`, `title`, `description?`, `status`, `isLocal?`, `completedAt
 ### `invites/{inviteId}`
 `code` (6 chars), `teamId`, `teamName`, `role`, `createdBy`, `createdAt`, `status`
 
+### `activityLog/{projectId}/entries/{entryId}`
+`userId`, `userFullname`, `action`, `taskId`, `taskTitle`, `timestamp`
+
+Actions: `task_created`, `task_deleted`, `photo_added`, `photo_deleted`, `video_added`, `video_deleted`, `value_set`, `value_cleared`, `task_completed`
+
 ### `driveConfig/{teamId}`
 `refreshToken`, `accessToken`, `tokenExpiry`, `connectedEmail`, `connectedAt`
 
 ### `driveSyncState/{teamId}`
-`lastSyncTimestamp`, `folderIds: { [path]: folderId }`, `sharedWith: string[]` (UIDs), `projects: { [projectId]: { lastSyncedTasksHash, syncedMedia, syncedPdfs } }`
+`lastSyncTimestamp`, `folderIds: { [path]: folderId }`, `sharedWith: string[]` (UIDs), `projects: { [projectId]: { lastSyncedTasksHash, syncedMedia } }`
 
 ---
 
 ## 4. ΡΟΛΟΙ & ΔΙΚΑΙΩΜΑΤΑ
 
-| Ενέργεια | Founder | Admin | Supervisor | User |
-|----------|---------|-------|------------|------|
-| Διαγραφή Ομάδας | ✅ | - | - | - |
-| Αλλαγή Ονόματος/Logo | ✅ | ✅ | - | - |
-| Δημιουργία Group | ✅ | ✅ | - | - |
+| Ενέργεια | Founder | Admin | Supervisor | Μέλος |
+|----------|:-------:|:-----:|:----------:|:-----:|
+| Δημιουργία ομάδας | ✅ | - | - | - |
+| Διαγραφή ομάδας | ✅ | - | - | - |
+| Δημιουργία Group | ✅ | ✅ | ✅ | - |
 | Δημιουργία Project | ✅ | ✅ | ✅ | - |
-| Ανάθεση Supervisors | ✅ | ✅ | - | - |
-| Ανάθεση Members | ✅ | ✅ | ✅ | - |
-| Πρόσκληση (Admin/Supervisor) | ✅ | ✅ | - | - |
-| Πρόσκληση User | ✅ | ✅ | ✅ | - |
-| Promote/Demote | ✅ | ✅ | - | - |
-| Kick | ✅ | ✅ | ✅* | - |
+| Διαγραφή Project | ✅ | ✅ | - | - |
+| Μεταφορά Project | ✅ | ✅ | - | - |
+| Ανάθεση Supervisors/Members | ✅ | ✅ | - | - |
+| Πρόσκληση Admin | ✅ | ✅ | - | - |
+| Πρόσκληση Supervisor | ✅ | ✅ | - | - |
+| Πρόσκληση Μέλους | ✅ | ✅ | ✅ | - |
+| Promote/Demote μελών | ✅ | ✅* | - | - |
+| Αφαίρεση μελών | ✅ | ✅* | Μόνο Μέλη | - |
 | Task CRUD | ✅ | ✅ | ✅ | ✅ |
-| Προβολή όλων Projects | ✅ | ✅ | ✅ | - |
-| Προβολή assigned | ✅ | ✅ | ✅ | ✅ |
-| Σύνδεση / Αποσύνδεση Drive | ✅ | ✅ | - | - |
+| PDF Export | ✅ | ✅ | ✅ | ✅ |
+| Google Drive (Σύνδεση/Sync) | ✅ | ✅ | - | - |
+| Admin Panel (web) | ✅ | ✅ | - | - |
 
-*Supervisor kick μόνο Users
-
----
-
-## 5. ΛΕΙΤΟΥΡΓΙΚΟΤΗΤΕΣ
-
-### v2.0.1 (Current)
-- **Google Drive Sync**: Full OAuth2 integration, auto-backup σε Google Drive
-  - Αυτόματη δημιουργία φακέλων: Ergon Work Management → Team → Group → Project → Photos/Videos
-  - Hash-based change detection (κανένα re-upload αν δεν άλλαξε τίποτα)
-  - URL normalization (αγνοεί token αλλαγές στα Firebase Storage URLs)
-  - Excel αρχείο ανά project (measurement + general tasks)
-  - Auto-share team folder με όλα τα μέλη της ομάδας (writer role)
-  - Progress indicator κατά τον συγχρονισμό
-  - "Sync Now" button + "Άνοιγμα στο Drive" button
-  - Auto-sync κατά το άνοιγμα της εφαρμογής (DriveSyncContext)
-- **PDF Improvements**:
-  - Μία φωτογραφία ανά σελίδα (page-break-before: always)
-  - Τίτλος task μόνο στην πρώτη φωτογραφία κάθε task
-  - Αρίθμηση ("Φωτογραφία 1, 2, 3...") σε κάθε σελίδα
-  - EXIF orientation fix (ImageManipulator με `[{ rotate: 0 }]`)
-  - GPS links για όλες τις φωτογραφίες (αφαίρεση .slice(0,4) ορίου)
-  - Centering με `<center>` tag (WebKit-compatible)
+*Admin δεν μπορεί να τροποποιήσει άλλον Admin ή Founder
 
 ---
 
-## 6. GOOGLE DRIVE SYNC (v2.0.1)
+## 5. ΛΕΙΤΟΥΡΓΙΚΟΤΗΤΕΣ ANA ΕΚΔΟΣΗ
+
+### v2.0 — Core MVP
+Authentication, Teams, Invites, Projects, Tasks (photo/video/measurement/general), Image Editor, Offline-first, PDF Export, Search/Filter, 3-stage Status, Role management, Firebase Storage, OTA Updates (EAS Update)
+
+### v2.0.1 — Google Drive
+- Full OAuth2 integration με Google Drive
+- Αυτόματη δημιουργία φακέλων: Ergon Work Management → Team → Group → Project → Φωτογραφίες/Βίντεο
+- Hash-based change detection (αποφυγή re-upload)
+- Excel αρχείο ανά project (measurement + general tasks)
+- Auto-share team folder με όλα τα μέλη (writer role)
+- Invite landing page (`ergon-work.web.app/invite`)
+
+### v2.2.0 — Image Editor + Video
+- Image Editor: ViewShot capture, Pan mode, 6 χρώματα, 3 μεγέθη, Undo, Reset
+- Video compression: 720p, 2.5Mbps
+- Multiple photos/videos ανά task
+
+### v2.2.2 — Admin Panel + Activity Log + Offline Guards
+- **Activity Log**: `utils/activityLog.ts`, Firestore subcollection `activityLog/{projectId}/entries`
+  - Καταγραφή: task create/delete, photo/video add/delete, value set/clear, task complete
+  - Εμφάνιση: εικονίδιο 🕐 στο header project → modal με τελευταίες 50 εγγραφές
+- **Admin Panel (Web)**: `static/admin/index.html` → `ergon-work.web.app/admin`
+  - Tab Μέλη: αλλαγή ρόλων, αφαίρεση μελών
+  - Tab Έργα: λίστα projects → tasks με multi-select + bulk delete
+  - Tab Storage: αρχεία ανά project, multi-select + bulk delete
+  - Πρόσβαση: Σελίδα ομάδας → ⋮ → Admin Panel (Founder/Admin μόνο)
+- **Offline Guards**: Alert "Offline" αν δεν υπάρχει internet σε:
+  - Google Drive Sync Now / Connect / Disconnect / Open in Drive
+  - Admin Panel (Linking.openURL)
+- **Confirmation dialogs**: Alert επιβεβαίωσης πριν διαγραφή τιμής (measurement/general tasks)
+
+### v2.2.5 — Current
+- Version bump (dashboard, splash screen, landing screen, MANUAL.md)
+- Filter logic: Ενεργά = ≥1 completed task, Εκκρεμή = 0 completed tasks
+
+---
+
+## 6. GOOGLE DRIVE SYNC
 
 ### OAuth2 Flow
 - Scope: `https://www.googleapis.com/auth/drive.file`
 - Callback: `https://ergon-work.web.app/auth/callback/`
-- Token refresh: αυτόματο με `refreshToken` πριν κάθε sync
+- Token refresh: αυτόματο πριν κάθε sync
+- **Σημείωση deploy**: Το EAS update αντικαθιστά το `dist/` → πρέπει `npx firebase deploy --only hosting:app` μετά από κάθε OTA
 
 ### Folder Structure στο Drive
 ```
@@ -125,18 +153,18 @@ Ergon Work Management/
               └── {projectName}/
                     ├── Φωτογραφίες/    ← photos (jpg)
                     ├── Βίντεο/          ← videos (mp4)
-                    └── {project}.xlsx   ← Excel με tasks
+                    └── {project}.xlsx   ← measurement + general tasks
 ```
 
 ### Αρχεία
 - `utils/driveAuth.ts` — OAuth2, token refresh, connect/disconnect
-- `utils/driveApi.ts` — Drive REST API (folders, upload, share, delete)
+- `utils/driveApi.ts` — Drive REST API (folders, upload, share)
 - `utils/driveSyncEngine.ts` — Sync orchestration, hash detection, auto-share
 - `utils/driveExcelGenerator.ts` — Excel generation με ExcelJS
-- `app/context/DriveSyncContext.tsx` — Auto-sync on app open
+- `app/context/DriveSyncContext.tsx` — Auto-sync on project changes (30s debounce)
 
 ### Auto-Share
-Κατά τον πρώτο sync, ο team folder γίνεται αυτόματα share με όλα τα μέλη της ομάδας. Τα UIDs που έχουν ήδη πάρει πρόσβαση αποθηκεύονται στο `driveSyncState/{teamId}.sharedWith` για να αποφύγουμε duplicate API calls.
+Κατά τον πρώτο sync, ο team folder γίνεται αυτόματα share με όλα τα μέλη. UIDs που έλαβαν πρόσβαση αποθηκεύονται στο `driveSyncState/{teamId}.sharedWith`.
 
 ---
 
@@ -144,9 +172,8 @@ Ergon Work Management/
 
 ### Firebase Storage
 - Path: `teams/{teamId}/projects/{projectId}/tasks/{taskId}/{mediaId}.{ext}`
-- Photos: 70% compression, full resolution, JPEG
-- Videos: 720p, 2.5Mbps, 4s max, MP4
-- 10MB file size limit, auth required
+- Photos: 70% quality, full resolution, JPEG
+- Videos: 720p, 2.5Mbps, MP4 (react-native-compressor)
 
 ### Google Drive (Backup)
 - Photos: JPEG, original filename
@@ -155,7 +182,25 @@ Ergon Work Management/
 
 ---
 
-## 8. BUSINESS MODEL (Planned)
+## 8. ADMIN PANEL (WEB)
+
+### Αρχεία
+- `static/admin/index.html` → deployed στο `ergon-work.web.app/admin`
+- Vanilla JS + Firebase SDK (CDN)
+
+### Tabs
+| Tab | Λειτουργίες |
+|-----|-------------|
+| Μέλη | Λίστα μελών, αλλαγή ρόλου, αφαίρεση |
+| Έργα | Λίστα projects → tasks list με multi-select + bulk delete |
+| Storage | Αρχεία ανά project, multi-select checkboxes + bulk delete |
+
+### Πρόσβαση
+Μόνο Founder / Admin. Ανοίγει από: Σελίδα Ομάδας → ⋮ → Admin Panel. Απαιτεί internet.
+
+---
+
+## 9. BUSINESS MODEL (Planned)
 
 | Tier | Τιμή | Features |
 |------|------|----------|
@@ -166,24 +211,24 @@ Ergon Work Management/
 
 ---
 
-## 9. ROADMAP
+## 10. ROADMAP
 
-### Phase 1 - MVP (Complete ✅)
-Authentication, Teams, Invites, Projects, Tasks, Photo/Video, Image Editor, Offline, PDF, Search/Filter, 3-stage Status, Role Cleanup, Firebase Storage, Web Landing Page, Video Compression, OTA Updates, Google Drive Sync, Auto-Share Drive, PDF one-photo-per-page
+### Phase 1 — MVP (Complete ✅)
+Authentication, Teams, Invites, Projects, Tasks (4 types), Image Editor (ViewShot), Offline-first, PDF Export, Search/Filter, 3-stage Status, Role management, Firebase Storage, OTA Updates, Google Drive Sync, Activity Log, Admin Panel (web), Offline guards, Confirmation dialogs
 
-### Phase 2 - Enhanced Features
+### Phase 2 — Enhanced Features
 - [ ] Push notifications
 - [ ] Task comments & mentions
 - [ ] Task deadlines & reminders
 - [ ] File attachments (PDFs, docs)
 - [ ] Calendar view
 
-### Phase 3 - Advanced
+### Phase 3 — Advanced
 - [ ] Analytics dashboard
 - [ ] Time tracking
 - [ ] Voice notes
 
-### Phase 4 - Enterprise
+### Phase 4 — Enterprise
 - [ ] LDAP/SSO
 - [ ] Custom workflows
 - [ ] API integrations
@@ -191,7 +236,7 @@ Authentication, Teams, Invites, Projects, Tasks, Photo/Video, Image Editor, Offl
 
 ---
 
-## 10. PERFORMANCE TARGETS
+## 11. PERFORMANCE TARGETS
 
 - App launch: <2s
 - Screen transition: <300ms
@@ -203,5 +248,5 @@ Authentication, Teams, Invites, Projects, Tasks, Photo/Video, Image Editor, Offl
 
 ---
 
-**Version**: 2.0.1
+**Version**: 2.2.5
 **Last Updated**: Φεβρουάριος 2026
