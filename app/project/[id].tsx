@@ -16,7 +16,6 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  Image as RNImage,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -108,6 +107,51 @@ type GeneralTask = {
 };
 
 type Task = PhotoTask | VideoTask | MeasurementTask | GeneralTask;
+
+// Parse JPEG SOF marker from the first bytes of a JPEG to get exact pixel dimensions.
+// Downloads only the first 10KB via HTTP Range request — works with Firebase Storage URLs.
+// Avoids RNImage.getSize() which uses Android BitmapFactory inSampleSize downsampling.
+async function getJpegDimsFromUrl(url: string): Promise<{ w: number; h: number } | null> {
+  try {
+    const response = await fetch(url, {
+      headers: { Range: "bytes=0-10239" }, // First 10KB: enough to cover EXIF + SOF marker
+    });
+    const buffer = await response.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+
+    // Verify JPEG magic bytes
+    if (bytes[0] !== 0xFF || bytes[1] !== 0xD8) return null;
+
+    let i = 2;
+    while (i < bytes.length - 9) {
+      if (bytes[i] !== 0xFF) { i++; continue; }
+      const marker = bytes[i + 1];
+      // SOF markers that contain dimensions: C0-C3, C5-C7, C9-CB, CD-CF
+      if (
+        (marker >= 0xC0 && marker <= 0xC3) ||
+        (marker >= 0xC5 && marker <= 0xC7) ||
+        (marker >= 0xC9 && marker <= 0xCB) ||
+        (marker >= 0xCD && marker <= 0xCF)
+      ) {
+        // SOF structure: marker(2) + length(2) + precision(1) + height(2) + width(2)
+        const h = (bytes[i + 5] << 8) | bytes[i + 6];
+        const w = (bytes[i + 7] << 8) | bytes[i + 8];
+        if (h > 0 && w > 0) return { w, h };
+      }
+      // Skip standalone markers (no length field)
+      if (marker === 0xD8 || marker === 0xD9 || marker === 0x01 ||
+          (marker >= 0xD0 && marker <= 0xD7)) { i += 2; continue; }
+      // Skip segment: marker(2) + length field (big-endian)
+      if (i + 3 >= bytes.length) break;
+      const segLen = (bytes[i + 2] << 8) | bytes[i + 3];
+      if (segLen < 2) { i += 2; continue; }
+      i += 2 + segLen;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 // Backward compatibility helper for old VideoTask format
 function normalizeVideoTask(task: any): Task {
@@ -1191,19 +1235,12 @@ export default function ProjectDetailsScreen() {
       setTempImageDims(storedDims);
       setEditorVisible(true);
     } else {
-      // Fallback for images saved before this fix: fetch from Firebase URL
-      RNImage.getSize(
-        selectedMediaForView,
-        (w, h) => {
-          setTempImageDims({ w, h });
-          setEditorVisible(true);
-        },
-        () => {
-          // Fallback: open without dims (screen-res capture)
-          setTempImageDims(null);
-          setEditorVisible(true);
-        },
-      );
+      // No stored dims (photo saved before fix) — parse JPEG header for accurate dims.
+      // Downloads only first 10KB via Range request, avoids RNImage.getSize inSampleSize bug.
+      getJpegDimsFromUrl(selectedMediaForView).then((dims) => {
+        setTempImageDims(dims ?? null);
+        setEditorVisible(true);
+      });
     }
   };
 
