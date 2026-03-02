@@ -16,6 +16,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Image as RNImage,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -67,6 +68,7 @@ type PhotoTask = {
   status: "pending" | "completed";
   images: string[];
   imageLocations: GeoPoint[];
+  imageDims?: Array<{ w: number; h: number } | null>; // Stored pixel dims per image (fixes RNImage.getSize inSampleSize bug)
   isLocal?: boolean;
   completedAt?: number; // Unix timestamp when task was completed
 };
@@ -975,11 +977,15 @@ export default function ProjectDetailsScreen() {
       const finalUri = await embedExifData(m.uri, tempGpsLoc, new Date());
       console.log("  - Final URI (with EXIF):", finalUri);
 
+      // Store accurate dims from ImageManipulator output (fixes RNImage.getSize inSampleSize bug on Android)
+      const savedDims = { w: m.width, h: m.height };
+      console.log("  - Saved dims:", savedDims);
+
       // Check if we're re-editing an existing photo
       if (reEditingIndex !== null && taskForEditing.type === "photo") {
         // REPLACE existing image at index
         console.log("🔄 Replacing image at index:", reEditingIndex);
-        await replaceMediaInTask(taskForEditing.id, reEditingIndex, finalUri);
+        await replaceMediaInTask(taskForEditing.id, reEditingIndex, finalUri, savedDims);
         console.log("✓ Image replaced successfully");
       } else {
         // ADD new image (original behavior)
@@ -988,6 +994,7 @@ export default function ProjectDetailsScreen() {
           taskForEditing.id,
           finalUri, // Save local file:// URI with EXIF, NOT Storage URL
           tempGpsLoc,
+          savedDims,
         );
         console.log("✓ Image saved successfully (offline-first)");
       }
@@ -1013,6 +1020,7 @@ export default function ProjectDetailsScreen() {
     tid: string,
     uri: string,
     location?: GeoPoint,
+    dims?: { w: number; h: number },
   ) => {
     const t = combinedTasks.find((x) => x.id === tid);
     if (!t) return;
@@ -1021,11 +1029,13 @@ export default function ProjectDetailsScreen() {
       const imgs = [...t.images, uri];
       const newLoc = location || { lat: 0, lng: 0 };
       const locs = [...t.imageLocations, newLoc];
+      const newDims = [...((t.imageDims as any[] | undefined) || []), dims || null];
 
       await saveTaskLocal({
         ...t,
         images: imgs,
         imageLocations: locs,
+        imageDims: newDims,
         status: "completed",
       });
       if (currentUser) {
@@ -1055,6 +1065,7 @@ export default function ProjectDetailsScreen() {
     tid: string,
     index: number,
     newUri: string,
+    dims?: { w: number; h: number },
   ) => {
     const t = combinedTasks.find((x) => x.id === tid);
     if (!t || t.type !== "photo") return;
@@ -1078,10 +1089,13 @@ export default function ProjectDetailsScreen() {
 
     // Replace the image at the index
     newImages[index] = newUri;
+    const newDims = [...((t.imageDims as any[] | undefined) || [])];
+    newDims[index] = dims || null;
 
     await saveTaskLocal({
       ...t,
       images: newImages,
+      imageDims: newDims,
       // Keep the same location for the replaced image
       status: "completed",
     });
@@ -1114,9 +1128,11 @@ export default function ProjectDetailsScreen() {
       if (idx !== -1) {
         const newImages = [...activeTaskForGallery.images];
         const newLocs = [...activeTaskForGallery.imageLocations];
+        const newDims = [...((activeTaskForGallery.imageDims as any[] | undefined) || [])];
 
         newImages.splice(idx, 1);
         if (newLocs.length > idx) newLocs.splice(idx, 1);
+        if (newDims.length > idx) newDims.splice(idx, 1);
 
         const st = newImages.length > 0 ? "completed" : "pending";
         setSelectedMediaForView(null);
@@ -1124,6 +1140,7 @@ export default function ProjectDetailsScreen() {
           ...activeTaskForGallery,
           images: newImages,
           imageLocations: newLocs,
+          imageDims: newDims,
           status: st as "completed" | "pending",
         });
         if (currentUser) {
@@ -1165,10 +1182,29 @@ export default function ProjectDetailsScreen() {
     // Set up for re-editing
     setReEditingIndex(index);
     setTempImageUri(selectedMediaForView);
-    setTempImageDims(null); // Firebase URL — natural dims not available
     setTaskForEditing(activeTaskForGallery);
     setSelectedMediaForView(null); // Close the viewer
-    setEditorVisible(true);
+
+    // Use stored dims if available (avoids RNImage.getSize inSampleSize bug on Android)
+    const storedDims = task.imageDims?.[index];
+    if (storedDims) {
+      setTempImageDims(storedDims);
+      setEditorVisible(true);
+    } else {
+      // Fallback for images saved before this fix: fetch from Firebase URL
+      RNImage.getSize(
+        selectedMediaForView,
+        (w, h) => {
+          setTempImageDims({ w, h });
+          setEditorVisible(true);
+        },
+        () => {
+          // Fallback: open without dims (screen-res capture)
+          setTempImageDims(null);
+          setEditorVisible(true);
+        },
+      );
+    }
   };
 
   const handleSaveInput = async () => {
@@ -1454,7 +1490,7 @@ export default function ProjectDetailsScreen() {
       // Build photo appendix section - full-size photos grouped by task
       let photosAppendixHTML = "";
       const photoTasksForAppendix = combinedTasks.filter(
-        (t) => t.type === "photo" && t.images.length > 0
+        (t): t is PhotoTask => t.type === "photo" && (t as PhotoTask).images.length > 0
       );
       if (photoTasksForAppendix.length > 0) {
         let photoPagesHTML = "";
