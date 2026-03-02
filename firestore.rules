@@ -125,13 +125,14 @@ service cloud.firestore {
       allow update: if false;
     }
 
-    // ── Activity Log ────────────────────────────────────────────────────────
-    match /activityLog/{projectId}/entries/{entryId} {
-      // Team members of the project's team can read the log
+    // ── Activity Log (subcollection of projects) ────────────────────────────
+    // Path: projects/{projectId}/activity/{entryId}
+    match /projects/{projectId}/activity/{entryId} {
+      // Team members can read the activity log
       allow read: if isAuth() &&
         isMember(get(/databases/$(database)/documents/projects/$(projectId)).data.teamId);
 
-      // Team members can write log entries (only for themselves)
+      // Team members can create entries (only as themselves)
       allow create: if isAuth() &&
         request.resource.data.userId == request.auth.uid &&
         isMember(get(/databases/$(database)/documents/projects/$(projectId)).data.teamId);
