@@ -354,7 +354,7 @@ export default function ProjectDetailsScreen() {
   const [editorVisible, setEditorVisible] = useState(false);
   const [tempImageUri, setTempImageUri] = useState<string | null>(null);
   const [tempImageDims, setTempImageDims] = useState<{ w: number; h: number } | null>(null);
-  const [tempGpsLoc, setTempGpsLoc] = useState<GeoPoint | undefined>(undefined);
+  const gpsPromiseRef = useRef<Promise<Location.LocationObject | null> | null>(null);
   const [taskForEditing, setTaskForEditing] = useState<Task | null>(null);
   const [reEditingIndex, setReEditingIndex] = useState<number | null>(null); // For re-editing existing photos
 
@@ -840,11 +840,12 @@ export default function ProjectDetailsScreen() {
   const launchCamera = async (task: Task) => {
     try {
       // 1. Start GPS fetch in background (non-blocking)
+      // Fallback to last known position if fresh fix fails (Android throttles after rapid successive calls)
       const gpsPromise = Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
-      }).catch((e) => {
-        console.log("GPS Failed:", e);
-        return null;
+      }).catch(async (e) => {
+        console.log("GPS fresh fix failed, trying last known:", e);
+        return Location.getLastKnownPositionAsync().catch(() => null);
       });
 
       // 2. Launch camera immediately (don't wait for GPS)
@@ -904,15 +905,11 @@ export default function ProjectDetailsScreen() {
         });
 
         if (!r.canceled && r.assets[0].uri) {
-          // Wait for GPS to complete
-          const gpsResult = await gpsPromise;
-          const gpsLoc = gpsResult ? { lat: gpsResult.coords.latitude, lng: gpsResult.coords.longitude } : undefined;
-
-          // To Drawing Editor
+          // Store GPS promise — awaited at Save time (gives full editor session for GPS fix)
+          gpsPromiseRef.current = gpsPromise;
           setTaskForEditing(task);
           setTempImageUri(r.assets[0].uri);
           setTempImageDims({ w: r.assets[0].width, h: r.assets[0].height });
-          setTempGpsLoc(gpsLoc);
           setReEditingIndex(null);
           setEditorVisible(true);
         }
@@ -927,7 +924,7 @@ export default function ProjectDetailsScreen() {
     try {
       const gpsPromise = Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
-      }).catch(() => null);
+      }).catch(async () => Location.getLastKnownPositionAsync().catch(() => null));
 
       if (task.type === "video") {
         const r = await ImagePicker.launchImageLibraryAsync({
@@ -964,13 +961,11 @@ export default function ProjectDetailsScreen() {
         });
 
         if (!r.canceled && r.assets[0].uri) {
-          const gpsResult = await gpsPromise;
-          const gpsLoc = gpsResult ? { lat: gpsResult.coords.latitude, lng: gpsResult.coords.longitude } : undefined;
-
+          // Store GPS promise — awaited at Save time (gives full editor session for GPS fix)
+          gpsPromiseRef.current = gpsPromise;
           setTaskForEditing(task);
           setTempImageUri(r.assets[0].uri);
           setTempImageDims({ w: r.assets[0].width, h: r.assets[0].height });
-          setTempGpsLoc(gpsLoc);
           setReEditingIndex(null);
           setEditorVisible(true);
         }
@@ -1017,27 +1012,32 @@ export default function ProjectDetailsScreen() {
         throw new Error("Δεν βρέθηκε το task για επεξεργασία");
       }
 
-      // Embed EXIF metadata (GPS + date) into the JPEG
-      const finalUri = await embedExifData(m.uri, tempGpsLoc, new Date());
-      console.log("  - Final URI (with EXIF):", finalUri);
-
       // Store accurate dims from ImageManipulator output (fixes RNImage.getSize inSampleSize bug on Android)
       const savedDims = { w: m.width, h: m.height };
       console.log("  - Saved dims:", savedDims);
 
       // Check if we're re-editing an existing photo
       if (reEditingIndex !== null && taskForEditing.type === "photo") {
-        // REPLACE existing image at index
+        // REPLACE: embed EXIF without GPS (location is preserved from original capture)
+        const finalUri = await embedExifData(m.uri, undefined, new Date());
+        console.log("  - Final URI (with EXIF):", finalUri);
         console.log("🔄 Replacing image at index:", reEditingIndex);
         await replaceMediaInTask(taskForEditing.id, reEditingIndex, finalUri, savedDims);
         console.log("✓ Image replaced successfully");
       } else {
-        // ADD new image (original behavior)
+        // NEW photo: await GPS promise now (has had full camera + editor session to resolve)
+        const gpsResult = gpsPromiseRef.current ? await gpsPromiseRef.current : null;
+        gpsPromiseRef.current = null;
+        const gpsLoc = gpsResult ? { lat: gpsResult.coords.latitude, lng: gpsResult.coords.longitude } : undefined;
+        console.log("  - GPS loc at save time:", gpsLoc);
+
+        const finalUri = await embedExifData(m.uri, gpsLoc, new Date());
+        console.log("  - Final URI (with EXIF):", finalUri);
         console.log("💾 Saving file:// URI to AsyncStorage...");
         await addMediaToTask(
           taskForEditing.id,
-          finalUri, // Save local file:// URI with EXIF, NOT Storage URL
-          tempGpsLoc,
+          finalUri,
+          gpsLoc,
           savedDims,
         );
         console.log("✓ Image saved successfully (offline-first)");
@@ -1143,6 +1143,10 @@ export default function ProjectDetailsScreen() {
       // Keep the same location for the replaced image
       status: "completed",
     });
+
+    if (currentUser) {
+      logActivity(projectId, currentUser.uid, currentUser.fullname, "media_edited", t.id, t.title, "photo");
+    }
   };
 
   const removeMediaFromTask = async (uri: string) => {
@@ -2317,7 +2321,7 @@ export default function ProjectDetailsScreen() {
                     ? activeTaskForGallery.images
                     : activeTaskForGallery.videos || []
                   : []),
-                "ADD"
+                ...(Platform.OS !== 'web' ? ["ADD"] : []),
               ]}
               numColumns={3}
               renderItem={({ item }) =>
@@ -2529,6 +2533,7 @@ function logActionLabel(action: string, taskTitle: string, details?: string): st
     case "task_completed":return `Ολοκλήρωσε ${t}`;
     case "status_changed":return `Άλλαξε κατάσταση ${t}`;
     case "media_added":   return `Πρόσθεσε ${details === "video" ? "βίντεο" : "φωτογραφία"} στο ${t}`;
+    case "media_edited":  return `Επεξεργάστηκε φωτογραφία στο ${t}`;
     case "media_deleted": return `Διέγραψε ${details === "video" ? "βίντεο" : "φωτογραφία"} από το ${t}`;
     case "value_saved":   return `Κατέχωρισε τιμή στο ${t}`;
     case "value_cleared": return `Διέγραψε τιμή από το ${t}`;

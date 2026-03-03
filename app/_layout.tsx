@@ -1,11 +1,15 @@
 import { Stack } from "expo-router";
 import { useEffect } from "react";
 import { LogBox } from "react-native";
+import { useFonts } from "expo-font";
+import { Ionicons } from "@expo/vector-icons";
 import { DriveSyncProvider } from "./context/DriveSyncContext";
 import { SyncProvider } from "./context/SyncContext";
 import { UserProvider } from "./context/UserContext";
 
 export default function Layout() {
+  useFonts(Ionicons.font); // Load fonts async — don't block rendering
+
   useEffect(() => {
     LogBox.ignoreLogs(["..."]);
   }, []);

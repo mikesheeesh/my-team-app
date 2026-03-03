@@ -4,6 +4,7 @@ import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   BackHandler,
+  Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -36,6 +37,7 @@ export default function DashboardScreen() {
   // 1. ΔΙΑΧΕΙΡΙΣΗ ΚΟΥΜΠΙΟΥ "ΠΙΣΩ"
   useFocusEffect(
     useCallback(() => {
+      if (Platform.OS === 'web') return;
       const onBackPress = () => {
         BackHandler.exitApp();
         return true;
