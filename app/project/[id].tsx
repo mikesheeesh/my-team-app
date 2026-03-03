@@ -508,15 +508,6 @@ export default function ProjectDetailsScreen() {
       newStatus = "active";
     }
 
-    // Αν ο admin έχει κλειδώσει το status και τα tasks θα έδιναν "completed", αγνοούμε
-    if (newStatus === "completed" && statusLock) return;
-
-    // Αν υπάρχει νέο task (newStatus != completed), αυτόματα καθαρίζουμε το lock
-    if (newStatus !== "completed" && statusLock) {
-      updateDoc(doc(db, "projects", projectId), { statusLock: false }).catch(() => {});
-      setStatusLock(false);
-    }
-
     // Ενημέρωση μόνο αν άλλαξε
     if (newStatus !== projectStatus) {
       updateProjectStatus(newStatus);
@@ -2031,8 +2022,8 @@ export default function ProjectDetailsScreen() {
         </View>
       )}
 
-      {/* FAB - Κρύβεται αν completed ή κλειστό */}
-      {Platform.OS !== "web" && !isClosed && projectStatus !== "completed" && (
+      {/* FAB - Φαίνεται μόνο αν το υποέργο είναι ανοιχτό */}
+      {Platform.OS !== "web" && !isClosed && (
         <TouchableOpacity
           style={[styles.fab, { bottom: 20 + insets.bottom }]}
           onPress={openCreateModal}

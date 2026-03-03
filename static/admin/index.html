@@ -235,11 +235,6 @@
       <div class="header-title" id="project-title"></div>
       <div class="header-sub" id="project-status-label"></div>
     </div>
-    <select id="project-status-select" onchange="changeProjectStatus(this.value)" title="Αλλαγή κατάστασης" style="margin-right:8px;">
-      <option value="pending">⏳ Εκκρεμές</option>
-      <option value="active">🔵 Ενεργό</option>
-      <option value="completed">✅ Ολοκληρωμένο</option>
-    </select>
     <button id="project-close-btn" class="btn btn-ghost btn-sm" onclick="toggleProjectClosed()" style="margin-right:8px;">🔒 Κλείσιμο</button>
     <button class="btn btn-danger btn-sm" onclick="confirmDeleteProject()">Διαγραφή Υποέργου</button>
   </div>
@@ -628,7 +623,6 @@ window.openProject = async (projectId, groupTitle) => {
   currentProject = { id: projectId, data: pd, groupTitle };
   document.getElementById('project-title').textContent = pd.title;
   document.getElementById('project-status-label').textContent = `Υποέργο · Project: ${groupTitle} · ${statusLabel(pd.status)}`;
-  document.getElementById('project-status-select').value = pd.status || 'pending';
   updateCloseBtn(pd.isClosed === true);
   renderTasks(pd.tasks || []);
 };
@@ -785,35 +779,6 @@ window.toggleProjectClosed = async () => {
     alert('Σφάλμα: ' + e.message);
   } finally {
     btn.disabled = false;
-  }
-};
-
-// ─── Change Project Status ────────────────────────────────────
-window.changeProjectStatus = async (newStatus) => {
-  if (!currentProject || !currentTeam) return;
-  const sel = document.getElementById('project-status-select');
-  sel.disabled = true;
-  try {
-    // statusLock: true αποτρέπει το app από το να ξαναβάλει "completed" αυτόματα
-    await updateDoc(doc(db, 'projects', currentProject.id), {
-      status: newStatus,
-      statusLock: newStatus !== 'completed'
-    });
-    // Keep team doc in sync
-    const newGroups = (currentTeam.data.groups||[]).map(g => ({
-      ...g,
-      projects: (g.projects||[]).map(p => p.id === currentProject.id ? { ...p, status: newStatus } : p)
-    }));
-    await updateDoc(doc(db, 'teams', currentTeam.id), { groups: newGroups });
-    currentProject.data = { ...currentProject.data, status: newStatus };
-    currentTeam.data = { ...currentTeam.data, groups: newGroups };
-    document.getElementById('project-status-label').textContent =
-      `Υποέργο · Project: ${currentProject.groupTitle} · ${statusLabel(newStatus)}`;
-  } catch(e) {
-    alert('Σφάλμα: ' + e.message);
-    sel.value = currentProject.data.status || 'pending';
-  } finally {
-    sel.disabled = false;
   }
 };
 
