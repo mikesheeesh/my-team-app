@@ -342,6 +342,10 @@ export default function GroupScreen() {
     const isOnline = await checkOnline();
     if (!isOnline) return;
     if (!selectedProject) return;
+    if (selectedProject.isClosed) {
+      Alert.alert("Κλειστό Υποέργο", "Δεν μπορείτε να διαγράψετε κλειστό υποέργο. Ανοίξτε το πρώτα από το Admin Panel.");
+      return;
+    }
 
     Alert.alert("Διαγραφή Υποέργου", "Είστε σίγουροι;", [
       { text: "Ακύρωση" },

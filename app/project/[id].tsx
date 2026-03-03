@@ -776,6 +776,7 @@ export default function ProjectDetailsScreen() {
   };
 
   const handleLongPressTask = (task: Task) => {
+    if (isClosed) return;
     if (Platform.OS !== "web") {
       setSelectedTaskForOptions(task);
       setOptionsModalVisible(true);
@@ -1151,7 +1152,7 @@ export default function ProjectDetailsScreen() {
   };
 
   const removeMediaFromTask = async (uri: string) => {
-    if (!activeTaskForGallery) return;
+    if (isClosed || !activeTaskForGallery) return;
 
     // DELETE FROM STORAGE (only if WiFi available and it's a Storage URL)
     const net = await Network.getNetworkStateAsync();
@@ -1220,7 +1221,7 @@ export default function ProjectDetailsScreen() {
 
   // Open the editor to re-edit an existing photo
   const handleOpenReEdit = () => {
-    if (!selectedMediaForView || !activeTaskForGallery) return;
+    if (isClosed || !selectedMediaForView || !activeTaskForGallery) return;
     if (activeTaskForGallery.type !== "photo") return;
 
     // Find the index of the selected media in the task
@@ -1250,6 +1251,7 @@ export default function ProjectDetailsScreen() {
   };
 
   const handleSaveInput = async () => {
+    if (isClosed) { setInputModalVisible(false); return; }
     setInputModalVisible(false);
     if (currentTaskId && inputValue) {
       const t = combinedTasks.find((x) => x.id === currentTaskId);
@@ -1999,7 +2001,7 @@ export default function ProjectDetailsScreen() {
               if (t.type === "photo" || t.type === "video") {
                 setActiveTaskForGallery(t);
                 setGalleryModalVisible(true);
-              } else if (t.type === "measurement" || t.type === "general") {
+              } else if (!isClosed && (t.type === "measurement" || t.type === "general")) {
                 setCurrentTaskId(t.id);
                 setCurrentTaskType(t.type);
                 setInputValue(t.value || "");
@@ -2330,7 +2332,7 @@ export default function ProjectDetailsScreen() {
                     ? activeTaskForGallery.images
                     : activeTaskForGallery.videos || []
                   : []),
-                ...(Platform.OS !== 'web' ? ["ADD"] : []),
+                ...(Platform.OS !== 'web' && !isClosed ? ["ADD"] : []),
               ]}
               numColumns={3}
               renderItem={({ item }) =>
@@ -2455,8 +2457,8 @@ export default function ProjectDetailsScreen() {
                   Χάρτης
                 </Text>
               </TouchableOpacity>
-              {/* Edit button - only for photos, not videos */}
-              {activeTaskForGallery?.type === "photo" && Platform.OS !== "web" && (
+              {/* Edit button - only for photos, not videos, not closed */}
+              {!isClosed && activeTaskForGallery?.type === "photo" && Platform.OS !== "web" && (
                 <TouchableOpacity
                   style={styles.toolBtn}
                   onPress={handleOpenReEdit}
@@ -2467,15 +2469,17 @@ export default function ProjectDetailsScreen() {
                   </Text>
                 </TouchableOpacity>
               )}
-              <TouchableOpacity
-                style={styles.toolBtn}
-                onPress={() => confirmDeleteMedia()}
-              >
-                <Ionicons name="trash-outline" size={24} color="#ef4444" />
-                <Text style={[styles.toolText, { color: "#ef4444" }]}>
-                  Διαγραφή
-                </Text>
-              </TouchableOpacity>
+              {!isClosed && (
+                <TouchableOpacity
+                  style={styles.toolBtn}
+                  onPress={() => confirmDeleteMedia()}
+                >
+                  <Ionicons name="trash-outline" size={24} color="#ef4444" />
+                  <Text style={[styles.toolText, { color: "#ef4444" }]}>
+                    Διαγραφή
+                  </Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity
                 style={styles.toolBtn}
                 onPress={() =>
