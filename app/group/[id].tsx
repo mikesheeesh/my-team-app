@@ -47,6 +47,7 @@ type Project = {
   members: string[];
   createdBy?: string;
   teamId?: string;
+  isClosed?: boolean;
 };
 type Group = { id: string; title: string; projects: Project[] };
 
@@ -268,6 +269,7 @@ export default function GroupScreen() {
                   members: p.members || [],
                   createdBy: p.createdBy || "",
                   teamId: p.teamId || teamId,
+                  isClosed: p.isClosed || false,
                 }),
               ),
             }));
@@ -552,6 +554,7 @@ export default function GroupScreen() {
             style={[
               styles.projectCard,
               project.status === "completed" && styles.projectCardCompleted,
+              project.isClosed && styles.projectCardClosed,
             ]}
             onPress={() => safeNavigate(`/project/${project.id}`)}
             onLongPress={() => {
@@ -561,38 +564,50 @@ export default function GroupScreen() {
               }
             }}
           >
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
               <View
                 style={[
                   styles.projectIconBox,
                   {
-                    backgroundColor:
-                      project.status === "completed" ? "#f0fdf4" : "#dbeafe",
+                    backgroundColor: project.isClosed
+                      ? "#f1f5f9"
+                      : project.status === "completed" ? "#f0fdf4" : "#dbeafe",
                   },
                 ]}
               >
                 <Ionicons
                   name={
-                    project.status === "completed"
+                    project.isClosed
+                      ? "lock-closed"
+                      : project.status === "completed"
                       ? "checkmark-done"
                       : "document-text"
                   }
                   size={20}
                   color={
-                    project.status === "completed" ? "#16a34a" : "#2563eb"
+                    project.isClosed
+                      ? "#94a3b8"
+                      : project.status === "completed" ? "#16a34a" : "#2563eb"
                   }
                 />
               </View>
-              <View style={{ marginLeft: 10 }}>
-                <Text
-                  style={[
-                    styles.projectTitle,
-                    project.status === "completed" &&
-                      styles.projectTitleCompleted,
-                  ]}
-                >
-                  {project.title}
-                </Text>
+              <View style={{ marginLeft: 10, flex: 1 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Text
+                    style={[
+                      styles.projectTitle,
+                      (project.status === "completed" || project.isClosed) &&
+                        styles.projectTitleCompleted,
+                    ]}
+                  >
+                    {project.title}
+                  </Text>
+                  {project.isClosed && (
+                    <View style={styles.closedBadge}>
+                      <Text style={styles.closedBadgeText}>ΚΛΕΙΣΤΟ</Text>
+                    </View>
+                  )}
+                </View>
                 <Text style={styles.projectMeta}>
                   Sup: {project.supervisors ? project.supervisors.length : 0} •
                   Mem: {project.members ? project.members.length : 0}
@@ -910,6 +925,24 @@ const styles = StyleSheet.create({
     borderColor: "#86efac",
     borderWidth: 1,
     opacity: 0.8,
+  },
+  projectCardClosed: {
+    backgroundColor: "#f8fafc",
+    borderColor: "#cbd5e1",
+    borderWidth: 1,
+    opacity: 0.7,
+  },
+  closedBadge: {
+    backgroundColor: "#e2e8f0",
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+  },
+  closedBadgeText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#64748b",
+    letterSpacing: 0.5,
   },
   projectIconBox: {
     width: 36,

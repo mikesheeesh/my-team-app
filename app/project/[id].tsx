@@ -337,6 +337,7 @@ export default function ProjectDetailsScreen() {
     "active" | "pending" | "completed"
   >("active");
   const [statusLock, setStatusLock] = useState(false); // Αν true, αποτρέπει auto-recalc από admin override
+  const [isClosed, setIsClosed] = useState(false); // Αν true, κλειστό από admin — FAB κρυφό
   const [teamId, setTeamId] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
@@ -430,6 +431,7 @@ export default function ProjectDetailsScreen() {
             setProjectName(data.title || "Project");
             setProjectStatus(data.status || "active");
             setStatusLock(data.statusLock === true);
+            setIsClosed(data.isClosed === true);
             setTeamId(data.teamId || "");
             AsyncStorage.setItem(
               CACHE_KEY,
@@ -2021,8 +2023,16 @@ export default function ProjectDetailsScreen() {
         contentContainerStyle={{ padding: 20, paddingBottom: 100 }}
       />
 
-      {/* FAB - Κρύβεται ΑΥΤΟΜΑΤΑ αν είναι completed */}
-      {Platform.OS !== "web" && projectStatus !== "completed" && (
+      {/* Closed banner */}
+      {isClosed && (
+        <View style={{ position: "absolute", bottom: 20 + insets.bottom, left: 20, right: 20, backgroundColor: "#1e293b", borderRadius: 12, padding: 12, flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Ionicons name="lock-closed" size={16} color="#94a3b8" />
+          <Text style={{ color: "#94a3b8", fontSize: 13, fontWeight: "600" }}>Αυτό το υποέργο είναι κλειστό</Text>
+        </View>
+      )}
+
+      {/* FAB - Κρύβεται αν completed ή κλειστό */}
+      {Platform.OS !== "web" && !isClosed && projectStatus !== "completed" && (
         <TouchableOpacity
           style={[styles.fab, { bottom: 20 + insets.bottom }]}
           onPress={openCreateModal}

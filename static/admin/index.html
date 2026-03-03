@@ -240,6 +240,7 @@
       <option value="active">🔵 Ενεργό</option>
       <option value="completed">✅ Ολοκληρωμένο</option>
     </select>
+    <button id="project-close-btn" class="btn btn-ghost btn-sm" onclick="toggleProjectClosed()" style="margin-right:8px;">🔒 Κλείσιμο</button>
     <button class="btn btn-danger btn-sm" onclick="confirmDeleteProject()">Διαγραφή Υποέργου</button>
   </div>
   <div class="content">
@@ -628,6 +629,7 @@ window.openProject = async (projectId, groupTitle) => {
   document.getElementById('project-title').textContent = pd.title;
   document.getElementById('project-status-label').textContent = `Υποέργο · Project: ${groupTitle} · ${statusLabel(pd.status)}`;
   document.getElementById('project-status-select').value = pd.status || 'pending';
+  updateCloseBtn(pd.isClosed === true);
   renderTasks(pd.tasks || []);
 };
 
@@ -754,6 +756,36 @@ window.deleteSelectedTasks = () => {
       }
     }
   );
+};
+
+// ─── Close / Open Υποέργο ─────────────────────────────────────
+function updateCloseBtn(isClosed) {
+  const btn = document.getElementById('project-close-btn');
+  btn.textContent = isClosed ? '🔓 Άνοιγμα' : '🔒 Κλείσιμο';
+  btn.className = isClosed ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm';
+}
+
+window.toggleProjectClosed = async () => {
+  if (!currentProject || !currentTeam) return;
+  const btn = document.getElementById('project-close-btn');
+  btn.disabled = true;
+  const newClosed = !(currentProject.data.isClosed === true);
+  try {
+    await updateDoc(doc(db, 'projects', currentProject.id), { isClosed: newClosed });
+    // Keep team doc in sync
+    const newGroups = (currentTeam.data.groups||[]).map(g => ({
+      ...g,
+      projects: (g.projects||[]).map(p => p.id === currentProject.id ? { ...p, isClosed: newClosed } : p)
+    }));
+    await updateDoc(doc(db, 'teams', currentTeam.id), { groups: newGroups });
+    currentProject.data = { ...currentProject.data, isClosed: newClosed };
+    currentTeam.data = { ...currentTeam.data, groups: newGroups };
+    updateCloseBtn(newClosed);
+  } catch(e) {
+    alert('Σφάλμα: ' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
 };
 
 // ─── Change Project Status ────────────────────────────────────

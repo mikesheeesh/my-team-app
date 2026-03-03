@@ -57,6 +57,7 @@ type Project = {
   members: string[];
   createdBy?: string;
   teamId?: string;
+  isClosed?: boolean;
 };
 type Group = { id: string; title: string; projects: Project[] };
 
@@ -656,42 +657,53 @@ export default function TeamProjectsScreen() {
             )}
           </View>
         }
-        renderItem={({ item: group }) => (
-          <TouchableOpacity
-            style={styles.groupCard}
-            onPress={() =>
-              safeNavigate({
-                pathname: `/group/${group.id}`,
-                params: { teamId },
-              })
-            }
-          >
-            <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
-              <View style={styles.groupIconBox}>
-                <Ionicons name="folder" size={22} color="#2563eb" />
+        renderItem={({ item: group }) => {
+          const allClosed =
+            group.projects.length > 0 &&
+            group.projects.every((p) => p.isClosed);
+          return (
+            <TouchableOpacity
+              style={[styles.groupCard, allClosed && styles.groupCardCompleted]}
+              onPress={() =>
+                safeNavigate({
+                  pathname: `/group/${group.id}`,
+                  params: { teamId },
+                })
+              }
+            >
+              <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
+                <View style={[styles.groupIconBox, allClosed && { backgroundColor: "#dcfce7" }]}>
+                  <Ionicons
+                    name={allClosed ? "checkmark-circle" : "folder"}
+                    size={22}
+                    color={allClosed ? "#16a34a" : "#2563eb"}
+                  />
+                </View>
+                <View style={{ marginLeft: 12, flex: 1 }}>
+                  <Text style={[styles.groupTitle, allClosed && { color: "#16a34a" }]}>
+                    {group.title}
+                  </Text>
+                  <Text style={styles.groupMeta}>
+                    {allClosed ? "✅ Ολοκληρωμένο" : `${group.projects.length} υποέργα`}
+                  </Text>
+                </View>
               </View>
-              <View style={{ marginLeft: 12, flex: 1 }}>
-                <Text style={styles.groupTitle}>{group.title}</Text>
-                <Text style={styles.groupMeta}>
-                  {group.projects.length} υποέργα
-                </Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+                {(myRole === "Founder" || myRole === "Admin") && (
+                  <TouchableOpacity
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleDeleteGroup(group.id, group.projects.length);
+                    }}
+                  >
+                    <Ionicons name="trash-bin-outline" size={18} color="#94a3b8" />
+                  </TouchableOpacity>
+                )}
+                <Ionicons name="chevron-forward" size={18} color="#94a3b8" />
               </View>
-            </View>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
-              {(myRole === "Founder" || myRole === "Admin") && (
-                <TouchableOpacity
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    handleDeleteGroup(group.id, group.projects.length);
-                  }}
-                >
-                  <Ionicons name="trash-bin-outline" size={18} color="#94a3b8" />
-                </TouchableOpacity>
-              )}
-              <Ionicons name="chevron-forward" size={18} color="#94a3b8" />
-            </View>
-          </TouchableOpacity>
-        )}
+            </TouchableOpacity>
+          );
+        }}
       />
 
       {/* --- MENU MODAL (GRID) --- */}
@@ -1191,6 +1203,11 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
+  },
+  groupCardCompleted: {
+    backgroundColor: "#f0fdf4",
+    borderColor: "#86efac",
+    borderWidth: 1.5,
   },
   groupIconBox: {
     width: 44,
