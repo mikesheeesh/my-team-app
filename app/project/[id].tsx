@@ -529,8 +529,22 @@ export default function ProjectDetailsScreen() {
     const net = await Network.getNetworkStateAsync();
     if (net.isConnected) {
       try {
-        // Ενημέρωση και στη βάση
+        // Ενημέρωση στο projects collection
         await updateDoc(doc(db, "projects", projectId), { status: newStatus });
+        // Ενημέρωση και στο teams doc (groups[].projects[].status)
+        if (teamId) {
+          const teamSnap = await getDoc(doc(db, "teams", teamId));
+          if (teamSnap.exists()) {
+            const groups = teamSnap.data().groups || [];
+            const updatedGroups = groups.map((g: any) => ({
+              ...g,
+              projects: (g.projects || []).map((p: any) =>
+                p.id === projectId ? { ...p, status: newStatus } : p
+              ),
+            }));
+            await updateDoc(doc(db, "teams", teamId), { groups: updatedGroups });
+          }
+        }
       } catch (e) {
         console.log("Status update failed", e);
       }
