@@ -336,6 +336,7 @@ export default function ProjectDetailsScreen() {
   const [projectStatus, setProjectStatus] = useState<
     "active" | "pending" | "completed"
   >("active");
+  const [statusLock, setStatusLock] = useState(false); // Αν true, αποτρέπει auto-recalc από admin override
   const [teamId, setTeamId] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
@@ -428,6 +429,7 @@ export default function ProjectDetailsScreen() {
             setCloudTasks(fetched);
             setProjectName(data.title || "Project");
             setProjectStatus(data.status || "active");
+            setStatusLock(data.statusLock === true);
             setTeamId(data.teamId || "");
             AsyncStorage.setItem(
               CACHE_KEY,
@@ -497,14 +499,20 @@ export default function ProjectDetailsScreen() {
     let newStatus: "active" | "pending" | "completed";
 
     if (completedCount === totalCount) {
-      // Όλα τα tasks ολοκληρώθηκαν
       newStatus = "completed";
     } else if (completedCount > 0) {
-      // Κάποια tasks ολοκληρώθηκαν (αλλά όχι όλα)
       newStatus = "pending";
     } else {
-      // Κανένα task δεν ολοκληρώθηκε
       newStatus = "active";
+    }
+
+    // Αν ο admin έχει κλειδώσει το status και τα tasks θα έδιναν "completed", αγνοούμε
+    if (newStatus === "completed" && statusLock) return;
+
+    // Αν υπάρχει νέο task (newStatus != completed), αυτόματα καθαρίζουμε το lock
+    if (newStatus !== "completed" && statusLock) {
+      updateDoc(doc(db, "projects", projectId), { statusLock: false }).catch(() => {});
+      setStatusLock(false);
     }
 
     // Ενημέρωση μόνο αν άλλαξε

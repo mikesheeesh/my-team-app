@@ -762,7 +762,11 @@ window.changeProjectStatus = async (newStatus) => {
   const sel = document.getElementById('project-status-select');
   sel.disabled = true;
   try {
-    await updateDoc(doc(db, 'projects', currentProject.id), { status: newStatus });
+    // statusLock: true αποτρέπει το app από το να ξαναβάλει "completed" αυτόματα
+    await updateDoc(doc(db, 'projects', currentProject.id), {
+      status: newStatus,
+      statusLock: newStatus !== 'completed'
+    });
     // Keep team doc in sync
     const newGroups = (currentTeam.data.groups||[]).map(g => ({
       ...g,
