@@ -732,6 +732,14 @@ window.toggleSelectAllTasks = () => {
   onTaskCheckChange();
 };
 
+function refFromDownloadUrl(url) {
+  try {
+    const m = url.match(/\/o\/(.+?)\?/);
+    if (!m) return null;
+    return ref(storage, decodeURIComponent(m[1]));
+  } catch { return null; }
+}
+
 window.deleteSelectedTasks = () => {
   const selected = [...document.querySelectorAll('.task-check')].filter(cb => cb.checked);
   if (!selected.length) return;
@@ -740,7 +748,21 @@ window.deleteSelectedTasks = () => {
     'Διαγραφή tasks',
     `Θέλεις σίγουρα να διαγράψεις ${indices.length} task${indices.length > 1 ? 's' : ''};`,
     async () => {
-      const tasks = (currentProject.data.tasks || []).filter((_, i) => !indices.includes(i));
+      const allTasks = currentProject.data.tasks || [];
+      const tasksToDelete = allTasks.filter((_, i) => indices.includes(i));
+      const tasks = allTasks.filter((_, i) => !indices.includes(i));
+      // Delete media from Storage
+      const mediaUrls = [];
+      tasksToDelete.forEach(t => {
+        if (t.images) mediaUrls.push(...t.images);
+        if (t.videos) mediaUrls.push(...t.videos);
+      });
+      for (const url of mediaUrls) {
+        if (url && url.startsWith('https://firebasestorage.googleapis.com')) {
+          const r = refFromDownloadUrl(url);
+          if (r) try { await deleteObject(r); } catch {}
+        }
+      }
       try {
         await updateDoc(doc(db, 'projects', currentProject.id), { tasks });
         currentProject.data = { ...currentProject.data, tasks };
@@ -764,15 +786,16 @@ window.toggleProjectClosed = async () => {
   const btn = document.getElementById('project-close-btn');
   btn.disabled = true;
   const newClosed = !(currentProject.data.isClosed === true);
+  const newStatus = newClosed ? 'completed' : 'active';
   try {
-    await updateDoc(doc(db, 'projects', currentProject.id), { isClosed: newClosed });
+    await updateDoc(doc(db, 'projects', currentProject.id), { isClosed: newClosed, status: newStatus });
     // Keep team doc in sync
     const newGroups = (currentTeam.data.groups||[]).map(g => ({
       ...g,
-      projects: (g.projects||[]).map(p => p.id === currentProject.id ? { ...p, isClosed: newClosed } : p)
+      projects: (g.projects||[]).map(p => p.id === currentProject.id ? { ...p, isClosed: newClosed, status: newStatus } : p)
     }));
     await updateDoc(doc(db, 'teams', currentTeam.id), { groups: newGroups });
-    currentProject.data = { ...currentProject.data, isClosed: newClosed };
+    currentProject.data = { ...currentProject.data, isClosed: newClosed, status: newStatus };
     currentTeam.data = { ...currentTeam.data, groups: newGroups };
     updateCloseBtn(newClosed);
   } catch(e) {

@@ -336,7 +336,6 @@ export default function ProjectDetailsScreen() {
   const [projectStatus, setProjectStatus] = useState<
     "active" | "pending" | "completed"
   >("active");
-  const [statusLock, setStatusLock] = useState(false); // Αν true, αποτρέπει auto-recalc από admin override
   const [isClosed, setIsClosed] = useState(false); // Αν true, κλειστό από admin — FAB κρυφό
   const [teamId, setTeamId] = useState<string>("");
   const [loading, setLoading] = useState(true);
@@ -430,7 +429,6 @@ export default function ProjectDetailsScreen() {
             setCloudTasks(fetched);
             setProjectName(data.title || "Project");
             setProjectStatus(data.status || "active");
-            setStatusLock(data.statusLock === true);
             setIsClosed(data.isClosed === true);
             setTeamId(data.teamId || "");
             AsyncStorage.setItem(
@@ -482,37 +480,18 @@ export default function ProjectDetailsScreen() {
   }, [cloudTasks, localTasks]);
 
   // --- AUTOMATIC STATUS ONLY ---
-  // Ελέγχουμε αν άλλαξε κάτι στα tasks και ενημερώνουμε το status ΑΥΤΟΜΑΤΑ
-  // NEW LOGIC: active → pending → completed
+  // "completed" status is set ONLY by admin via isClosed toggle — never auto-calculated
   useEffect(() => {
+    if (isClosed) return; // Κλειστό: η κατάσταση ελέγχεται από το admin panel
     if (combinedTasks.length === 0) {
-      // No tasks → reset to active
-      if (projectStatus !== "active") {
-        updateProjectStatus("active");
-      }
+      if (projectStatus !== "active") updateProjectStatus("active");
       return;
     }
-
-    const completedCount = combinedTasks.filter(
-      (t) => t.status === "completed",
-    ).length;
-    const totalCount = combinedTasks.length;
-
-    let newStatus: "active" | "pending" | "completed";
-
-    if (completedCount === totalCount) {
-      newStatus = "completed";
-    } else if (completedCount > 0) {
-      newStatus = "pending";
-    } else {
-      newStatus = "active";
-    }
-
-    // Ενημέρωση μόνο αν άλλαξε
-    if (newStatus !== projectStatus) {
-      updateProjectStatus(newStatus);
-    }
-  }, [combinedTasks]); // Τρέχει όποτε αλλάξει κάτι στα tasks
+    const completedCount = combinedTasks.filter((t) => t.status === "completed").length;
+    // Never auto-set "completed" — only "active" or "pending"
+    const newStatus: "active" | "pending" = completedCount > 0 ? "pending" : "active";
+    if (newStatus !== projectStatus) updateProjectStatus(newStatus);
+  }, [combinedTasks, isClosed]);
 
   // Reset media states when switching to a different file
   useEffect(() => {
