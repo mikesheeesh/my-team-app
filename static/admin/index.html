@@ -209,7 +209,7 @@
   <div class="content">
     <div class="tabs">
       <div class="tab active" onclick="switchTab('members')">Μέλη</div>
-      <div class="tab" onclick="switchTab('projects')">Έργα</div>
+      <div class="tab" onclick="switchTab('projects')">Projects</div>
       <div class="tab" onclick="switchTab('storage')">Storage</div>
     </div>
     <!-- Members -->
@@ -235,7 +235,12 @@
       <div class="header-title" id="project-title"></div>
       <div class="header-sub" id="project-status-label"></div>
     </div>
-    <button class="btn btn-danger btn-sm" onclick="confirmDeleteProject()">Διαγραφή</button>
+    <select id="project-status-select" onchange="changeProjectStatus(this.value)" title="Αλλαγή κατάστασης" style="margin-right:8px;">
+      <option value="pending">⏳ Εκκρεμές</option>
+      <option value="active">🔵 Ενεργό</option>
+      <option value="completed">✅ Ολοκληρωμένο</option>
+    </select>
+    <button class="btn btn-danger btn-sm" onclick="confirmDeleteProject()">Διαγραφή Υποέργου</button>
   </div>
   <div class="content">
     <div id="tasks-list"></div>
@@ -589,18 +594,18 @@ function loadProjects() {
   const { data } = currentTeam;
   const groups = data.groups || [];
   if (groups.length === 0 || groups.every(g => !g.projects?.length)) {
-    el.innerHTML = '<div class="empty">Δεν υπάρχουν έργα.</div>';
+    el.innerHTML = '<div class="empty">Δεν υπάρχουν Projects.</div>';
     return;
   }
   el.innerHTML = groups.map(g => {
     const projects = g.projects || [];
     if (!projects.length) return '';
-    return `<div class="group-label">${esc(g.title)}</div>` +
+    return `<div class="group-label">📁 Project: ${esc(g.title)}</div>` +
       projects.map(p => `
         <div class="project-row" onclick="openProject('${esc(p.id)}','${esc(g.title)}')">
           <div>
             <div class="project-name">${esc(p.title)}</div>
-            <div class="project-meta">${(p.members||[]).length} μέλη</div>
+            <div class="project-meta">Υποέργο · ${(p.members||[]).length} μέλη</div>
           </div>
           <span class="badge badge-${p.status||'pending'}">${statusLabel(p.status)}</span>
         </div>`).join('');
@@ -621,7 +626,8 @@ window.openProject = async (projectId, groupTitle) => {
   const pd = snap.data();
   currentProject = { id: projectId, data: pd, groupTitle };
   document.getElementById('project-title').textContent = pd.title;
-  document.getElementById('project-status-label').textContent = statusLabel(pd.status);
+  document.getElementById('project-status-label').textContent = `Υποέργο · Project: ${groupTitle} · ${statusLabel(pd.status)}`;
+  document.getElementById('project-status-select').value = pd.status || 'pending';
   renderTasks(pd.tasks || []);
 };
 
@@ -750,11 +756,36 @@ window.deleteSelectedTasks = () => {
   );
 };
 
+// ─── Change Project Status ────────────────────────────────────
+window.changeProjectStatus = async (newStatus) => {
+  if (!currentProject || !currentTeam) return;
+  const sel = document.getElementById('project-status-select');
+  sel.disabled = true;
+  try {
+    await updateDoc(doc(db, 'projects', currentProject.id), { status: newStatus });
+    // Keep team doc in sync
+    const newGroups = (currentTeam.data.groups||[]).map(g => ({
+      ...g,
+      projects: (g.projects||[]).map(p => p.id === currentProject.id ? { ...p, status: newStatus } : p)
+    }));
+    await updateDoc(doc(db, 'teams', currentTeam.id), { groups: newGroups });
+    currentProject.data = { ...currentProject.data, status: newStatus };
+    currentTeam.data = { ...currentTeam.data, groups: newGroups };
+    document.getElementById('project-status-label').textContent =
+      `Υποέργο · Project: ${currentProject.groupTitle} · ${statusLabel(newStatus)}`;
+  } catch(e) {
+    alert('Σφάλμα: ' + e.message);
+    sel.value = currentProject.data.status || 'pending';
+  } finally {
+    sel.disabled = false;
+  }
+};
+
 // ─── Delete Project ───────────────────────────────────────────
 window.confirmDeleteProject = () => {
   showConfirm(
-    'Διαγραφή έργου',
-    `Θέλεις σίγουρα να διαγράψεις το έργο "${currentProject?.data?.title||''}";\nΔεν μπορεί να αναιρεθεί.`,
+    'Διαγραφή Υποέργου',
+    `Θέλεις σίγουρα να διαγράψεις το υποέργο "${currentProject?.data?.title||''}";\nΔεν μπορεί να αναιρεθεί.`,
     deleteProject
   );
 };
@@ -790,7 +821,7 @@ async function loadStorage() {
   const projects = groups.flatMap(g => (g.projects||[]).map(p => ({ ...p, groupTitle: g.title })));
 
   if (!projects.length) {
-    el.innerHTML = '<div class="empty">Δεν υπάρχουν έργα.</div>';
+    el.innerHTML = '<div class="empty">Δεν υπάρχουν υποέργα.</div>';
     return;
   }
 

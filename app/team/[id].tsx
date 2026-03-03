@@ -29,13 +29,11 @@ import {
   getValidAccessToken,
 } from "../../utils/driveAuth";
 import { revokeEmailAccess } from "../../utils/driveApi";
-import { deleteProjectMedia } from "../../utils/storageUtils";
 
 // FIREBASE - Προστέθηκε το arrayUnion εδώ
 import { onAuthStateChanged } from "firebase/auth";
 import {
   arrayRemove,
-  arrayUnion, // <--- ΔΙΟΡΘΩΣΗ ΕΔΩ
   collection,
   deleteDoc,
   deleteField,
@@ -44,8 +42,6 @@ import {
   getDocs,
   onSnapshot,
   query,
-  serverTimestamp,
-  setDoc,
   updateDoc,
   where,
 } from "firebase/firestore";
@@ -81,15 +77,10 @@ export default function TeamProjectsScreen() {
   const [groups, setGroups] = useState<Group[]>([]);
   const groupsRef = useRef<Group[]>([]);
   const userCacheRef = useRef(new Map<string, { fullname: string; email: string }>());
-  const syncDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [teamDriveConfig, setTeamDriveConfig] = useState<any>(null);
 
-  // --- SEARCH & FILTER STATE ---
+  // --- SEARCH STATE ---
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<
-    "all" | "active" | "pending" | "completed"
-  >("all");
-  const [filterModalVisible, setFilterModalVisible] = useState(false);
 
   // --- NAVIGATION LOCK (500ms) ---
   const [isNavigating, setIsNavigating] = useState(false);
@@ -105,25 +96,17 @@ export default function TeamProjectsScreen() {
   // MODALS
   const [menuVisible, setMenuVisible] = useState(false);
   const [usersModalVisible, setUsersModalVisible] = useState(false);
-  const [projectSettingsVisible, setProjectSettingsVisible] = useState(false);
   const [settingsSubMenuVisible, setSettingsSubMenuVisible] = useState(false);
   const [driveModalVisible, setDriveModalVisible] = useState(false);
   const [driveConnecting, setDriveConnecting] = useState(false);
   const { isDriveSyncing, driveSyncProgress, triggerDriveSync } = useDriveSync();
 
-  const [selectedProject, setSelectedProject] = useState<{
-    groupId: string;
-    project: Project;
-  } | null>(null);
-  const [moveModalVisible, setMoveModalVisible] = useState(false);
-
   // INPUT
   const [inputVisible, setInputVisible] = useState(false);
-  const [inputMode, setInputMode] = useState<
-    "teamName" | "newGroup" | "newProject"
-  >("teamName");
+  const [inputMode, setInputMode] = useState<"teamName" | "newGroup">(
+    "teamName",
+  );
   const [tempValue, setTempValue] = useState("");
-  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
 
   const CACHE_KEY = `cached_team_${teamId}`;
 
@@ -171,16 +154,8 @@ export default function TeamProjectsScreen() {
 
               const initialGroups = data.groups || [];
 
-              // Αρχικοποίηση groups αν δεν υπάρχουν
-              setGroups((prevGroups) => {
-                if (prevGroups.length === 0) return initialGroups;
-                // Αν υπάρχουν ήδη, κρατάμε τη δομή αλλά θα ενημερωθούν από τον άλλο listener
-                // Απλά ενημερώνουμε τίτλους groups αν άλλαξαν
-                return initialGroups.map((g: Group) => {
-                  const existing = prevGroups.find((pg) => pg.id === g.id);
-                  return existing ? { ...g, projects: existing.projects } : g;
-                });
-              });
+              // Άμεση ενημέρωση — η ομάδα δεν έχει 2ο listener, χρησιμοποιούμε πάντα τα φρέσκα δεδομένα
+              setGroups(initialGroups);
 
               let role = "User";
               if (data.roles && data.roles[user.uid]) {
@@ -247,113 +222,6 @@ export default function TeamProjectsScreen() {
     return () => unsubscribeAuth();
   }, [teamId]);
 
-  // 1.5. LOAD/SAVE FILTERS FROM ASYNCSTORAGE
-  const FILTER_CACHE_KEY = `team_filters_${teamId}`;
-
-  useEffect(() => {
-    // Load saved filters on mount
-    const loadFilters = async () => {
-      try {
-        const saved = await AsyncStorage.getItem(FILTER_CACHE_KEY);
-        if (saved) {
-          const { search, status } = JSON.parse(saved);
-          if (search !== undefined) setSearchQuery(search);
-          if (status !== undefined) setStatusFilter(status);
-        }
-      } catch (e) {
-        console.log("Failed to load filters:", e);
-      }
-    };
-    loadFilters();
-  }, [teamId]);
-
-  useEffect(() => {
-    // Save filters whenever they change
-    const saveFilters = async () => {
-      try {
-        await AsyncStorage.setItem(
-          FILTER_CACHE_KEY,
-          JSON.stringify({
-            search: searchQuery,
-            status: statusFilter,
-          }),
-        );
-      } catch (e) {
-        console.log("Failed to save filters:", e);
-      }
-    };
-    saveFilters();
-  }, [searchQuery, statusFilter, teamId]);
-
-  // 2. LIVE PROJECT LISTENER (REAL-TIME UPDATES FOR COUNTS & STATUS)
-  useEffect(() => {
-    if (!teamId) return;
-    const q = query(collection(db, "projects"), where("teamId", "==", teamId));
-
-    const unsubscribeProjects = onSnapshot(q, (snapshot) => {
-      // Φτιάχνουμε έναν χάρτη με τα φρέσκα δεδομένα από τη συλλογή 'projects'
-      const freshProjectsMap = new Map();
-      snapshot.docs.forEach((doc) => {
-        freshProjectsMap.set(doc.id, { ...doc.data(), id: doc.id });
-      });
-
-      // Ενημερώνουμε τα groups ώστε να περιέχουν τα ΠΡΑΓΜΑΤΙΚΑ δεδομένα (counts, status)
-      setGroups((currentGroups) => {
-        let hasChanges = false;
-        const updatedGroups = currentGroups.map((group) => ({
-          ...group,
-          projects: group.projects.map((proj) => {
-            const freshData = freshProjectsMap.get(proj.id);
-            if (freshData) {
-              const tasks = freshData.tasks || [];
-              let derivedStatus: "active" | "pending" | "completed" = "pending";
-              if (tasks.length > 0) {
-                const done = tasks.filter((t: any) => t.status === "completed").length;
-                if (done === tasks.length) derivedStatus = "completed";
-                else if (done > 0) derivedStatus = "active";
-                else derivedStatus = "pending";
-              }
-              if (proj.status !== derivedStatus) hasChanges = true;
-              return {
-                ...proj,
-                status: derivedStatus,
-                supervisors: freshData.supervisors || [],
-                members: freshData.members || [],
-              };
-            }
-            return proj;
-          }),
-        }));
-
-        // Debounced sync στη βάση μόνο αν άλλαξε κάποιο status
-        if (hasChanges) {
-          if (syncDebounceRef.current) clearTimeout(syncDebounceRef.current);
-          syncDebounceRef.current = setTimeout(() => {
-            // Use ref for latest groups (avoids stale closure after delete/create)
-            const latestGroups = groupsRef.current;
-            const groupsForDb = latestGroups.map((g) => ({
-              id: g.id,
-              title: g.title,
-              projects: g.projects.map((p) => ({
-                id: p.id,
-                title: p.title,
-                status: p.status,
-                supervisors: p.supervisors || [],
-                members: p.members || [],
-                createdBy: p.createdBy || "",
-                teamId: p.teamId || teamId,
-              })),
-            }));
-            updateDoc(doc(db, "teams", teamId), { groups: groupsForDb }).catch(() => {});
-          }, 5000);
-        }
-
-        return updatedGroups;
-      });
-    });
-
-    return () => unsubscribeProjects();
-  }, [teamId]);
 
   const checkOnline = async () => {
     const net = await Network.getNetworkStateAsync();
@@ -384,45 +252,7 @@ export default function TeamProjectsScreen() {
     if (!tempValue.trim()) return;
 
     try {
-      if (inputMode === "newProject" && activeGroupId) {
-        const newProjectId =
-          Date.now().toString() + Math.random().toString(36).substr(2, 5);
-
-        let initialSupervisors: string[] = [];
-        if (myRole === "Supervisor") {
-          initialSupervisors = [currentUserId];
-        }
-
-        const newProject: Project = {
-          id: newProjectId,
-          title: tempValue,
-          status: "active",
-          supervisors: initialSupervisors,
-          members: [],
-          createdBy: currentUserId,
-          teamId: teamId,
-        };
-
-        // 1. Ενημέρωση της δομής του Group στο Team Doc
-        const updatedGroups = groups.map((g) =>
-          g.id === activeGroupId
-            ? { ...g, projects: [...g.projects, newProject] }
-            : g,
-        );
-
-        // Update local state immediately for UI refresh
-        setGroups(updatedGroups);
-
-        // Update Firestore
-        await updateTeamData("groups", updatedGroups);
-
-        // 2. Δημιουργία του εγγράφου στη συλλογή Projects
-        await setDoc(doc(db, "projects", newProjectId), {
-          ...newProject,
-          tasks: [],
-          createdAt: serverTimestamp(),
-        });
-      } else if (inputMode === "newGroup") {
+      if (inputMode === "newGroup") {
         const newGroup: Group = {
           id: Date.now().toString(),
           title: tempValue,
@@ -596,11 +426,9 @@ export default function TeamProjectsScreen() {
 
       await Promise.all(updatePromises);
 
-      // Ακύρωση Drive πρόσβασης αν demote από Admin/Founder σε χαμηλότερο ρόλο
-      if (
-        action === "demote" &&
-        (targetUser.role === "Admin" || targetUser.role === "Founder")
-      ) {
+      // Ακύρωση Drive πρόσβασης αν demote από Admin σε χαμηλότερο ρόλο
+      // (Founder check not needed — guarded at line 302)
+      if (action === "demote" && targetUser.role === "Admin") {
         try {
           const accessToken = await getValidAccessToken(teamId);
           if (accessToken) {
@@ -626,105 +454,6 @@ export default function TeamProjectsScreen() {
     }
   };
 
-  const handleDeleteProject = async () => {
-    const isOnline = await checkOnline();
-    if (!isOnline) return;
-
-    if (!selectedProject) return;
-    const { groupId, project } = selectedProject;
-
-    Alert.alert("Διαγραφή Project", "Είστε σίγουροι;", [
-      { text: "Ακύρωση" },
-      {
-        text: "Διαγραφή",
-        style: "destructive",
-        onPress: async () => {
-          // Cancel any pending debounced sync (prevents stale data overwrite)
-          if (syncDebounceRef.current) {
-            clearTimeout(syncDebounceRef.current);
-            syncDebounceRef.current = null;
-          }
-
-          // 1. Αφαίρεση από τη δομή του Group
-          const updatedGroups = groups.map((g) =>
-            g.id === groupId
-              ? {
-                  ...g,
-                  projects: g.projects.filter((p) => p.id !== project.id),
-                }
-              : g,
-          );
-
-          // Update local state immediately for UI refresh
-          setGroups(updatedGroups);
-
-          // Update Firestore
-          await updateTeamData("groups", updatedGroups);
-
-          // 2. Διαγραφή media από Firebase Storage
-          try {
-            await deleteProjectMedia(teamId, project.id);
-          } catch (e) {
-            console.error("Storage cleanup failed:", e);
-          }
-
-          // 3. Διαγραφή του εγγράφου από τη συλλογή Projects
-          try {
-            await deleteDoc(doc(db, "projects", project.id));
-          } catch (e) {}
-          setProjectSettingsVisible(false);
-        },
-      },
-    ]);
-  };
-
-  const toggleProjectRole = async (
-    userId: string,
-    type: "supervisor" | "member",
-  ) => {
-    const isOnline = await checkOnline();
-    if (!isOnline) return;
-    if (!selectedProject) return;
-    const { groupId, project } = selectedProject;
-
-    // Ανανεωμένη λογική με arrayRemove/arrayUnion για ασφάλεια
-    // Αντί να στέλνουμε όλο το array, στέλνουμε την εντολή προσθήκης/αφαίρεσης
-    const projectRef = doc(db, "projects", project.id);
-    const field = type === "supervisor" ? "supervisors" : "members";
-    const currentList =
-      type === "supervisor" ? project.supervisors : project.members;
-
-    const isIncluded = currentList.includes(userId);
-
-    try {
-      if (isIncluded) {
-        // Αφαίρεση
-        await updateDoc(projectRef, {
-          [field]: arrayRemove(userId),
-        });
-      } else {
-        // Προσθήκη
-        await updateDoc(projectRef, {
-          [field]: arrayUnion(userId),
-        });
-      }
-
-      // UI Optimistic Update (για να φαίνεται αμέσως στον χρήστη που το πάτησε)
-      const updatedProject = { ...project };
-      if (type === "supervisor") {
-        updatedProject.supervisors = isIncluded
-          ? updatedProject.supervisors.filter((id) => id !== userId)
-          : [...updatedProject.supervisors, userId];
-      } else {
-        updatedProject.members = isIncluded
-          ? updatedProject.members.filter((id) => id !== userId)
-          : [...updatedProject.members, userId];
-      }
-      setSelectedProject({ groupId, project: updatedProject });
-    } catch (e) {
-      Alert.alert("Σφάλμα", "Η ενημέρωση απέτυχε");
-    }
-  };
 
   const pickLogo = async () => {
     const isOnline = await checkOnline();
@@ -776,12 +505,11 @@ export default function TeamProjectsScreen() {
     ]);
   };
 
-  const openInput = async (mode: typeof inputMode, groupId?: string) => {
+  const openInput = async (mode: typeof inputMode) => {
     const isOnline = await checkOnline();
     if (!isOnline) return;
     setInputMode(mode);
     setTempValue("");
-    if (groupId) setActiveGroupId(groupId);
     setMenuVisible(false);
     setInputVisible(true);
   };
@@ -800,8 +528,8 @@ export default function TeamProjectsScreen() {
     const isOnline = await checkOnline();
     if (!isOnline) return;
     if (projectCount > 0)
-      return Alert.alert("Αδύνατη Διαγραφή", "Το Group δεν είναι άδειο.");
-    Alert.alert("Διαγραφή Group", "Είστε σίγουροι;", [
+      return Alert.alert("Αδύνατη Διαγραφή", "Το Project δεν είναι άδειο.");
+    Alert.alert("Διαγραφή Project", "Είστε σίγουροι;", [
       { text: "Όχι" },
       {
         text: "Ναι",
@@ -814,63 +542,24 @@ export default function TeamProjectsScreen() {
     ]);
   };
 
-  const handleMoveProject = async (targetGroupId: string) => {
-    const isOnline = await checkOnline();
-    if (!isOnline) return;
-    if (!selectedProject) return;
-    const { groupId: oldGroupId, project } = selectedProject;
-    const updatedGroups = groups.map((g) => {
-      if (g.id === oldGroupId)
-        return {
-          ...g,
-          projects: g.projects.filter((p) => p.id !== project.id),
-        };
-      if (g.id === targetGroupId)
-        return { ...g, projects: [...g.projects, project] };
-      return g;
-    });
 
-    // Update local state immediately for UI refresh
-    setGroups(updatedGroups);
-
-    // Update Firestore
-    await updateTeamData("groups", updatedGroups);
-    setMoveModalVisible(false);
-    setProjectSettingsVisible(false);
-  };
-
-  // SEARCH & FILTER LOGIC
+  // SEARCH LOGIC — filter groups by title
   const visibleGroups = groups
-    .map((g) => {
-      // 1. Filter by role (existing logic)
-      let roleFilteredProjects = g.projects;
+    .filter((g) => {
+      // Role filter: Users only see groups where they have at least one assigned project
       if (myRole === "User") {
-        roleFilteredProjects = g.projects.filter(
+        return g.projects.some(
           (p) =>
             p.members.includes(currentUserId) ||
             p.supervisors.includes(currentUserId),
         );
       }
-
-      // 2. Filter by status
-      let statusFilteredProjects = roleFilteredProjects;
-      if (statusFilter !== "all") {
-        statusFilteredProjects = roleFilteredProjects.filter(
-          (p) => p.status === statusFilter,
-        );
-      }
-
-      // 3. Filter by search query (project title only - Option 1)
-      let searchFilteredProjects = statusFilteredProjects;
-      if (searchQuery.trim()) {
-        searchFilteredProjects = statusFilteredProjects.filter((p) =>
-          p.title.toLowerCase().includes(searchQuery.toLowerCase()),
-        );
-      }
-
-      return { ...g, projects: searchFilteredProjects };
+      return true;
     })
-    .filter((g) => myRole !== "User" || g.projects.length > 0);
+    .filter((g) =>
+      !searchQuery.trim() ||
+      g.title.toLowerCase().includes(searchQuery.toLowerCase()),
+    );
 
   if (loading)
     return (
@@ -922,7 +611,7 @@ export default function TeamProjectsScreen() {
         )}
       </View>
 
-      {/* SEARCH & FILTER BAR - COMPACT VERSION */}
+      {/* SEARCH BAR */}
       <View style={styles.filterContainer}>
         <View style={styles.searchBar}>
           <Ionicons
@@ -944,26 +633,6 @@ export default function TeamProjectsScreen() {
             </TouchableOpacity>
           )}
         </View>
-
-        {/* Filter Icon Button */}
-        <TouchableOpacity
-          style={[
-            styles.filterIconBtn,
-            statusFilter !== "all" && styles.filterIconBtnActive,
-          ]}
-          onPress={() => setFilterModalVisible(true)}
-        >
-          <Ionicons
-            name="options-outline"
-            size={20}
-            color={statusFilter !== "all" ? "#2563eb" : "#64748b"}
-          />
-          {statusFilter !== "all" && (
-            <View style={styles.filterBadge}>
-              <View style={styles.filterBadgeDot} />
-            </View>
-          )}
-        </TouchableOpacity>
       </View>
 
       {/* CONTENT */}
@@ -978,118 +647,50 @@ export default function TeamProjectsScreen() {
           <View style={{ alignItems: "center", marginTop: 50 }}>
             <Ionicons name="folder-open-outline" size={64} color="#ccc" />
             <Text style={{ color: "#999", marginTop: 10 }}>
-              Δεν υπάρχουν έργα.
+              Δεν υπάρχουν projects.
             </Text>
             {(myRole === "Founder" || myRole === "Admin") && (
               <Text style={{ color: "#2563eb", fontWeight: "bold" }}>
-                Πατήστε το Γρανάζι για Νέο Group!
+                Πατήστε το Γρανάζι για Νέο Project!
               </Text>
             )}
           </View>
         }
         renderItem={({ item: group }) => (
-          <View style={styles.groupContainer}>
-            <View style={styles.groupHeader}>
-              <View style={{ flexDirection: "row", alignItems: "center" }}>
-                <Ionicons
-                  name="folder"
-                  size={18}
-                  color="#64748b"
-                  style={{ marginRight: 6 }}
-                />
-                <Text style={styles.groupTitle}>{group.title}</Text>
+          <TouchableOpacity
+            style={styles.groupCard}
+            onPress={() =>
+              safeNavigate({
+                pathname: `/group/${group.id}`,
+                params: { teamId },
+              })
+            }
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
+              <View style={styles.groupIconBox}>
+                <Ionicons name="folder" size={22} color="#2563eb" />
               </View>
+              <View style={{ marginLeft: 12, flex: 1 }}>
+                <Text style={styles.groupTitle}>{group.title}</Text>
+                <Text style={styles.groupMeta}>
+                  {group.projects.length} υποέργα
+                </Text>
+              </View>
+            </View>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
               {(myRole === "Founder" || myRole === "Admin") && (
                 <TouchableOpacity
-                  onPress={() =>
-                    handleDeleteGroup(group.id, group.projects.length)
-                  }
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    handleDeleteGroup(group.id, group.projects.length);
+                  }}
                 >
-                  <Ionicons name="trash-bin-outline" size={18} color="#999" />
+                  <Ionicons name="trash-bin-outline" size={18} color="#94a3b8" />
                 </TouchableOpacity>
               )}
+              <Ionicons name="chevron-forward" size={18} color="#94a3b8" />
             </View>
-
-            {group.projects.map((project) => (
-              <TouchableOpacity
-                key={project.id}
-                style={[
-                  styles.projectCard,
-                  project.status === "completed" && styles.projectCardCompleted,
-                ]}
-                // ΑΛΛΑΓΗ ΕΔΩ: Χρήση του safeNavigate
-                onPress={() => safeNavigate(`/project/${project.id}`)}
-                onLongPress={() => {
-                  if (myRole !== "User") {
-                    setSelectedProject({ groupId: group.id, project });
-                    setProjectSettingsVisible(true);
-                  }
-                }}
-              >
-                <View style={{ flexDirection: "row", alignItems: "center" }}>
-                  <View
-                    style={[
-                      styles.projectIconBox,
-                      {
-                        backgroundColor:
-                          project.status === "completed"
-                            ? "#f0fdf4"
-                            : "#dbeafe",
-                      },
-                    ]}
-                  >
-                    <Ionicons
-                      name={
-                        project.status === "completed"
-                          ? "checkmark-done"
-                          : "document-text"
-                      }
-                      size={20}
-                      color={
-                        project.status === "completed" ? "#16a34a" : "#2563eb"
-                      }
-                    />
-                  </View>
-                  <View style={{ marginLeft: 10 }}>
-                    <Text
-                      style={[
-                        styles.projectTitle,
-                        project.status === "completed" &&
-                          styles.projectTitleCompleted,
-                      ]}
-                    >
-                      {project.title}
-                    </Text>
-                    {/* ΕΔΩ ΘΑ ΒΛΕΠΕΙΣ ΤΟΥΣ ΣΩΣΤΟΥΣ ΑΡΙΘΜΟΥΣ ΑΜΕΣΩΣ */}
-                    <Text style={styles.projectMeta}>
-                      Sup:{" "}
-                      {project.supervisors ? project.supervisors.length : 0} •
-                      Mem: {project.members ? project.members.length : 0}
-                    </Text>
-                  </View>
-                </View>
-                {myRole !== "User" && (
-                  <Ionicons
-                    name="ellipsis-vertical"
-                    size={16}
-                    color="#cbd5e1"
-                  />
-                )}
-              </TouchableOpacity>
-            ))}
-
-            {(myRole === "Founder" ||
-              myRole === "Admin" ||
-              myRole === "Supervisor") && (
-              <TouchableOpacity
-                style={styles.addProjectBtn}
-                onPress={() => openInput("newProject", group.id)}
-              >
-                <Ionicons name="add" size={20} color="#2563eb" />
-                <Text style={styles.addProjectText}>Νέο Project</Text>
-              </TouchableOpacity>
-            )}
-          </View>
+          </TouchableOpacity>
         )}
       />
 
@@ -1121,7 +722,7 @@ export default function TeamProjectsScreen() {
                 >
                   <Ionicons name="folder-open" size={28} color="#2563eb" />
                 </View>
-                <Text style={styles.optionText}>Νέο Group</Text>
+                <Text style={styles.optionText}>Νέο Project</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -1438,125 +1039,6 @@ export default function TeamProjectsScreen() {
         </View>
       </Modal>
 
-      {/* --- SETTINGS MODAL (PROJECT) --- */}
-      <Modal
-        visible={projectSettingsVisible}
-        animationType="slide"
-        onRequestClose={() => setProjectSettingsVisible(false)}
-      >
-        <SafeAreaView style={{ flex: 1, backgroundColor: "white" }}>
-          <View style={styles.header}>
-            <Text style={styles.headerTitle}>Ρυθμίσεις Project</Text>
-            <TouchableOpacity onPress={() => setProjectSettingsVisible(false)}>
-              <Ionicons name="close" size={28} color="#333" />
-            </TouchableOpacity>
-          </View>
-          <ScrollView
-            contentContainerStyle={{
-              padding: 20,
-              paddingBottom: 50 + insets.bottom,
-            }}
-          >
-            <Text style={styles.sectionTitle}>1. Supervisors</Text>
-            {users
-              .filter((u) => u.role === "Supervisor")
-              .map((u) => (
-                <TouchableOpacity
-                  key={u.id}
-                  style={styles.checkItem}
-                  onPress={() => toggleProjectRole(u.id, "supervisor")}
-                >
-                  <Ionicons
-                    name={
-                      selectedProject?.project.supervisors.includes(u.id)
-                        ? "checkbox"
-                        : "square-outline"
-                    }
-                    size={24}
-                    color="#2563eb"
-                  />
-                  <Text style={{ marginLeft: 10 }}>{u.name}</Text>
-                </TouchableOpacity>
-              ))}
-            <View style={{ height: 20 }} />
-            <Text style={styles.sectionTitle}>2. Μέλη (Users)</Text>
-            {users
-              .filter((u) => u.role === "User")
-              .map((u) => (
-                <TouchableOpacity
-                  key={u.id}
-                  style={styles.checkItem}
-                  onPress={() => toggleProjectRole(u.id, "member")}
-                >
-                  <Ionicons
-                    name={
-                      selectedProject?.project.members.includes(u.id)
-                        ? "checkbox"
-                        : "square-outline"
-                    }
-                    size={24}
-                    color="#16a34a"
-                  />
-                  <Text style={{ marginLeft: 10 }}>{u.name}</Text>
-                </TouchableOpacity>
-              ))}
-            <View style={{ height: 30 }} />
-            <TouchableOpacity
-              style={styles.actionBtn}
-              onPress={() => setMoveModalVisible(true)}
-            >
-              <Ionicons name="folder-outline" size={20} color="#333" />
-              <Text style={{ fontWeight: "bold", marginLeft: 10 }}>
-                Μεταφορά σε άλλο Group
-              </Text>
-            </TouchableOpacity>
-            {myRole !== "User" && (
-              <TouchableOpacity
-                style={[styles.actionBtn, { borderColor: "red" }]}
-                onPress={handleDeleteProject}
-              >
-                <Ionicons name="trash-outline" size={20} color="red" />
-                <Text
-                  style={{ fontWeight: "bold", marginLeft: 10, color: "red" }}
-                >
-                  Διαγραφή Project
-                </Text>
-              </TouchableOpacity>
-            )}
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
-
-      {/* MOVE MODAL */}
-      <Modal visible={moveModalVisible} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View
-            style={[styles.modalContent, { paddingBottom: insets.bottom + 20 }]}
-          >
-            <Text style={styles.modalHeader}>Επιλέξτε Group</Text>
-            {groups.map((g) => (
-              <TouchableOpacity
-                key={g.id}
-                style={[
-                  styles.menuItem,
-                  g.id === selectedProject?.groupId && { opacity: 0.5 },
-                ]}
-                disabled={g.id === selectedProject?.groupId}
-                onPress={() => handleMoveProject(g.id)}
-              >
-                <Ionicons name="folder-open" size={20} color="#333" />
-                <Text style={styles.menuText}>{g.title}</Text>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity
-              style={styles.closeMenuBtn}
-              onPress={() => setMoveModalVisible(false)}
-            >
-              <Text style={{ color: "red" }}>Ακύρωση</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
 
       {/* USERS MODAL */}
       <Modal
@@ -1629,165 +1111,12 @@ export default function TeamProjectsScreen() {
         </SafeAreaView>
       </Modal>
 
-      {/* FILTER MODAL - BOTTOM SHEET */}
-      <Modal
-        visible={filterModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setFilterModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View
-            style={[styles.modalContent, { paddingBottom: insets.bottom + 20 }]}
-          >
-            <View style={styles.modalHeaderRow}>
-              <Text style={styles.modalHeader}>Φίλτρα</Text>
-              <TouchableOpacity onPress={() => setFilterModalVisible(false)}>
-                <Ionicons name="close" size={24} color="#999" />
-              </TouchableOpacity>
-            </View>
-
-            <Text
-              style={{
-                fontSize: 14,
-                color: "#64748b",
-                marginBottom: 16,
-                fontWeight: "600",
-              }}
-            >
-              ΚΑΤΑΣΤΑΣΗ PROJECT
-            </Text>
-
-            {/* Filter Options */}
-            <TouchableOpacity
-              style={[
-                styles.filterOption,
-                statusFilter === "all" && styles.filterOptionActive,
-              ]}
-              onPress={() => {
-                setStatusFilter("all");
-                setFilterModalVisible(false);
-              }}
-            >
-              <Ionicons
-                name={statusFilter === "all" ? "radio-button-on" : "radio-button-off"}
-                size={24}
-                color={statusFilter === "all" ? "#2563eb" : "#cbd5e1"}
-              />
-              <Text
-                style={[
-                  styles.filterOptionText,
-                  statusFilter === "all" && styles.filterOptionTextActive,
-                ]}
-              >
-                Όλα
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.filterOption,
-                statusFilter === "active" && styles.filterOptionActive,
-              ]}
-              onPress={() => {
-                setStatusFilter("active");
-                setFilterModalVisible(false);
-              }}
-            >
-              <Ionicons
-                name={statusFilter === "active" ? "radio-button-on" : "radio-button-off"}
-                size={24}
-                color={statusFilter === "active" ? "#2563eb" : "#cbd5e1"}
-              />
-              <Text
-                style={[
-                  styles.filterOptionText,
-                  statusFilter === "active" && styles.filterOptionTextActive,
-                ]}
-              >
-                Ενεργά
-              </Text>
-              <View style={[styles.statusBadge, { backgroundColor: "#dbeafe" }]}>
-                <Text style={{ color: "#2563eb", fontSize: 10, fontWeight: "700" }}>
-                  ACTIVE
-                </Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.filterOption,
-                statusFilter === "pending" && styles.filterOptionActive,
-              ]}
-              onPress={() => {
-                setStatusFilter("pending");
-                setFilterModalVisible(false);
-              }}
-            >
-              <Ionicons
-                name={statusFilter === "pending" ? "radio-button-on" : "radio-button-off"}
-                size={24}
-                color={statusFilter === "pending" ? "#2563eb" : "#cbd5e1"}
-              />
-              <Text
-                style={[
-                  styles.filterOptionText,
-                  statusFilter === "pending" && styles.filterOptionTextActive,
-                ]}
-              >
-                Εκκρεμή
-              </Text>
-              <View style={[styles.statusBadge, { backgroundColor: "#fef3c7" }]}>
-                <Text style={{ color: "#d97706", fontSize: 10, fontWeight: "700" }}>
-                  PENDING
-                </Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.filterOption,
-                statusFilter === "completed" && styles.filterOptionActive,
-              ]}
-              onPress={() => {
-                setStatusFilter("completed");
-                setFilterModalVisible(false);
-              }}
-            >
-              <Ionicons
-                name={statusFilter === "completed" ? "radio-button-on" : "radio-button-off"}
-                size={24}
-                color={statusFilter === "completed" ? "#2563eb" : "#cbd5e1"}
-              />
-              <Text
-                style={[
-                  styles.filterOptionText,
-                  statusFilter === "completed" && styles.filterOptionTextActive,
-                ]}
-              >
-                Ολοκληρωμένα
-              </Text>
-              <View style={[styles.statusBadge, { backgroundColor: "#dcfce7" }]}>
-                <Text style={{ color: "#16a34a", fontSize: 10, fontWeight: "700" }}>
-                  DONE
-                </Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
 
       <InputModal
         visible={inputVisible}
         onClose={() => setInputVisible(false)}
         onSave={handleSaveInput}
-        title={
-          inputMode === "newGroup"
-            ? "Νέο Project Group"
-            : inputMode === "newProject"
-              ? "Νέο Project"
-              : "Επεξεργασία"
-        }
+        title={inputMode === "newGroup" ? "Νέο Project" : "Επεξεργασία"}
         value={tempValue}
         onChangeText={setTempValue}
         placeholder="Πληκτρολογήστε..."
@@ -1847,131 +1176,39 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#1e293b",
   },
-  filterIconBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
-    backgroundColor: "#f8fafc",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    position: "relative",
-  },
-  filterIconBtnActive: {
-    backgroundColor: "#eff6ff",
-    borderColor: "#bfdbfe",
-  },
-  filterBadge: {
-    position: "absolute",
-    top: 8,
-    right: 8,
-  },
-  filterBadgeDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#2563eb",
-  },
-  filterOption: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f1f5f9",
-    gap: 12,
-  },
-  filterOptionActive: {
-    backgroundColor: "#f8fafc",
-  },
-  filterOptionText: {
-    flex: 1,
-    fontSize: 16,
-    color: "#334155",
-    fontWeight: "500",
-  },
-  filterOptionTextActive: {
-    color: "#2563eb",
-    fontWeight: "700",
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
 
-  // GROUPS & PROJECTS UI
-  groupContainer: { marginBottom: 30 },
-  groupHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
-    paddingHorizontal: 5,
-  },
-  groupTitle: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#475569",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-
-  projectCard: {
+  // PROJECTS (GROUPS) FOLDER CARDS
+  groupCard: {
     backgroundColor: "white",
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 8,
+    padding: 16,
+    borderRadius: 14,
+    marginBottom: 10,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     shadowColor: "#64748b",
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
+    elevation: 2,
   },
-  // --- COMPLETED STYLES ---
-  projectCardCompleted: {
-    backgroundColor: "#f0fdf4", // Ανοιχτό πράσινο background
-    borderColor: "#86efac", // Πράσινο border
-    borderWidth: 1,
-    opacity: 0.8,
+  groupIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: "#eff6ff",
+    justifyContent: "center",
+    alignItems: "center",
   },
-  projectTitleCompleted: {
-    textDecorationLine: "line-through",
+  groupTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#1e293b",
+  },
+  groupMeta: {
+    fontSize: 12,
     color: "#94a3b8",
-  },
-  // ------------------------
-
-  projectIconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  projectTitle: { fontSize: 16, fontWeight: "600", color: "#334155" },
-  projectMeta: { fontSize: 11, color: "#94a3b8", marginTop: 2 },
-
-  addProjectBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 12,
-    marginTop: 5,
-    borderRadius: 10,
-    backgroundColor: "#f1f5f9",
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderStyle: "dashed",
-  },
-  addProjectText: {
-    color: "#2563eb",
-    fontSize: 14,
-    fontWeight: "600",
-    marginLeft: 8,
+    marginTop: 2,
   },
 
   // --- NICE MODAL STYLES (Menu Grid) ---
@@ -2033,30 +1270,6 @@ const styles = StyleSheet.create({
   },
   menuText: { marginLeft: 15, fontSize: 16, color: "#334155" },
   closeMenuBtn: { marginTop: 20, alignItems: "center", padding: 10 },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    marginTop: 10,
-    marginBottom: 5,
-    color: "#111827",
-  },
-  checkItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderColor: "#eee",
-  },
-  actionBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 15,
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 10,
-    marginBottom: 10,
-    justifyContent: "center",
-  },
   userCard: {
     backgroundColor: "#f9fafb",
     padding: 15,

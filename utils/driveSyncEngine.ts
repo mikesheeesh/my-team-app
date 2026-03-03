@@ -371,7 +371,7 @@ export const syncProjectToDrive = async (
     const teamName = teamData.name || "Χωρίς Όνομα";
 
     // Find which group this project belongs to
-    let groupName = "Χωρίς Ομάδα";
+    let groupName = "Χωρίς Project";
     for (const group of teamData.groups || []) {
       if (group.projects?.some((p: any) => p.id === projectId)) {
         groupName = group.title;
