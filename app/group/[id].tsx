@@ -145,13 +145,12 @@ export default function GroupScreen() {
                 setGroupTitle(currentGroup.title);
                 setProjects((prev) => {
                   if (prev.length === 0) return currentGroup.projects;
-                  // Merge: keep fresh statuses/roles from 2nd listener, update titles/structure
+                  // Merge: keep roles from 2nd listener, but take status/isClosed from team doc
                   return currentGroup.projects.map((p: Project) => {
                     const existing = prev.find((ep) => ep.id === p.id);
                     return existing
                       ? {
                           ...p,
-                          status: existing.status,
                           supervisors: existing.supervisors,
                           members: existing.members,
                         }
@@ -231,20 +230,13 @@ export default function GroupScreen() {
         const updated = currentProjects.map((proj) => {
           const freshData = freshProjectsMap.get(proj.id);
           if (freshData) {
-            const tasks = freshData.tasks || [];
-            let derivedStatus: "active" | "pending" | "completed" = "pending";
-            if (tasks.length > 0) {
-              const done = tasks.filter(
-                (t: any) => t.status === "completed",
-              ).length;
-              if (done === tasks.length) derivedStatus = "completed";
-              else if (done > 0) derivedStatus = "active";
-              else derivedStatus = "pending";
-            }
-            if (proj.status !== derivedStatus) hasChanges = true;
+            const freshStatus = (freshData.status || "active") as "active" | "pending" | "completed";
+            const freshIsClosed = freshData.isClosed === true;
+            if (proj.status !== freshStatus || proj.isClosed !== freshIsClosed) hasChanges = true;
             return {
               ...proj,
-              status: derivedStatus,
+              status: freshStatus,
+              isClosed: freshIsClosed,
               supervisors: freshData.supervisors || [],
               members: freshData.members || [],
             };
