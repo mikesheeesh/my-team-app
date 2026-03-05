@@ -489,8 +489,10 @@ export default function ProjectDetailsScreen() {
       return;
     }
     const completedCount = combinedTasks.filter((t) => t.status === "completed").length;
+    const totalCount = combinedTasks.length;
     // Never auto-set "completed" — only "active" or "pending"
-    const newStatus: "active" | "pending" = completedCount > 0 ? "pending" : "active";
+    // All done OR none done → "active", partial → "pending"
+    const newStatus: "active" | "pending" = completedCount > 0 && completedCount < totalCount ? "pending" : "active";
     if (newStatus !== projectStatus) updateProjectStatus(newStatus);
   }, [combinedTasks, isClosed]);
 
