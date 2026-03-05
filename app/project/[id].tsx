@@ -336,7 +336,7 @@ export default function ProjectDetailsScreen() {
   const [projectStatus, setProjectStatus] = useState<
     "active" | "pending" | "completed"
   >("active");
-  const [isClosed, setIsClosed] = useState(false); // Αν true, κλειστό από admin — FAB κρυφό
+  const [isClosed, setIsClosed] = useState<boolean | null>(null); // null = δεν έχει φορτωθεί ακόμα
   const [teamId, setTeamId] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
@@ -482,6 +482,7 @@ export default function ProjectDetailsScreen() {
   // --- AUTOMATIC STATUS ONLY ---
   // "completed" status is set ONLY by admin via isClosed toggle — never auto-calculated
   useEffect(() => {
+    if (isClosed === null) return; // Δεν έχει φορτωθεί ακόμα — περίμενε snapshot
     if (isClosed) return; // Κλειστό: η κατάσταση ελέγχεται από το admin panel
     if (combinedTasks.length === 0) {
       if (projectStatus !== "active") updateProjectStatus("active");
