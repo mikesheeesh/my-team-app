@@ -798,6 +798,7 @@ window.toggleProjectClosed = async () => {
     currentProject.data = { ...currentProject.data, isClosed: newClosed, status: newStatus };
     currentTeam.data = { ...currentTeam.data, groups: newGroups };
     updateCloseBtn(newClosed);
+    document.getElementById('project-status-label').textContent = `Υποέργο · Project: ${currentProject.groupTitle} · ${statusLabel(newStatus)}`;
   } catch(e) {
     alert('Σφάλμα: ' + e.message);
   } finally {
