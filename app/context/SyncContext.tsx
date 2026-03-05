@@ -174,28 +174,46 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
         // Check connectivity before Firestore operation
         const checkConn = effectiveAllowCellular ? isNetworkAvailable : isWiFiConnected;
         if (shouldAbortRef.current || !(await checkConn())) {
-          console.log("🛑 Sync aborted before getDoc - no connection");
+          console.log("🛑 Sync aborted before Firestore read - no connection");
           break;
         }
 
         const projectRef = doc(db, "projects", projectId);
-        const projectSnap = await getDoc(projectRef);
 
-        if (!projectSnap.exists()) {
-          await AsyncStorage.removeItem(key);
-          continue;
+        // Use cached project data if fresh (< 30 sec), skip getDoc read
+        const CACHE_MAX_AGE = 30_000;
+        const PROJ_CACHE_KEY = `cached_project_tasks_${projectId}`;
+        let currentCloudList: any[] = [];
+        let teamId: string | undefined;
+
+        try {
+          const cached = await AsyncStorage.getItem(PROJ_CACHE_KEY);
+          if (cached) {
+            const { tasks, teamId: cachedTeamId, updatedAt } = JSON.parse(cached);
+            if (updatedAt && Date.now() - updatedAt < CACHE_MAX_AGE) {
+              currentCloudList = tasks || [];
+              teamId = cachedTeamId;
+            }
+          }
+        } catch {}
+
+        if (!teamId) {
+          const projectSnap = await getDoc(projectRef);
+          if (!projectSnap.exists()) {
+            await AsyncStorage.removeItem(key);
+            continue;
+          }
+          currentCloudList = projectSnap.data().tasks || [];
+          teamId = projectSnap.data().teamId;
         }
 
-        let currentCloudList = projectSnap.data().tasks || [];
-        let changesMade = false;
-
-        // Get teamId for Storage paths
-        const teamId = projectSnap.data().teamId;
         if (!teamId) {
           console.error("⚠️ No teamId found for project:", projectId);
           await AsyncStorage.removeItem(key);
           continue;
         }
+
+        let changesMade = false;
 
         // Track successfully synced tasks for removal
         const syncedTaskIds: string[] = [];

@@ -338,6 +338,8 @@ export default function ProjectDetailsScreen() {
   >("active");
   const [isClosed, setIsClosed] = useState<boolean | null>(null); // null = δεν έχει φορτωθεί ακόμα
   const [teamId, setTeamId] = useState<string>("");
+  const lastCloudStatusRef = useRef<string>("active"); // guard: αποφυγή write όταν status ήρθε από cloud
+  const statusDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
 
@@ -429,6 +431,7 @@ export default function ProjectDetailsScreen() {
             setCloudTasks(fetched);
             setProjectName(data.title || "Project");
             setProjectStatus(data.status || "active");
+            lastCloudStatusRef.current = data.status || "active"; // guard ενάντια σε spurious writes
             setIsClosed(data.isClosed === true);
             setTeamId(data.teamId || "");
             AsyncStorage.setItem(
@@ -438,6 +441,7 @@ export default function ProjectDetailsScreen() {
                 tasks: fetched,
                 status: data.status,
                 teamId: data.teamId,
+                updatedAt: Date.now(),
               }),
             );
           }
@@ -481,19 +485,28 @@ export default function ProjectDetailsScreen() {
 
   // --- AUTOMATIC STATUS ONLY ---
   // "completed" status is set ONLY by admin via isClosed toggle — never auto-calculated
+  // Debounced (2sec) + guards against writing when status just arrived from cloud
   useEffect(() => {
-    if (isClosed === null) return; // Δεν έχει φορτωθεί ακόμα — περίμενε snapshot
-    if (isClosed) return; // Κλειστό: η κατάσταση ελέγχεται από το admin panel
-    if (combinedTasks.length === 0) {
-      if (projectStatus !== "active") updateProjectStatus("active");
-      return;
-    }
-    const completedCount = combinedTasks.filter((t) => t.status === "completed").length;
-    const totalCount = combinedTasks.length;
-    // Never auto-set "completed" — only "active" or "pending"
-    // All done OR none done → "active", partial → "pending"
-    const newStatus: "active" | "pending" = completedCount > 0 && completedCount < totalCount ? "pending" : "active";
-    if (newStatus !== projectStatus) updateProjectStatus(newStatus);
+    if (isClosed === null) return; // δεν έχει φορτωθεί ακόμα
+    if (isClosed) return; // κλειστό: status ελέγχεται από admin
+    if (statusDebounceRef.current) clearTimeout(statusDebounceRef.current);
+    statusDebounceRef.current = setTimeout(() => {
+      const tasks = combinedTasks;
+      if (tasks.length === 0) {
+        if (projectStatus !== "active" && lastCloudStatusRef.current !== "active") {
+          updateProjectStatus("active");
+        }
+        return;
+      }
+      const completedCount = tasks.filter((t) => t.status === "completed").length;
+      const totalCount = tasks.length;
+      const newStatus: "active" | "pending" = completedCount > 0 && completedCount < totalCount ? "pending" : "active";
+      // Μην γράψεις αν το cloud ήδη έχει αυτό το status
+      if (newStatus !== projectStatus && newStatus !== lastCloudStatusRef.current) {
+        updateProjectStatus(newStatus);
+      }
+    }, 2000);
+    return () => { if (statusDebounceRef.current) clearTimeout(statusDebounceRef.current); };
   }, [combinedTasks, isClosed]);
 
   // Reset media states when switching to a different file
@@ -527,27 +540,12 @@ export default function ProjectDetailsScreen() {
   const updateProjectStatus = async (
     newStatus: "active" | "pending" | "completed",
   ) => {
-    setProjectStatus(newStatus); // Ενημέρωση τοπικά για άμεση απόκριση
-
+    setProjectStatus(newStatus); // τοπική ενημέρωση για άμεση απόκριση
     const net = await Network.getNetworkStateAsync();
     if (net.isConnected) {
       try {
-        // Ενημέρωση στο projects collection
         await updateDoc(doc(db, "projects", projectId), { status: newStatus });
-        // Ενημέρωση και στο teams doc (groups[].projects[].status)
-        if (teamId) {
-          const teamSnap = await getDoc(doc(db, "teams", teamId));
-          if (teamSnap.exists()) {
-            const groups = teamSnap.data().groups || [];
-            const updatedGroups = groups.map((g: any) => ({
-              ...g,
-              projects: (g.projects || []).map((p: any) =>
-                p.id === projectId ? { ...p, status: newStatus } : p
-              ),
-            }));
-            await updateDoc(doc(db, "teams", teamId), { groups: updatedGroups });
-          }
-        }
+        // teams doc ενημερώνεται από τον listener του group/[id].tsx (structural changes only)
       } catch (e) {
         console.log("Status update failed", e);
       }

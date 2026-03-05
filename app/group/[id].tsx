@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Network from "expo-network";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
@@ -99,6 +100,8 @@ export default function GroupScreen() {
   const [inputVisible, setInputVisible] = useState(false);
   const [tempValue, setTempValue] = useState("");
 
+  const USER_CACHE_KEY = `user_cache_${teamId}`;
+
   // Keep refs in sync
   useEffect(() => {
     projectsRef.current = projects;
@@ -106,6 +109,19 @@ export default function GroupScreen() {
   useEffect(() => {
     allGroupsRef.current = allGroups;
   }, [allGroups]);
+
+  // Pre-populate userCacheRef from AsyncStorage on mount
+  useEffect(() => {
+    AsyncStorage.getItem(USER_CACHE_KEY)
+      .then((stored) => {
+        if (stored) {
+          JSON.parse(stored).forEach(([uid, data]: [string, any]) => {
+            userCacheRef.current.set(uid, data);
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const checkOnline = async () => {
     const net = await Network.getNetworkStateAsync();
@@ -194,6 +210,10 @@ export default function GroupScreen() {
                   });
                 }
                 setUsers(loadedUsers);
+                AsyncStorage.setItem(
+                  USER_CACHE_KEY,
+                  JSON.stringify(Array.from(userCacheRef.current.entries())),
+                ).catch(() => {});
               }
 
               setLoading(false);
@@ -227,24 +247,34 @@ export default function GroupScreen() {
 
       setProjects((currentProjects) => {
         let hasChanges = false;
+        let hasStructuralChange = false;
         const updated = currentProjects.map((proj) => {
           const freshData = freshProjectsMap.get(proj.id);
           if (freshData) {
             const freshStatus = (freshData.status || "active") as "active" | "pending" | "completed";
             const freshIsClosed = freshData.isClosed === true;
+            const freshSupervisors = freshData.supervisors || [];
+            const freshMembers = freshData.members || [];
             if (proj.status !== freshStatus || proj.isClosed !== freshIsClosed) hasChanges = true;
+            // Structural change = supervisors/members changed (NOT status/isClosed)
+            if (
+              JSON.stringify(freshSupervisors) !== JSON.stringify(proj.supervisors || []) ||
+              JSON.stringify(freshMembers) !== JSON.stringify(proj.members || [])
+            ) hasStructuralChange = true;
             return {
               ...proj,
               status: freshStatus,
               isClosed: freshIsClosed,
-              supervisors: freshData.supervisors || [],
-              members: freshData.members || [],
+              supervisors: freshSupervisors,
+              members: freshMembers,
             };
           }
           return proj;
         });
 
-        if (hasChanges) {
+        // Γράφουμε στο teams doc ΜΟΝΟ για structural changes (supervisors/members)
+        // Όχι για status/isClosed — αυτά τα γράφει το updateProjectStatus στο projects collection
+        if (hasStructuralChange) {
           if (syncDebounceRef.current) clearTimeout(syncDebounceRef.current);
           syncDebounceRef.current = setTimeout(() => {
             const latestProjects = projectsRef.current;
@@ -271,7 +301,9 @@ export default function GroupScreen() {
           }, 5000);
         }
 
-        return updated;
+        // Re-render μόνο αν άλλαξε κάτι
+        if (hasChanges || hasStructuralChange) return updated;
+        return currentProjects;
       });
     });
 

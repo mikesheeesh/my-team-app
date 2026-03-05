@@ -110,6 +110,7 @@ export default function TeamProjectsScreen() {
   const [tempValue, setTempValue] = useState("");
 
   const CACHE_KEY = `cached_team_${teamId}`;
+  const USER_CACHE_KEY = `user_cache_${teamId}`;
 
   // Keep groupsRef in sync with latest state
   useEffect(() => {
@@ -132,6 +133,14 @@ export default function TeamProjectsScreen() {
           if (data.myRole) setMyRole(data.myRole);
           if (data.users) setUsers(data.users);
           setLoading(false);
+        }
+      } catch (e) {}
+      try {
+        const cachedUserMap = await AsyncStorage.getItem(USER_CACHE_KEY);
+        if (cachedUserMap) {
+          JSON.parse(cachedUserMap).forEach(([uid, data]: [string, any]) => {
+            userCacheRef.current.set(uid, data);
+          });
         }
       } catch (e) {}
     };
@@ -191,6 +200,10 @@ export default function TeamProjectsScreen() {
                   });
                 }
                 setUsers(loadedUsers);
+                AsyncStorage.setItem(
+                  USER_CACHE_KEY,
+                  JSON.stringify(Array.from(userCacheRef.current.entries())),
+                ).catch(() => {});
               }
 
               AsyncStorage.setItem(
