@@ -167,6 +167,8 @@ export default function GroupScreen() {
                     return existing
                       ? {
                           ...p,
+                          status: existing.status ?? p.status,
+                          isClosed: existing.isClosed ?? p.isClosed,
                           supervisors: existing.supervisors,
                           members: existing.members,
                         }
