@@ -23,7 +23,7 @@ export default function Layout() {
             <Stack screenOptions={{ headerShown: false }}>
               <Stack.Screen name="index" />
               <Stack.Screen name="login" />
-              <Stack.Screen name="onboarding/invite" />
+              <Stack.Screen name="join-request" />
               <Stack.Screen
                 name="dashboard/index"
                 options={{

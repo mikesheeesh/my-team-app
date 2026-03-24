@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   BackHandler,
@@ -15,15 +15,23 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "../firebaseConfig";
+import {
+  collection,
+  getDocs,
+  onSnapshot,
+  query,
+  where,
+} from "firebase/firestore";
+import { auth, db } from "../firebaseConfig";
 import { useUser } from "./context/UserContext";
 
 export default function DashboardScreen() {
   const router = useRouter();
   const { user: userData } = useUser();
   const [loading, setLoading] = useState(true);
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
+  const [firstAdminTeamId, setFirstAdminTeamId] = useState<string | null>(null);
 
-  // --- NAVIGATION LOCK (500ms) ---
   const [isNavigating, setIsNavigating] = useState(false);
 
   const safeNavigate = (path: any) => {
@@ -32,12 +40,11 @@ export default function DashboardScreen() {
     router.push(path);
     setTimeout(() => setIsNavigating(false), 500);
   };
-  // -------------------------------
 
-  // 1. ΔΙΑΧΕΙΡΙΣΗ ΚΟΥΜΠΙΟΥ "ΠΙΣΩ"
+  // 1. BACK BUTTON LOCK
   useFocusEffect(
     useCallback(() => {
-      if (Platform.OS === 'web') return;
+      if (Platform.OS === "web") return;
       const onBackPress = () => {
         BackHandler.exitApp();
         return true;
@@ -64,6 +71,54 @@ export default function DashboardScreen() {
     }, []),
   );
 
+  // 3. BELL — pending join requests for teams where user is Founder/Admin
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    let unsubRequests: (() => void) | null = null;
+
+    // Get teams where user is Founder or Admin
+    const unsubTeams = onSnapshot(
+      query(collection(db, "teams"), where("memberIds", "array-contains", user.uid)),
+      (teamsSnap) => {
+        const adminTeamIds: string[] = [];
+        teamsSnap.forEach((d) => {
+          const role = d.data().roles?.[user.uid];
+          if (role === "Founder" || role === "Admin") {
+            adminTeamIds.push(d.id);
+          }
+        });
+
+        if (unsubRequests) unsubRequests();
+
+        if (adminTeamIds.length === 0) {
+          setPendingRequestsCount(0);
+          setFirstAdminTeamId(null);
+          return;
+        }
+
+        setFirstAdminTeamId(adminTeamIds[0]);
+
+        // Firestore 'in' supports up to 30 items
+        const batchIds = adminTeamIds.slice(0, 30);
+        unsubRequests = onSnapshot(
+          query(
+            collection(db, "joinRequests"),
+            where("teamId", "in", batchIds),
+            where("status", "==", "pending"),
+          ),
+          (snap) => setPendingRequestsCount(snap.size),
+        );
+      },
+    );
+
+    return () => {
+      unsubTeams();
+      if (unsubRequests) unsubRequests();
+    };
+  }, []);
+
   if (loading) {
     return (
       <SafeAreaView style={[styles.center, { backgroundColor: "#f8fafc" }]}>
@@ -80,24 +135,46 @@ export default function DashboardScreen() {
       <View style={styles.header}>
         <View>
           <Text style={styles.appName}>Ergon Work Management</Text>
-          <Text style={styles.greeting}>Γεια σου, {userData?.fullname || "Χρήστης"}!</Text>
+          <Text style={styles.greeting}>
+            Γεια σου, {userData?.fullname || "Χρήστης"}!
+          </Text>
         </View>
-        <TouchableOpacity
-          style={styles.profileButton}
-          // ΑΛΛΑΓΗ ΕΔΩ: safeNavigate
-          onPress={() => safeNavigate("/profile")}
-        >
-          <Ionicons name="person-circle-outline" size={48} color="#2563eb" />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          {/* BELL */}
+          <TouchableOpacity
+            style={styles.bellButton}
+            onPress={() => {
+              if (firstAdminTeamId) {
+                safeNavigate(`/team/${firstAdminTeamId}?openRequests=true`);
+              }
+            }}
+          >
+            <Ionicons name="notifications-outline" size={26} color="#374151" />
+            {pendingRequestsCount > 0 && (
+              <View style={styles.bellBadge}>
+                <Text style={styles.bellBadgeText}>
+                  {pendingRequestsCount > 9 ? "9+" : pendingRequestsCount}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          {/* PROFILE */}
+          <TouchableOpacity
+            style={styles.profileButton}
+            onPress={() => safeNavigate("/profile")}
+          >
+            <Ionicons name="person-circle-outline" size={48} color="#2563eb" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.sectionHeader}>Ενέργειες</Text>
 
-        {/* 1. ΟΙ ΟΜΑΔΕΣ ΜΟΥ (Λευκή Κάρτα) */}
+        {/* ΟΙ ΟΜΑΔΕΣ ΜΟΥ */}
         <TouchableOpacity
           style={[styles.card, styles.cardWhite]}
-          // ΑΛΛΑΓΗ ΕΔΩ: safeNavigate
           onPress={() => safeNavigate("/teams/my-teams")}
           activeOpacity={0.8}
         >
@@ -115,51 +192,6 @@ export default function DashboardScreen() {
           <Ionicons name="chevron-forward" size={24} color="#cbd5e1" />
         </TouchableOpacity>
 
-        {/* 2. ΔΗΜΙΟΥΡΓΙΑ ΟΜΑΔΑΣ (Μπλε Κάρτα - Primary) */}
-        <TouchableOpacity
-          style={[styles.card, styles.cardBlue]}
-          // ΑΛΛΑΓΗ ΕΔΩ: safeNavigate
-          onPress={() => safeNavigate("/onboarding/create-team")}
-          activeOpacity={0.8}
-        >
-          <View
-            style={[
-              styles.iconCircle,
-              { backgroundColor: "rgba(255,255,255,0.2)" },
-            ]}
-          >
-            <Ionicons name="add" size={32} color="#ffffff" />
-          </View>
-          <View style={styles.cardTextContainer}>
-            <Text style={[styles.cardTitle, { color: "#ffffff" }]}>
-              Δημιουργία Ομάδας
-            </Text>
-            <Text
-              style={[styles.cardSubtitle, { color: "rgba(255,255,255,0.9)" }]}
-            >
-              Για Ιδρυτές / Managers
-            </Text>
-          </View>
-          <Ionicons
-            name="chevron-forward"
-            size={24}
-            color="rgba(255,255,255,0.6)"
-          />
-        </TouchableOpacity>
-
-        {/* 3. JOIN WITH CODE */}
-        <View style={styles.linkContainer}>
-          <Text style={styles.linkHint}>Έλαβες πρόσκληση;</Text>
-          <TouchableOpacity
-            style={styles.linkButton}
-            // ΑΛΛΑΓΗ ΕΔΩ: safeNavigate
-            onPress={() => safeNavigate("/join")}
-          >
-            <Ionicons name="key-outline" size={20} color="#2563eb" />
-            <Text style={styles.linkText}>Εισαγωγή Κωδικού</Text>
-          </TouchableOpacity>
-        </View>
-
         {/* VERSION */}
         <Text style={styles.versionText}>v2.3.0</Text>
       </ScrollView>
@@ -171,7 +203,6 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f8fafc" },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
 
-  // HEADER STYLES
   header: {
     paddingHorizontal: 24,
     paddingVertical: 20,
@@ -185,35 +216,57 @@ const styles = StyleSheet.create({
   appName: {
     fontSize: 24,
     fontWeight: "800",
-    color: "#1e3a8a", // Dark Blue
+    color: "#1e3a8a",
     letterSpacing: -0.5,
   },
   greeting: {
     fontSize: 15,
-    color: "#64748b", // Slate 500
+    color: "#64748b",
     marginTop: 4,
     fontWeight: "500",
   },
-  profileButton: {
-    // Touch target optimization
-    padding: 4,
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
+  bellButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#f1f5f9",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  bellBadge: {
+    position: "absolute",
+    top: -2,
+    right: -2,
+    backgroundColor: "#ef4444",
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 3,
+  },
+  bellBadgeText: {
+    color: "#fff",
+    fontSize: 9,
+    fontWeight: "800",
+  },
+  profileButton: { padding: 4 },
 
-  // CONTENT STYLES
-  content: {
-    padding: 24,
-    paddingBottom: 50,
-  },
+  content: { padding: 24, paddingBottom: 50 },
   sectionHeader: {
     fontSize: 18,
-    color: "#334155", // Slate 700
+    color: "#334155",
     marginBottom: 16,
     fontWeight: "700",
     letterSpacing: 0.5,
     textTransform: "uppercase",
   },
 
-  // CARD BASE STYLE
   card: {
     padding: 20,
     borderRadius: 20,
@@ -221,28 +274,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 16,
-
-    // Shadows
     shadowColor: "#64748b",
     shadowOpacity: 0.1,
     shadowOffset: { width: 0, height: 4 },
     shadowRadius: 12,
     elevation: 4,
   },
-
-  // CARD VARIANTS
   cardWhite: {
     backgroundColor: "#ffffff",
     borderWidth: 1,
     borderColor: "#e2e8f0",
   },
-  cardBlue: {
-    backgroundColor: "#2563eb", // Brand Blue
-    shadowColor: "#2563eb",
-    shadowOpacity: 0.3,
-  },
-
-  // CARD ELEMENTS
   iconCircle: {
     width: 56,
     height: 56,
@@ -251,47 +293,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginRight: 16,
   },
-  cardTextContainer: {
-    flex: 1,
-  },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    marginBottom: 4,
-  },
-  cardSubtitle: {
-    fontSize: 13,
-    fontWeight: "500",
-  },
+  cardTextContainer: { flex: 1 },
+  cardTitle: { fontSize: 18, fontWeight: "700", marginBottom: 4 },
+  cardSubtitle: { fontSize: 13, fontWeight: "500" },
 
-  // LINK SECTION
-  linkContainer: {
-    marginTop: 24,
-    alignItems: "center",
-    paddingVertical: 20,
-    borderTopWidth: 1,
-    borderColor: "#e2e8f0",
-    borderStyle: "dashed",
-  },
-  linkHint: {
-    fontSize: 14,
-    color: "#94a3b8",
-    marginBottom: 8,
-  },
-  linkButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    backgroundColor: "#eff6ff",
-    borderRadius: 30,
-  },
-  linkText: {
-    color: "#2563eb",
-    fontWeight: "700",
-    fontSize: 16,
-    marginLeft: 8,
-  },
   versionText: {
     textAlign: "center",
     fontSize: 12,

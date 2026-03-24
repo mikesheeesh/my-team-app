@@ -1,21 +1,26 @@
-import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import { useRouter } from "expo-router";
 import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  updateProfile,
+  GoogleAuthProvider,
+  signInWithCredential,
+  signInWithPopup,
 } from "firebase/auth";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDocs,
+  getDoc,
+  query,
+  setDoc,
+  where,
+} from "firebase/firestore";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
+  Image,
   Platform,
-  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -23,316 +28,175 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { auth, db } from "../firebaseConfig";
 import { showAlert } from "./context/AlertContext";
 
-const PROFILE_CACHE_KEY = "user_profile_data_cache";
+if (Platform.OS !== "web") {
+  GoogleSignin.configure({
+    webClientId:
+      "1066934665062-58dao455r4etr1ublg2tthmrj89c8a1j.apps.googleusercontent.com",
+  });
+}
 
 export default function LoginScreen() {
   const router = useRouter();
-  const [isRegistering, setIsRegistering] = useState(false);
-
-  const [fullname, setFullname] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const [showPassword, setShowPassword] = useState(false);
-
-  const getFriendlyError = (errorMsg: string) => {
-    if (errorMsg.includes("invalid-email")) return "Το email δεν είναι έγκυρο.";
-    if (errorMsg.includes("user-not-found"))
-      return "Δεν βρέθηκε χρήστης με αυτό το email.";
-    if (errorMsg.includes("wrong-password")) return "Λάθος κωδικός πρόσβασης.";
-    if (errorMsg.includes("email-already-in-use"))
-      return "Το email χρησιμοποιείται ήδη.";
-    if (errorMsg.includes("weak-password"))
-      return "Ο κωδικός πρέπει να έχει τουλάχιστον 6 χαρακτήρες.";
-    if (errorMsg.includes("network-request-failed"))
-      return "Πρόβλημα σύνδεσης στο ίντερνετ.";
-    return errorMsg;
-  };
-
-  const handleAuth = async () => {
-    if (!email || !password)
-      return showAlert("Προσοχή", "Συμπληρώστε Email και Κωδικό.");
-    if (isRegistering && !fullname.trim())
-      return showAlert("Προσοχή", "Το Όνομα είναι απαραίτητο.");
-
+  const handleGoogleSignIn = async () => {
     setLoading(true);
     try {
-      if (isRegistering) {
-        const userCredential = await createUserWithEmailAndPassword(
-          auth,
-          email,
-          password,
-        );
-        const user = userCredential.user;
+      let user;
 
-        await updateProfile(user, { displayName: fullname });
+      if (Platform.OS === "web") {
+        const provider = new GoogleAuthProvider();
+        const result = await signInWithPopup(auth, provider);
+        user = result.user;
+      } else {
+        await GoogleSignin.hasPlayServices();
+        const signInResult = await GoogleSignin.signIn();
+        const idToken =
+          signInResult.data?.idToken ?? (signInResult as any).idToken;
+        if (!idToken) throw new Error("No ID token received from Google.");
+        const credential = GoogleAuthProvider.credential(idToken);
+        const result = await signInWithCredential(auth, credential);
+        user = result.user;
+      }
 
-        const userData = {
-          fullname: fullname,
-          email: email.toLowerCase(),
+      // Create user doc if new
+      const userRef = doc(db, "users", user.uid);
+      const snap = await getDoc(userRef);
+      if (!snap.exists()) {
+        await setDoc(userRef, {
+          fullname: user.displayName || "",
+          email: user.email || "",
+          photoURL: user.photoURL || null,
           createdAt: new Date().toISOString(),
           phone: "",
-          avatar: null,
-        };
+        });
+      }
 
-        await setDoc(doc(db, "users", user.uid), userData);
-        await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(userData));
+      // Check if user has teams
+      const teamsSnap = await getDocs(
+        query(
+          collection(db, "teams"),
+          where("memberIds", "array-contains", user.uid),
+        ),
+      );
 
-        router.replace("/dashboard");
+      if (teamsSnap.empty) {
+        router.replace("/join-request");
       } else {
-        const userCredential = await signInWithEmailAndPassword(
-          auth,
-          email,
-          password,
-        );
-        const user = userCredential.user;
-
-        try {
-          const userDoc = await getDoc(doc(db, "users", user.uid));
-          if (userDoc.exists()) {
-            const data = userDoc.data();
-            await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(data));
-          }
-        } catch (e) {
-          console.log("Offline login (cache update skipped)");
-        }
-
         router.replace("/dashboard");
       }
     } catch (error: any) {
-      showAlert("Σφάλμα", getFriendlyError(error.message));
+      if (
+        error.code !== "SIGN_IN_CANCELLED" &&
+        error.code !== "12501" // user cancelled on Android
+      ) {
+        showAlert("Σφάλμα", "Η σύνδεση απέτυχε. Δοκιμάστε ξανά.");
+        console.log("Google Sign-In error:", error);
+      }
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={{ flex: 1 }}
-      >
-        <ScrollView
-          contentContainerStyle={styles.container}
-          keyboardShouldPersistTaps="handled"
+    <SafeAreaView style={styles.container}>
+      <View style={styles.content}>
+        <Image
+          source={require("../assets/logo2.png")}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+
+        <Text style={styles.title}>Ergon Work Management</Text>
+        <Text style={styles.subtitle}>
+          Συνδεθείτε με τον λογαριασμό Google σας για να συνεχίσετε.
+        </Text>
+
+        <TouchableOpacity
+          style={styles.googleButton}
+          onPress={handleGoogleSignIn}
+          disabled={loading}
+          activeOpacity={0.85}
         >
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={styles.backBtn}
-          >
-            <Ionicons name="arrow-back" size={24} color="#0f172a" />
-          </TouchableOpacity>
-
-          <View style={styles.header}>
-            <Text style={styles.title}>
-              {isRegistering ? "Δημιουργία Λογαριασμού" : "Καλωσήρθατε"}
-            </Text>
-            <Text style={styles.subtitle}>
-              {isRegistering
-                ? "Συμπληρώστε τα στοιχεία σας για να ξεκινήσετε."
-                : "Συνδεθείτε για να συνεχίσετε."}
-            </Text>
-          </View>
-
-          <View style={styles.form}>
-            {isRegistering && (
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Ονοματεπώνυμο</Text>
-                <View style={styles.inputContainer}>
-                  <Ionicons
-                    name="person-outline"
-                    size={20}
-                    color="#64748b"
-                    style={styles.inputIcon}
-                  />
-                  <TextInput
-                    style={styles.input}
-                    value={fullname}
-                    onChangeText={setFullname}
-                    placeholder="Π.χ. Γιάννης Παπαδόπουλος"
-                    placeholderTextColor="#94a3b8"
-                  />
-                </View>
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <>
+              <View style={styles.googleIconBox}>
+                <Text style={styles.googleG}>G</Text>
               </View>
-            )}
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Email</Text>
-              <View style={styles.inputContainer}>
-                <Ionicons
-                  name="mail-outline"
-                  size={20}
-                  color="#64748b"
-                  style={styles.inputIcon}
-                />
-                <TextInput
-                  style={styles.input}
-                  value={email}
-                  onChangeText={setEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  placeholder="name@example.com"
-                  placeholderTextColor="#94a3b8"
-                />
-              </View>
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Κωδικός</Text>
-              <View style={styles.inputContainer}>
-                <Ionicons
-                  name="lock-closed-outline"
-                  size={20}
-                  color="#64748b"
-                  style={styles.inputIcon}
-                />
-                <TextInput
-                  style={styles.input}
-                  value={password}
-                  onChangeText={setPassword}
-                  secureTextEntry={!showPassword}
-                  placeholder="******"
-                  placeholderTextColor="#94a3b8"
-                />
-                <TouchableOpacity
-                  onPress={() => setShowPassword(!showPassword)}
-                  style={styles.eyeIcon}
-                >
-                  <Ionicons
-                    name={showPassword ? "eye-off-outline" : "eye-outline"}
-                    size={20}
-                    color="#64748b"
-                  />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <TouchableOpacity
-              style={styles.btnPrimary}
-              onPress={handleAuth}
-              disabled={loading}
-              activeOpacity={0.8}
-            >
-              {loading ? (
-                <ActivityIndicator color="white" />
-              ) : (
-                <Text style={styles.btnText}>
-                  {isRegistering ? "Εγγραφή" : "Είσοδος"}
-                </Text>
-              )}
-            </TouchableOpacity>
-
-            <View style={styles.toggleContainer}>
-              <Text style={{ color: "#64748b" }}>
-                {isRegistering
-                  ? "Έχετε ήδη λογαριασμό;"
-                  : "Δεν έχετε λογαριασμό;"}
-              </Text>
-              <TouchableOpacity
-                onPress={() => setIsRegistering(!isRegistering)}
-              >
-                <Text style={styles.toggleText}>
-                  {isRegistering ? " Σύνδεση" : " Εγγραφή"}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+              <Text style={styles.googleButtonText}>Σύνδεση με Google</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flexGrow: 1,
-    padding: 24,
+    flex: 1,
+    backgroundColor: "#fff",
   },
-  backBtn: {
-    marginBottom: 20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#f1f5f9",
-    justifyContent: "center", // Κάθετο κεντράρισμα
-    alignItems: "center", // Οριζόντιο κεντράρισμα (Αυτό έλειπε)
+  content: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 32,
   },
-  header: {
-    marginBottom: 32,
+  logo: {
+    width: 180,
+    height: 180,
+    marginBottom: 12,
   },
   title: {
-    fontSize: 28,
+    fontSize: 22,
     fontWeight: "800",
-    color: "#0f172a",
+    color: "#1e3a8a",
+    textAlign: "center",
     marginBottom: 8,
   },
   subtitle: {
-    fontSize: 15,
-    color: "#64748b",
-    lineHeight: 22,
-  },
-  form: {
-    gap: 20,
-  },
-  inputGroup: {
-    gap: 8,
-  },
-  label: {
     fontSize: 14,
-    fontWeight: "600",
-    color: "#334155",
-    marginLeft: 4,
+    color: "#64748b",
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: 48,
+    paddingHorizontal: 16,
   },
-  inputContainer: {
+  googleButton: {
     flexDirection: "row",
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
+    backgroundColor: "#4285F4",
     borderRadius: 12,
-    backgroundColor: "#f8fafc",
-    paddingHorizontal: 12,
-    height: 56,
-  },
-  inputIcon: {
-    marginRight: 10,
-  },
-  input: {
-    flex: 1,
-    fontSize: 16,
-    color: "#0f172a",
-    height: "100%",
-  },
-  eyeIcon: {
-    padding: 8,
-  },
-  btnPrimary: {
-    backgroundColor: "#2563eb",
-    height: 56,
-    borderRadius: 12,
-    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    width: "100%",
     justifyContent: "center",
-    marginTop: 10,
-    shadowColor: "#2563eb",
+    shadowColor: "#4285F4",
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.35,
     shadowRadius: 8,
-    elevation: 4,
+    elevation: 5,
+    gap: 12,
   },
-  btnText: {
-    color: "white",
-    fontWeight: "bold",
-    fontSize: 16,
-    letterSpacing: 0.5,
-  },
-  toggleContainer: {
-    flexDirection: "row",
+  googleIconBox: {
+    width: 28,
+    height: 28,
+    borderRadius: 4,
+    backgroundColor: "#fff",
     justifyContent: "center",
-    marginTop: 10,
+    alignItems: "center",
   },
-  toggleText: {
-    color: "#2563eb",
-    fontWeight: "bold",
-    marginLeft: 5,
+  googleG: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#4285F4",
+  },
+  googleButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
   },
 });

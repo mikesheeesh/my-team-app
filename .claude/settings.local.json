@@ -14,7 +14,19 @@
       "Bash(vercel --prod:*)",
       "Bash(node -e:*)",
       "Bash(npx expo prebuild --clean)",
-      "Bash(npx expo run:android)"
+      "Bash(npx expo run:android)",
+      "Bash(git push:*)",
+      "Bash(python:*)",
+      "Bash(npx eas update:*)",
+      "Bash(npx firebase deploy:*)",
+      "Bash(eas update:*)",
+      "Bash(cmd /c \"dir /B /S C:\\\\Users\\\\Michael\\\\my-team-app\\\\*.md 2>nul\")",
+      "Bash(powershell -Command:*)",
+      "Bash(eas build:*)",
+      "Bash(unzip:*)",
+      "Bash(wc -l app/team/[id].tsx app/project/[id].tsx app/login.tsx app/join.tsx app/dashboard.tsx)",
+      "Bash(node scripts/copy-static.js)",
+      "Bash(npx expo export --platform web)"
     ]
   }
 }

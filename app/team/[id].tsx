@@ -34,6 +34,7 @@ import { revokeEmailAccess } from "../../utils/driveApi";
 import { onAuthStateChanged } from "firebase/auth";
 import {
   arrayRemove,
+  arrayUnion,
   collection,
   deleteDoc,
   deleteField,
@@ -63,7 +64,7 @@ type Group = { id: string; title: string; projects: Project[] };
 
 export default function TeamProjectsScreen() {
   const router = useRouter();
-  const { id } = useLocalSearchParams();
+  const { id, openRequests } = useLocalSearchParams();
   const teamId = id as string;
   const insets = useSafeAreaInsets();
 
@@ -94,6 +95,14 @@ export default function TeamProjectsScreen() {
   };
   // -------------------------------
 
+  // JOIN REQUESTS
+  type JoinRequest = { id: string; userId: string; userName: string; userEmail: string; createdAt: any; };
+  const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
+  const [membersTab, setMembersTab] = useState<"members" | "requests">("members");
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [rolePickerVisible, setRolePickerVisible] = useState(false);
+  const [pendingApproval, setPendingApproval] = useState<JoinRequest | null>(null);
+
   // MODALS
   const [menuVisible, setMenuVisible] = useState(false);
   const [usersModalVisible, setUsersModalVisible] = useState(false);
@@ -116,6 +125,32 @@ export default function TeamProjectsScreen() {
   useEffect(() => {
     groupsRef.current = groups;
   }, [groups]);
+
+  // Listen for join requests for this team
+  useEffect(() => {
+    if (!teamId) return;
+    const q = query(
+      collection(db, "joinRequests"),
+      where("teamId", "==", teamId),
+      where("status", "==", "pending"),
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const list: any[] = [];
+      snap.forEach((d) => {
+        list.push({ id: d.id, ...d.data() });
+      });
+      setJoinRequests(list);
+    });
+    return () => unsub();
+  }, [teamId]);
+
+  // Auto-open members modal on requests tab if bell was tapped
+  useEffect(() => {
+    if (openRequests === "true" && !loading) {
+      setMembersTab("requests");
+      setUsersModalVisible(true);
+    }
+  }, [openRequests, loading]);
 
   // 1. DATA LOADING (TEAM STRUCTURE)
   useEffect(() => {
@@ -468,6 +503,33 @@ export default function TeamProjectsScreen() {
     }
   };
 
+
+  const handleApproveRequest = async (request: any, selectedRole: string) => {
+    setApprovingId(request.id);
+    try {
+      await updateDoc(doc(db, "teams", teamId), {
+        memberIds: arrayUnion(request.userId),
+        [`roles.${request.userId}`]: selectedRole,
+      });
+      await updateDoc(doc(db, "joinRequests", request.id), {
+        status: "approved",
+      });
+    } catch (e) {
+      showAlert("Σφάλμα", "Η έγκριση απέτυχε.");
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
+  const handleRejectRequest = async (requestId: string) => {
+    try {
+      await updateDoc(doc(db, "joinRequests", requestId), {
+        status: "rejected",
+      });
+    } catch (e) {
+      showAlert("Σφάλμα", "Η απόρριψη απέτυχε.");
+    }
+  };
 
   const pickLogo = async () => {
     const isOnline = await checkOnline();
@@ -1073,67 +1135,160 @@ export default function TeamProjectsScreen() {
       >
         <SafeAreaView style={{ flex: 1, backgroundColor: "white" }}>
           <View style={styles.header}>
-            <Text style={styles.headerTitle}>Χρήστες ({users.length})</Text>
+            <Text style={styles.headerTitle}>Μέλη</Text>
             <TouchableOpacity onPress={() => setUsersModalVisible(false)}>
               <Ionicons name="close" size={28} color="#333" />
             </TouchableOpacity>
           </View>
-          <FlatList
-            data={users}
-            keyExtractor={(u) => u.id}
-            contentContainerStyle={{
-              padding: 20,
-              paddingBottom: 50 + insets.bottom,
-            }}
-            renderItem={({ item }) => (
-              <View style={styles.userCard}>
-                <View>
-                  <Text style={{ fontWeight: "bold" }}>{item.name}</Text>
-                  <Text style={{ fontSize: 12, color: "#666" }}>
-                    {item.role}
-                  </Text>
+
+          {/* TAB SWITCHER */}
+          {(myRole === "Founder" || myRole === "Admin") && (
+            <View style={styles.tabSwitcher}>
+              <TouchableOpacity
+                style={[styles.tabBtn, membersTab === "members" && styles.tabBtnActive]}
+                onPress={() => setMembersTab("members")}
+              >
+                <Ionicons name="people" size={16} color={membersTab === "members" ? "#2563eb" : "#64748b"} />
+                <Text style={[styles.tabBtnText, membersTab === "members" && styles.tabBtnTextActive]}>
+                  Μέλη ({users.length})
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.tabBtn, membersTab === "requests" && styles.tabBtnActive]}
+                onPress={() => setMembersTab("requests")}
+              >
+                <Ionicons name="clipboard" size={16} color={membersTab === "requests" ? "#2563eb" : "#64748b"} />
+                <Text style={[styles.tabBtnText, membersTab === "requests" && styles.tabBtnTextActive]}>
+                  Αιτήματα {joinRequests.length > 0 ? `(${joinRequests.length})` : ""}
+                </Text>
+                {joinRequests.length > 0 && (
+                  <View style={styles.tabBadge}>
+                    <Text style={styles.tabBadgeText}>{joinRequests.length}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* MEMBERS TAB */}
+          {membersTab === "members" && (
+            <FlatList
+              data={users}
+              keyExtractor={(u) => u.id}
+              contentContainerStyle={{ padding: 20, paddingBottom: 50 + insets.bottom }}
+              renderItem={({ item }) => (
+                <View style={styles.userCard}>
+                  <View>
+                    <Text style={{ fontWeight: "bold" }}>{item.name}</Text>
+                    <Text style={{ fontSize: 12, color: "#666" }}>{item.role}</Text>
+                  </View>
+                  {item.id !== currentUserId &&
+                    item.role !== "Founder" &&
+                    (myRole === "Admin" ||
+                      myRole === "Founder" ||
+                      (myRole === "Supervisor" && item.role === "User")) && (
+                      <View style={{ flexDirection: "row", gap: 10 }}>
+                        {(myRole === "Founder" || myRole === "Admin") && item.role !== "Admin" && (
+                          <TouchableOpacity onPress={() => changeUserRole(item, "promote")}>
+                            <Ionicons name="arrow-up-circle" size={28} color="#22c55e" />
+                          </TouchableOpacity>
+                        )}
+                        {(myRole === "Founder" || myRole === "Admin") && item.role !== "User" && (
+                          <TouchableOpacity onPress={() => changeUserRole(item, "demote")}>
+                            <Ionicons name="arrow-down-circle" size={28} color="#f59e0b" />
+                          </TouchableOpacity>
+                        )}
+                        <TouchableOpacity onPress={() => changeUserRole(item, "kick")}>
+                          <Ionicons name="trash" size={28} color="#ef4444" />
+                        </TouchableOpacity>
+                      </View>
+                    )}
                 </View>
-                {item.id !== currentUserId &&
-                  item.role !== "Founder" &&
-                  (myRole === "Admin" ||
-                    myRole === "Founder" ||
-                    (myRole === "Supervisor" && item.role === "User")) && (
-                    <View style={{ flexDirection: "row", gap: 10 }}>
-                      {(myRole === "Founder" || myRole === "Admin") &&
-                        item.role !== "Admin" && (
-                          <TouchableOpacity
-                            onPress={() => changeUserRole(item, "promote")}
-                          >
-                            <Ionicons
-                              name="arrow-up-circle"
-                              size={28}
-                              color="#22c55e"
-                            />
-                          </TouchableOpacity>
-                        )}
-                      {(myRole === "Founder" || myRole === "Admin") &&
-                        item.role !== "User" && (
-                          <TouchableOpacity
-                            onPress={() => changeUserRole(item, "demote")}
-                          >
-                            <Ionicons
-                              name="arrow-down-circle"
-                              size={28}
-                              color="#f59e0b"
-                            />
-                          </TouchableOpacity>
-                        )}
-                      <TouchableOpacity
-                        onPress={() => changeUserRole(item, "kick")}
-                      >
-                        <Ionicons name="trash" size={28} color="#ef4444" />
-                      </TouchableOpacity>
-                    </View>
-                  )}
-              </View>
-            )}
-          />
+              )}
+            />
+          )}
+
+          {/* REQUESTS TAB */}
+          {membersTab === "requests" && (
+            <FlatList
+              data={joinRequests}
+              keyExtractor={(r) => r.id}
+              contentContainerStyle={{ padding: 20, paddingBottom: 50 + insets.bottom }}
+              ListEmptyComponent={
+                <View style={{ alignItems: "center", marginTop: 40 }}>
+                  <Ionicons name="clipboard-outline" size={48} color="#cbd5e1" />
+                  <Text style={{ color: "#94a3b8", marginTop: 10 }}>Δεν υπάρχουν εκκρεμή αιτήματα.</Text>
+                </View>
+              }
+              renderItem={({ item: req }) => (
+                <View style={styles.requestCard}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontWeight: "700", fontSize: 15, color: "#1e293b" }}>{req.userName || "Χρήστης"}</Text>
+                    <Text style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{req.userEmail}</Text>
+                    {req.createdAt?.toDate && (
+                      <Text style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
+                        {req.createdAt.toDate().toLocaleDateString("el-GR")}
+                      </Text>
+                    )}
+                  </View>
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    <TouchableOpacity
+                      style={styles.approveBtn}
+                      disabled={approvingId === req.id}
+                      onPress={() => {
+                        setPendingApproval(req);
+                        setRolePickerVisible(true);
+                      }}
+                    >
+                      {approvingId === req.id ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Ionicons name="checkmark" size={18} color="#fff" />
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.rejectBtn}
+                      onPress={() => handleRejectRequest(req.id)}
+                    >
+                      <Ionicons name="close" size={18} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+            />
+          )}
         </SafeAreaView>
+      </Modal>
+
+      {/* ROLE PICKER MODAL for approving join requests */}
+      <Modal visible={rolePickerVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { paddingBottom: insets.bottom + 20 }]}>
+            <Text style={styles.modalHeader}>Επιλέξτε Ρόλο</Text>
+            <Text style={{ color: "#64748b", marginBottom: 20, fontSize: 14 }}>
+              Για: {pendingApproval?.userName}
+            </Text>
+            {["User", "Supervisor", "Admin"].map((role) => (
+              <TouchableOpacity
+                key={role}
+                style={styles.rolePickerBtn}
+                onPress={() => {
+                  setRolePickerVisible(false);
+                  if (pendingApproval) handleApproveRequest(pendingApproval, role);
+                  setPendingApproval(null);
+                }}
+              >
+                <Text style={styles.rolePickerBtnText}>{role}</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={styles.closeMenuBtn}
+              onPress={() => { setRolePickerVisible(false); setPendingApproval(null); }}
+            >
+              <Text style={{ color: "#64748b" }}>Άκυρο</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
 
 
@@ -1311,4 +1466,83 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#eee",
   },
+
+  // TAB SWITCHER
+  tabSwitcher: {
+    flexDirection: "row",
+    backgroundColor: "#f1f5f9",
+    margin: 16,
+    borderRadius: 12,
+    padding: 4,
+  },
+  tabBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    borderRadius: 10,
+    gap: 6,
+  },
+  tabBtnActive: {
+    backgroundColor: "#fff",
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  tabBtnText: { fontSize: 13, fontWeight: "600", color: "#64748b" },
+  tabBtnTextActive: { color: "#2563eb" },
+  tabBadge: {
+    backgroundColor: "#ef4444",
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 4,
+  },
+  tabBadgeText: { color: "#fff", fontSize: 9, fontWeight: "800" },
+
+  // REQUEST CARD
+  requestCard: {
+    backgroundColor: "#f9fafb",
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  approveBtn: {
+    backgroundColor: "#16a34a",
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  rejectBtn: {
+    backgroundColor: "#ef4444",
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  // ROLE PICKER
+  rolePickerBtn: {
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: "#eff6ff",
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+    marginBottom: 10,
+    alignItems: "center",
+  },
+  rolePickerBtnText: { fontSize: 16, fontWeight: "700", color: "#1d4ed8" },
 });

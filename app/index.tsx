@@ -1,10 +1,8 @@
-import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import * as Updates from "expo-updates";
 import { onAuthStateChanged } from "firebase/auth";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -13,80 +11,49 @@ import {
   StatusBar,
   StyleSheet,
   Text,
-  TouchableOpacity,
-  View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { auth } from "../firebaseConfig";
+import { auth, db } from "../firebaseConfig";
 
-// Key for storing pending invite code
-const PENDING_INVITE_KEY = "@pending_invite_code";
-
-// Κρατάμε το Splash Screen μέχρι να φορτώσουμε
+// Keep splash screen until we're ready
 SplashScreen.preventAutoHideAsync();
 
 export default function LandingScreen() {
   const router = useRouter();
   const [showLoading, setShowLoading] = useState(true);
-  const [appIsReady, setAppIsReady] = useState(false);
-  const hasHandledDeepLink = useRef(false);
   const pendingNavRef = useRef<(() => void) | null>(null);
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
-  // 1. DEEP LINK CHECK - Αποθηκεύουμε τον κωδικό, δεν κάνουμε redirect αν δεν είναι logged in
-  const url = Linking.useURL();
-
-  useEffect(() => {
-    const handleDeepLink = async () => {
-      if (url && !hasHandledDeepLink.current) {
-        const regex = /[?&](inviteCode|code)=([^&#]+)/;
-        const match = url.match(regex);
-        if (match && match[2]) {
-          const inviteCode = match[2].toUpperCase();
-
-          // Ελέγχουμε αν ο χρήστης είναι συνδεδεμένος
-          const user = auth.currentUser;
-          if (user) {
-            // Αν είναι συνδεδεμένος, πάμε κατευθείαν στο join
-            hasHandledDeepLink.current = true;
-            router.push(`/join?inviteCode=${inviteCode}`);
-          } else {
-            // Αν δεν είναι συνδεδεμένος, αποθηκεύουμε τον κωδικό για μετά
-            hasHandledDeepLink.current = true;
-            await AsyncStorage.setItem(PENDING_INVITE_KEY, inviteCode);
-            console.log("📝 Saved pending invite code from deep link:", inviteCode);
-            // Δεν κάνουμε redirect - ο χρήστης θα συνδεθεί πρώτα
-          }
-        }
-      }
-    };
-    handleDeepLink();
-  }, [url]);
-
-  // 2. AUTH CHECK - αποθηκεύουμε navigation για μετά το loading
+  // 1. AUTH CHECK — decide where to navigate
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        const pendingCode = await AsyncStorage.getItem(PENDING_INVITE_KEY);
-        if (pendingCode) {
-          await AsyncStorage.removeItem(PENDING_INVITE_KEY);
-          pendingNavRef.current = () => router.replace(`/join?inviteCode=${pendingCode}`);
-        } else {
+        try {
+          const teamsSnap = await getDocs(
+            query(
+              collection(db, "teams"),
+              where("memberIds", "array-contains", user.uid),
+            ),
+          );
+          if (teamsSnap.empty) {
+            pendingNavRef.current = () => router.replace("/join-request");
+          } else {
+            pendingNavRef.current = () => router.replace("/dashboard");
+          }
+        } catch (e) {
+          // Offline fallback — go to dashboard, it will handle auth
           pendingNavRef.current = () => router.replace("/dashboard");
         }
       } else {
-        // Δεν είναι logged in - θα δείξουμε landing μετά το loading
-        pendingNavRef.current = null;
+        pendingNavRef.current = () => router.replace("/login");
       }
 
-      // Κρύβουμε το native splash αμέσως, δείχνουμε custom loading
       await SplashScreen.hideAsync();
     });
 
     return () => unsubscribe();
   }, []);
 
-  // 3. OTA UPDATE CHECK - Ελέγχει για νέα version κατά το launch
+  // 2. OTA UPDATE CHECK
   useEffect(() => {
     if (Platform.OS === "web") return;
     const checkForUpdate = async () => {
@@ -103,7 +70,7 @@ export default function LandingScreen() {
     checkForUpdate();
   }, []);
 
-  // 4. LOADING SCREEN TIMER - 2 δευτερόλεπτα, μετά fade out και navigate
+  // 3. LOADING SCREEN — 2s then fade and navigate
   useEffect(() => {
     const timer = setTimeout(() => {
       Animated.timing(fadeAnim, {
@@ -114,8 +81,6 @@ export default function LandingScreen() {
         setShowLoading(false);
         if (pendingNavRef.current) {
           pendingNavRef.current();
-        } else {
-          setAppIsReady(true);
         }
       });
     }, 2000);
@@ -123,58 +88,16 @@ export default function LandingScreen() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Loading screen
-  if (showLoading) {
-    return (
-      <Animated.View style={[styles.loadingContainer, { opacity: fadeAnim }]}>
-        <StatusBar barStyle="dark-content" backgroundColor="#f8fafc" />
-        <Image
-          source={require("../assets/logo2.png")}
-          style={styles.loadingLogo}
-          resizeMode="contain"
-        />
-        <Text style={styles.loadingVersion}>v2.3.0</Text>
-      </Animated.View>
-    );
-  }
-
-  if (!appIsReady) {
-    return null;
-  }
-
   return (
-    <SafeAreaView style={styles.container}>
+    <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
       <StatusBar barStyle="dark-content" backgroundColor="#f8fafc" />
-
-      <View style={styles.content}>
-        {/* LOGO IMAGE */}
-        <View style={styles.logoContainer}>
-          <Image
-            source={require("../assets/logo2.png")}
-            style={styles.customLogo}
-            resizeMode="contain"
-          />
-        </View>
-
-        {/* BUTTON */}
-        <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={() => router.push("/login")}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.buttonText}>Σύνδεση / Εγγραφή</Text>
-          <Ionicons
-            name="arrow-forward"
-            size={20}
-            color="white"
-            style={{ marginLeft: 10 }}
-          />
-        </TouchableOpacity>
-      </View>
-
-      {/* VERSION FOOTER */}
+      <Image
+        source={require("../assets/logo2.png")}
+        style={styles.logo}
+        resizeMode="contain"
+      />
       <Text style={styles.version}>v2.3.0</Text>
-    </SafeAreaView>
+    </Animated.View>
   );
 }
 
@@ -182,83 +105,14 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#f8fafc",
-  },
-  content: {
-    flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 30,
   },
-
-  // Logo Styles
-  logoContainer: {
-    marginBottom: 20,
-    alignItems: "center",
-    // Αφαιρέσαμε τα shadows του container για να μην φαίνονται άσχημα γύρω από διαφανές PNG
-  },
-  customLogo: {
+  logo: {
     width: 250,
     height: 250,
   },
-
-  // Text Styles
-  textContainer: {
-    alignItems: "center",
-    marginBottom: 60,
-  },
-  titleMain: {
-    fontSize: 36,
-    fontWeight: "900",
-    color: "#0f172a",
-    letterSpacing: 2,
-  },
-  titleSub: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#64748b",
-    letterSpacing: 3,
-    marginTop: 5,
-  },
-
-  // Button Styles
-  primaryButton: {
-    width: "100%",
-    height: 56,
-    backgroundColor: "#2563eb",
-    borderRadius: 16,
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#2563eb",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  buttonText: {
-    color: "white",
-    fontSize: 16,
-    fontWeight: "bold",
-    letterSpacing: 0.5,
-  },
-
   version: {
-    textAlign: "center",
-    color: "#0f172a",
-    fontSize: 12,
-    marginBottom: 20,
-  },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: "#f8fafc",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  loadingLogo: {
-    width: 250,
-    height: 250,
-  },
-  loadingVersion: {
     position: "absolute",
     bottom: 60,
     color: "#0f172a",

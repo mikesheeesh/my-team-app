@@ -19,6 +19,45 @@ import { onAuthStateChanged } from "firebase/auth";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { auth, db } from "../../firebaseConfig";
 
+// Bell notification for pending join requests (Founder/Admin only)
+function usePendingRequests() {
+  const [count, setCount] = useState(0);
+  const [firstTeamId, setFirstTeamId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    let unsubRequests: (() => void) | null = null;
+
+    const unsubTeams = onSnapshot(
+      query(collection(db, "teams"), where("memberIds", "array-contains", user.uid)),
+      (teamsSnap) => {
+        const adminTeamIds: string[] = [];
+        teamsSnap.forEach((d) => {
+          const role = d.data().roles?.[user.uid];
+          if (role === "Founder" || role === "Admin") adminTeamIds.push(d.id);
+        });
+        if (unsubRequests) unsubRequests();
+        if (adminTeamIds.length === 0) { setCount(0); setFirstTeamId(null); return; }
+        setFirstTeamId(adminTeamIds[0]);
+        unsubRequests = onSnapshot(
+          query(
+            collection(db, "joinRequests"),
+            where("teamId", "in", adminTeamIds.slice(0, 30)),
+            where("status", "==", "pending"),
+          ),
+          (snap) => setCount(snap.size),
+        );
+      },
+    );
+
+    return () => { unsubTeams(); if (unsubRequests) unsubRequests(); };
+  }, []);
+
+  return { count, firstTeamId };
+}
+
 // CONTEXT
 import { showAlert } from "../context/AlertContext";
 import { useSync } from "../context/SyncContext";
@@ -132,6 +171,7 @@ export default function MyTeamsScreen() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
+  const { count: pendingRequests, firstTeamId: bellTeamId } = usePendingRequests();
 
   // --- NAVIGATION LOCK (500ms) ---
   const [isNavigating, setIsNavigating] = useState(false);
@@ -273,12 +313,30 @@ export default function MyTeamsScreen() {
           <Text style={styles.welcomeText}>Λίστα Ομάδων</Text>
           <Text style={styles.userName}>{contextUser?.fullname || "Χρήστης"}</Text>
         </View>
-        <TouchableOpacity
-          onPress={() => router.push("/profile")}
-          style={styles.profileButton}
-        >
-          <Ionicons name="person-circle-outline" size={40} color="#2563eb" />
-        </TouchableOpacity>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          {/* BELL */}
+          <TouchableOpacity
+            style={styles.bellButton}
+            onPress={() => {
+              if (bellTeamId) router.push(`/team/${bellTeamId}?openRequests=true`);
+            }}
+          >
+            <Ionicons name="notifications-outline" size={24} color="#374151" />
+            {pendingRequests > 0 && (
+              <View style={styles.bellBadge}>
+                <Text style={styles.bellBadgeText}>
+                  {pendingRequests > 9 ? "9+" : pendingRequests}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => router.push("/profile")}
+            style={styles.profileButton}
+          >
+            <Ionicons name="person-circle-outline" size={40} color="#2563eb" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <TouchableOpacity
@@ -403,6 +461,31 @@ const styles = StyleSheet.create({
   },
   userName: { fontSize: 24, fontWeight: "800", color: "#0f172a" },
   profileButton: { padding: 2 },
+  bellButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#f1f5f9",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  bellBadge: {
+    position: "absolute",
+    top: -2,
+    right: -2,
+    backgroundColor: "#ef4444",
+    borderRadius: 8,
+    minWidth: 15,
+    height: 15,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 3,
+  },
+  bellBadgeText: {
+    color: "#fff",
+    fontSize: 8,
+    fontWeight: "800",
+  },
 
   syncCard: {
     padding: 16,
