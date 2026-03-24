@@ -162,13 +162,13 @@ service cloud.firestore {
         isAdminOrAbove(resource.data.teamId)
       );
 
-      // Only Admins/Founders can update status (approve/reject)
+      // Only Admins/Founders can update status (reject) or delete (approve)
       allow update: if isAuth() &&
         isAdminOrAbove(resource.data.teamId) &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
         request.resource.data.status in ['approved', 'rejected'];
 
-      allow delete: if false;
+      allow delete: if isAuth() && isAdminOrAbove(resource.data.teamId);
     }
 
     // ── Deny everything else ────────────────────────────────────────────────

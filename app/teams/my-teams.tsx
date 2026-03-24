@@ -18,7 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // FIREBASE
 import { onAuthStateChanged } from "firebase/auth";
-import { arrayUnion, collection, doc, onSnapshot, query, updateDoc, where } from "firebase/firestore";
+import { arrayUnion, collection, deleteDoc, doc, onSnapshot, query, updateDoc, where } from "firebase/firestore";
 import { auth, db } from "../../firebaseConfig";
 
 // Bell notification for pending join requests (Founder/Admin only)
@@ -311,7 +311,7 @@ export default function MyTeamsScreen() {
         memberIds: arrayUnion(req.userId),
         [`roles.${req.userId}`]: role,
       });
-      await updateDoc(doc(db, "joinRequests", req.id), { status: "approved" });
+      await deleteDoc(doc(db, "joinRequests", req.id));
     } catch (e) {
       showAlert("Σφάλμα", "Η έγκριση απέτυχε.");
     } finally {
