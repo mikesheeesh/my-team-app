@@ -193,7 +193,7 @@ export default function DashboardScreen() {
         </TouchableOpacity>
 
         {/* VERSION */}
-        <Text style={styles.versionText}>v2.3.0</Text>
+        <Text style={styles.versionText}>v2.5.0</Text>
       </ScrollView>
     </SafeAreaView>
   );

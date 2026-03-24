@@ -96,7 +96,7 @@ export default function LandingScreen() {
         style={styles.logo}
         resizeMode="contain"
       />
-      <Text style={styles.version}>v2.3.0</Text>
+      <Text style={styles.version}>v2.5.0</Text>
     </Animated.View>
   );
 }
