@@ -127,6 +127,7 @@ export default function LoginScreen() {
           )}
         </TouchableOpacity>
       </View>
+      <Text style={styles.version}>v2.5.0</Text>
     </SafeAreaView>
   );
 }
@@ -195,5 +196,12 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 16,
     fontWeight: "700",
+  },
+  version: {
+    position: "absolute",
+    bottom: 24,
+    alignSelf: "center",
+    fontSize: 12,
+    color: "#94a3b8",
   },
 });
