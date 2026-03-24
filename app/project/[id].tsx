@@ -11,10 +11,10 @@ import * as Print from "expo-print";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
 
+import { showAlert } from "../context/AlertContext";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   KeyboardAvoidingView,
   Linking,
@@ -714,7 +714,7 @@ export default function ProjectDetailsScreen() {
 
   const handleSaveTask = async () => {
     if (!newTaskTitle.trim())
-      return Alert.alert("Προσοχή", "Τίτλος υποχρεωτικός");
+      return showAlert("Προσοχή", "Τίτλος υποχρεωτικός");
 
     let taskToSave: Task;
     const baseTask = {
@@ -794,7 +794,7 @@ export default function ProjectDetailsScreen() {
   };
 
   const handleDeleteCompletely = (task: Task) => {
-    Alert.alert("Διαγραφή", "Σίγουρα;", [
+    showAlert("Διαγραφή", "Σίγουρα;", [
       { text: "Όχι", style: "cancel" },
       {
         text: "Διαγραφή",
@@ -888,7 +888,7 @@ export default function ProjectDetailsScreen() {
             console.log("  - Will upload to Storage when online via SyncContext");
           } catch (e: any) {
             console.error("❌ Video compression/save error:", e);
-            Alert.alert("Σφάλμα", e.message || "Απέτυχε η συμπίεση του βίντεο.");
+            showAlert("Σφάλμα", e.message || "Απέτυχε η συμπίεση του βίντεο.");
           } finally {
             setProcessing(false);
           }
@@ -911,7 +911,7 @@ export default function ProjectDetailsScreen() {
         }
       }
     } catch (e) {
-      Alert.alert("Error", "Camera failed");
+      showAlert("Error", "Camera failed");
       setProcessing(false);
     }
   };
@@ -945,7 +945,7 @@ export default function ProjectDetailsScreen() {
             const finalVideoUri = await embedVideoGps(compressedUri, gpsLoc);
             await addMediaToTask(task.id, finalVideoUri, gpsLoc);
           } catch (e: any) {
-            Alert.alert("Σφάλμα", e.message || "Απέτυχε η συμπίεση του βίντεο.");
+            showAlert("Σφάλμα", e.message || "Απέτυχε η συμπίεση του βίντεο.");
           } finally {
             setProcessing(false);
           }
@@ -967,7 +967,7 @@ export default function ProjectDetailsScreen() {
         }
       }
     } catch (e) {
-      Alert.alert("Σφάλμα", "Αποτυχία πρόσβασης στη συλλογή");
+      showAlert("Σφάλμα", "Αποτυχία πρόσβασης στη συλλογή");
       setProcessing(false);
     }
   };
@@ -1043,7 +1043,7 @@ export default function ProjectDetailsScreen() {
     } catch (e: any) {
       console.error("❌ Image save error:", e);
       console.error("  - Error message:", e.message);
-      Alert.alert(
+      showAlert(
         "Σφάλμα",
         e.message || "Απέτυχε η αποθήκευση της επεξεργασμένης εικόνας."
       );
@@ -1262,7 +1262,7 @@ export default function ProjectDetailsScreen() {
     if (!currentTaskId) return;
     const t = combinedTasks.find((x) => x.id === currentTaskId);
     if (!t || (t.type !== "measurement" && t.type !== "general")) return;
-    Alert.alert("Διαγραφή τιμής", "Είσαι σίγουρος ότι θέλεις να διαγράψεις την τιμή;", [
+    showAlert("Διαγραφή τιμής", "Είσαι σίγουρος ότι θέλεις να διαγράψεις την τιμή;", [
       { text: "Άκυρο", style: "cancel" },
       {
         text: "Διαγραφή",
@@ -1279,7 +1279,7 @@ export default function ProjectDetailsScreen() {
   };
   const confirmDeleteMedia = () => {
     if (!selectedMediaForView) return;
-    Alert.alert("Διαγραφή", "Διαγραφή αρχείου;", [
+    showAlert("Διαγραφή", "Διαγραφή αρχείου;", [
       { text: "Άκυρο", style: "cancel" },
       {
         text: "Διαγραφή",
@@ -1301,7 +1301,7 @@ export default function ProjectDetailsScreen() {
           const url = `https://www.google.com/maps/search/?api=1&query=${loc.lat},${loc.lng}`;
           Linking.openURL(url);
         } else {
-          Alert.alert(
+          showAlert(
             "Πληροφορία",
             "Δεν έχει καταγραφεί τοποθεσία για αυτό το αρχείο.",
           );
@@ -1315,14 +1315,14 @@ export default function ProjectDetailsScreen() {
           const url = `https://www.google.com/maps/search/?api=1&query=${loc.lat},${loc.lng}`;
           Linking.openURL(url);
         } else {
-          Alert.alert(
+          showAlert(
             "Πληροφορία",
             "Δεν έχει καταγραφεί τοποθεσία για αυτό το βίντεο.",
           );
         }
       }
     } else {
-      Alert.alert(
+      showAlert(
         "Πληροφορία",
         "Η τοποθεσία είναι διαθέσιμη μόνο για φωτογραφίες και βίντεο.",
       );
@@ -1331,12 +1331,12 @@ export default function ProjectDetailsScreen() {
 
   const handleShare = async (uri: string) => {
     if (!(await Sharing.isAvailableAsync())) {
-      Alert.alert("Σφάλμα", "Η κοινοποίηση δεν είναι διαθέσιμη σε αυτή τη συσκευή.");
+      showAlert("Σφάλμα", "Η κοινοποίηση δεν είναι διαθέσιμη σε αυτή τη συσκευή.");
       return;
     }
 
     if (!uri) {
-      Alert.alert("Σφάλμα", "Δεν υπάρχει αρχείο για κοινοποίηση.");
+      showAlert("Σφάλμα", "Δεν υπάρχει αρχείο για κοινοποίηση.");
       return;
     }
 
@@ -1366,7 +1366,7 @@ export default function ProjectDetailsScreen() {
           });
         } else {
           console.error("📤 Download failed:", downloadResult.status);
-          Alert.alert("Σφάλμα", "Αποτυχία λήψης αρχείου για κοινοποίηση.");
+          showAlert("Σφάλμα", "Αποτυχία λήψης αρχείου για κοινοποίηση.");
         }
         return;
       }
@@ -1378,7 +1378,7 @@ export default function ProjectDetailsScreen() {
         const ext = isVideo ? ".mp4" : ".jpg";
         const base64Data = uri.split("base64,")[1];
         if (!base64Data) {
-          Alert.alert("Σφάλμα", "Μη έγκυρα δεδομένα εικόνας.");
+          showAlert("Σφάλμα", "Μη έγκυρα δεδομένα εικόνας.");
           return;
         }
         const filename = FileSystem.cacheDirectory + `temp_share${ext}`;
@@ -1391,15 +1391,15 @@ export default function ProjectDetailsScreen() {
 
       // Fallback - unknown format
       console.warn("📤 Unknown URI format:", uri.substring(0, 50));
-      Alert.alert("Σφάλμα", "Μη υποστηριζόμενη μορφή αρχείου.");
+      showAlert("Σφάλμα", "Μη υποστηριζόμενη μορφή αρχείου.");
     } catch (error) {
       console.error("Share error:", error);
-      Alert.alert("Σφάλμα", "Δεν ήταν δυνατή η κοινοποίηση.");
+      showAlert("Σφάλμα", "Δεν ήταν δυνατή η κοινοποίηση.");
     }
   };
   const handleSyncPress = async () => {
     const net = await Network.getNetworkStateAsync();
-    if (!net.isConnected) return Alert.alert("No Internet");
+    if (!net.isConnected) return showAlert("No Internet");
     syncNow();
   };
 
@@ -1876,7 +1876,7 @@ export default function ProjectDetailsScreen() {
       const { uri } = await Print.printToFileAsync({ html });
       await Sharing.shareAsync(uri);
     } catch (e) {
-      Alert.alert("PDF Error", "Δεν ήταν δυνατή η δημιουργία του PDF.");
+      showAlert("PDF Error", "Δεν ήταν δυνατή η δημιουργία του PDF.");
     } finally {
       setProcessing(false);
     }
@@ -2019,7 +2019,7 @@ export default function ProjectDetailsScreen() {
       )}
 
       {/* FAB - Φαίνεται μόνο αν το υποέργο είναι ανοιχτό */}
-      {Platform.OS !== "web" && !isClosed && (
+      {!isClosed && (
         <TouchableOpacity
           style={[styles.fab, { bottom: 20 + insets.bottom }]}
           onPress={openCreateModal}

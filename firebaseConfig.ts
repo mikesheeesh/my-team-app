@@ -8,7 +8,12 @@ import {
   getReactNativePersistence,
   initializeAuth,
 } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { Platform } from "react-native";
 
@@ -38,7 +43,14 @@ if (Platform.OS === "web") {
   });
 }
 
-const db = getFirestore(app);
+const db =
+  Platform.OS === "web"
+    ? initializeFirestore(app, {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager(),
+        }),
+      })
+    : getFirestore(app);
 const storage = getStorage(app);
 
 export { auth, db, storage };

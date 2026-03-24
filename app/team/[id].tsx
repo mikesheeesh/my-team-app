@@ -6,7 +6,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Image,
   Linking,
@@ -22,6 +21,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import InputModal from "../components/InputModal";
+import { showAlert } from "../context/AlertContext";
 import { useDriveSync } from "../context/DriveSyncContext";
 import {
   connectGoogleDrive,
@@ -240,7 +240,7 @@ export default function TeamProjectsScreen() {
   const checkOnline = async () => {
     const net = await Network.getNetworkStateAsync();
     if (!net.isConnected || !net.isInternetReachable) {
-      Alert.alert("Offline", "Δεν έχετε ίντερνετ.");
+      showAlert("Offline", "Δεν έχετε ίντερνετ.");
       return false;
     }
     return true;
@@ -252,7 +252,7 @@ export default function TeamProjectsScreen() {
     try {
       await updateDoc(doc(db, "teams", teamId), { [field]: value });
     } catch (err: any) {
-      Alert.alert("Σφάλμα", err.message);
+      showAlert("Σφάλμα", err.message);
     }
   };
 
@@ -289,7 +289,7 @@ export default function TeamProjectsScreen() {
       setMenuVisible(false);
       setSettingsSubMenuVisible(false);
     } catch (error: any) {
-      Alert.alert("Σφάλμα", error.message);
+      showAlert("Σφάλμα", error.message);
     }
   };
 
@@ -301,15 +301,15 @@ export default function TeamProjectsScreen() {
     if (!isOnline) return;
 
     if (myRole === "Supervisor" && targetUser.role !== "User")
-      return Alert.alert(
+      return showAlert(
         "Απαγορεύεται",
         "Μπορείτε να διαχειριστείτε μόνο απλούς χρήστες.",
       );
     if (targetUser.role === "Founder")
-      return Alert.alert("Απαγορεύεται", "Δεν πειράζουμε τον Ιδρυτή.");
+      return showAlert("Απαγορεύεται", "Δεν πειράζουμε τον Ιδρυτή.");
 
     if (action === "kick") {
-      Alert.alert("Διαγραφή Μέλους", `Αφαίρεση "${targetUser.name}";`, [
+      showAlert("Διαγραφή Μέλους", `Αφαίρεση "${targetUser.name}";`, [
         { text: "Άκυρο", style: "cancel" },
         {
           text: "Διαγραφή",
@@ -368,7 +368,7 @@ export default function TeamProjectsScreen() {
               }
             } catch (e) {
               console.log("Error removing user from projects:", e);
-              Alert.alert(
+              showAlert(
                 "Σφάλμα",
                 "Ο χρήστης διαγράφηκε από την ομάδα, αλλά ίσως έμεινε σε κάποια projects.",
               );
@@ -464,7 +464,7 @@ export default function TeamProjectsScreen() {
       }
     } catch (error) {
       console.error("Role update failed:", error);
-      Alert.alert("Σφάλμα", "Η αλλαγή ρόλου απέτυχε.");
+      showAlert("Σφάλμα", "Η αλλαγή ρόλου απέτυχε.");
     }
   };
 
@@ -490,7 +490,7 @@ export default function TeamProjectsScreen() {
   const handleDeleteLogo = async () => {
     const isOnline = await checkOnline();
     if (!isOnline) return;
-    Alert.alert("Διαγραφή Logo", "Διαγραφή;", [
+    showAlert("Διαγραφή Logo", "Διαγραφή;", [
       { text: "Όχι" },
       {
         text: "Ναι",
@@ -504,7 +504,7 @@ export default function TeamProjectsScreen() {
   };
 
   const handleDeleteTeam = () => {
-    Alert.alert("Διαγραφή Ομάδας", "ΠΡΟΣΟΧΗ: Θα διαγραφούν τα πάντα.", [
+    showAlert("Διαγραφή Ομάδας", "ΠΡΟΣΟΧΗ: Θα διαγραφούν τα πάντα.", [
       { text: "Ακύρωση" },
       {
         text: "ΔΙΑΓΡΑΦΗ",
@@ -542,8 +542,8 @@ export default function TeamProjectsScreen() {
     const isOnline = await checkOnline();
     if (!isOnline) return;
     if (projectCount > 0)
-      return Alert.alert("Αδύνατη Διαγραφή", "Το Project δεν είναι άδειο.");
-    Alert.alert("Διαγραφή Project", "Είστε σίγουροι;", [
+      return showAlert("Αδύνατη Διαγραφή", "Το Project δεν είναι άδειο.");
+    showAlert("Διαγραφή Project", "Είστε σίγουροι;", [
       { text: "Όχι" },
       {
         text: "Ναι",
@@ -800,7 +800,7 @@ export default function TeamProjectsScreen() {
                   onPress={async () => {
                     const net = await Network.getNetworkStateAsync();
                     if (!net.isConnected) {
-                      Alert.alert("Offline", "Δεν υπάρχει σύνδεση στο διαδίκτυο.");
+                      showAlert("Offline", "Δεν υπάρχει σύνδεση στο διαδίκτυο.");
                       return;
                     }
                     setMenuVisible(false);
@@ -928,7 +928,7 @@ export default function TeamProjectsScreen() {
                       onPress={async () => {
                         const net = await Network.getNetworkStateAsync();
                         if (!net.isConnected) {
-                          Alert.alert("Offline", "Δεν υπάρχει σύνδεση στο διαδίκτυο.");
+                          showAlert("Offline", "Δεν υπάρχει σύνδεση στο διαδίκτυο.");
                           return;
                         }
                         triggerDriveSync(teamId);
@@ -946,24 +946,24 @@ export default function TeamProjectsScreen() {
                       onPress={async () => {
                         const net = await Network.getNetworkStateAsync();
                         if (!net.isConnected) {
-                          Alert.alert("Offline", "Δεν υπάρχει σύνδεση στο διαδίκτυο.");
+                          showAlert("Offline", "Δεν υπάρχει σύνδεση στο διαδίκτυο.");
                           return;
                         }
                         try {
                           const syncDoc = await getDoc(doc(db, "driveSyncState", teamId));
                           const folderIds = syncDoc.data()?.folderIds;
                           if (!folderIds) {
-                            Alert.alert("Σφάλμα", "Δεν έχει γίνει ακόμα συγχρονισμός. Κάντε πρώτα συγχρονισμό.");
+                            showAlert("Σφάλμα", "Δεν έχει γίνει ακόμα συγχρονισμός. Κάντε πρώτα συγχρονισμό.");
                             return;
                           }
                           const folderId = folderIds[teamName] || folderIds["root"];
                           if (!folderId) {
-                            Alert.alert("Σφάλμα", "Δεν βρέθηκε φάκελος Drive. Κάντε πρώτα συγχρονισμό.");
+                            showAlert("Σφάλμα", "Δεν βρέθηκε φάκελος Drive. Κάντε πρώτα συγχρονισμό.");
                             return;
                           }
                           await Linking.openURL(`https://drive.google.com/drive/folders/${folderId}`);
                         } catch {
-                          Alert.alert("Σφάλμα", "Αποτυχία ανοίγματος Google Drive.");
+                          showAlert("Σφάλμα", "Αποτυχία ανοίγματος Google Drive.");
                         }
                       }}
                     >
@@ -978,10 +978,10 @@ export default function TeamProjectsScreen() {
                       onPress={async () => {
                         const net = await Network.getNetworkStateAsync();
                         if (!net.isConnected) {
-                          Alert.alert("Offline", "Δεν υπάρχει σύνδεση στο διαδίκτυο.");
+                          showAlert("Offline", "Δεν υπάρχει σύνδεση στο διαδίκτυο.");
                           return;
                         }
-                        Alert.alert(
+                        showAlert(
                           "Αποσύνδεση Drive",
                           "Θέλετε να αποσυνδέσετε το Google Drive;",
                           [
@@ -992,10 +992,10 @@ export default function TeamProjectsScreen() {
                               onPress: async () => {
                                 try {
                                   await disconnectGoogleDrive(teamId);
-                                  Alert.alert("Επιτυχία", "Το Google Drive αποσυνδέθηκε.");
+                                  showAlert("Επιτυχία", "Το Google Drive αποσυνδέθηκε.");
                                   setDriveModalVisible(false);
                                 } catch {
-                                  Alert.alert("Σφάλμα", "Αποτυχία αποσύνδεσης.");
+                                  showAlert("Σφάλμα", "Αποτυχία αποσύνδεσης.");
                                 }
                               },
                             },
@@ -1026,16 +1026,16 @@ export default function TeamProjectsScreen() {
                       onPress={async () => {
                         const net = await Network.getNetworkStateAsync();
                         if (!net.isConnected) {
-                          Alert.alert("Offline", "Δεν υπάρχει σύνδεση στο διαδίκτυο.");
+                          showAlert("Offline", "Δεν υπάρχει σύνδεση στο διαδίκτυο.");
                           return;
                         }
                         setDriveConnecting(true);
                         const result = await connectGoogleDrive(teamId);
                         setDriveConnecting(false);
                         if (result.success) {
-                          Alert.alert("Επιτυχία", "Το Google Drive συνδέθηκε!");
+                          showAlert("Επιτυχία", "Το Google Drive συνδέθηκε!");
                         } else {
-                          Alert.alert("Σφάλμα", result.error || "Αποτυχία σύνδεσης.");
+                          showAlert("Σφάλμα", result.error || "Αποτυχία σύνδεσης.");
                         }
                       }}
                       disabled={driveConnecting}

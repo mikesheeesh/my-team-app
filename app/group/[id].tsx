@@ -5,7 +5,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   SafeAreaView,
@@ -19,6 +18,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import InputModal from "../components/InputModal";
+import { showAlert } from "../context/AlertContext";
 import { deleteProjectMedia } from "../../utils/storageUtils";
 
 import { onAuthStateChanged } from "firebase/auth";
@@ -126,7 +126,7 @@ export default function GroupScreen() {
   const checkOnline = async () => {
     const net = await Network.getNetworkStateAsync();
     if (!net.isConnected || !net.isInternetReachable) {
-      Alert.alert("Offline", "Δεν έχετε ίντερνετ.");
+      showAlert("Offline", "Δεν έχετε ίντερνετ.");
       return false;
     }
     return true;
@@ -136,7 +136,7 @@ export default function GroupScreen() {
     try {
       await updateDoc(doc(db, "teams", teamId), { groups: updatedGroups });
     } catch (err: any) {
-      Alert.alert("Σφάλμα", err.message);
+      showAlert("Σφάλμα", err.message);
     }
   };
 
@@ -360,7 +360,7 @@ export default function GroupScreen() {
       setInputVisible(false);
       setTempValue("");
     } catch (error: any) {
-      Alert.alert("Σφάλμα", error.message);
+      showAlert("Σφάλμα", error.message);
     }
   };
 
@@ -369,11 +369,11 @@ export default function GroupScreen() {
     if (!isOnline) return;
     if (!selectedProject) return;
     if (selectedProject.isClosed) {
-      Alert.alert("Κλειστό Υποέργο", "Δεν μπορείτε να διαγράψετε κλειστό υποέργο. Ανοίξτε το πρώτα από το Admin Panel.");
+      showAlert("Κλειστό Υποέργο", "Δεν μπορείτε να διαγράψετε κλειστό υποέργο. Ανοίξτε το πρώτα από το Admin Panel.");
       return;
     }
 
-    Alert.alert("Διαγραφή Υποέργου", "Είστε σίγουροι;", [
+    showAlert("Διαγραφή Υποέργου", "Είστε σίγουροι;", [
       { text: "Ακύρωση" },
       {
         text: "Διαγραφή",
@@ -441,7 +441,7 @@ export default function GroupScreen() {
       }
       setSelectedProject(updated);
     } catch {
-      Alert.alert("Σφάλμα", "Η ενημέρωση απέτυχε");
+      showAlert("Σφάλμα", "Η ενημέρωση απέτυχε");
     }
   };
 

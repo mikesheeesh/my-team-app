@@ -36,10 +36,17 @@ fs.mkdirSync(ioniconsDestDir, { recursive: true });
 fs.copyFileSync(ioniconsSource, ioniconsDest);
 console.log("Copied:", ioniconsDest);
 
-// Inject @font-face into dist/index.html so icons are available before JS runs
+// Copy service worker to dist/ root
+const swSource = path.join("sw.js");
+const swDest = path.join("dist", "sw.js");
+fs.copyFileSync(swSource, swDest);
+console.log("Copied: dist/sw.js");
+
+// Inject @font-face + service worker registration into dist/index.html
 const indexPath = path.join("dist", "index.html");
 let html = fs.readFileSync(indexPath, "utf8");
 const fontStyle = `  <style>@font-face { font-family: 'Ionicons'; src: url('/fonts/Ionicons.ttf') format('truetype'); font-display: block; }</style>\n`;
-html = html.replace("</head>", fontStyle + "</head>");
+const swScript = `  <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}</script>\n`;
+html = html.replace("</head>", fontStyle + swScript + "</head>");
 fs.writeFileSync(indexPath, html, "utf8");
-console.log("Injected Ionicons @font-face into dist/index.html");
+console.log("Injected Ionicons @font-face + SW registration into dist/index.html");
