@@ -814,18 +814,6 @@ export default function TeamProjectsScreen() {
 
               <TouchableOpacity
                 style={styles.optionCard}
-                onPress={handleInvite}
-              >
-                <View
-                  style={[styles.optionIcon, { backgroundColor: "#f0fdf4" }]}
-                >
-                  <Ionicons name="person-add" size={28} color="#16a34a" />
-                </View>
-                <Text style={styles.optionText}>Πρόσκληση</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.optionCard}
                 onPress={() => {
                   setMenuVisible(false);
                   setUsersModalVisible(true);
