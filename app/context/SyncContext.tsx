@@ -65,12 +65,14 @@ const isNetworkAvailable = async (): Promise<boolean> => {
 type SyncContextType = {
   isSyncing: boolean;
   syncNow: () => Promise<void>;
+  triggerSync: () => Promise<void>;
   justSyncedProjectId: string | null;
 };
 
 const SyncContext = createContext<SyncContextType>({
   isSyncing: false,
   syncNow: async () => {},
+  triggerSync: async () => {},
   justSyncedProjectId: null,
 });
 
@@ -588,7 +590,22 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  // 3. ΧΕΙΡΟΚΙΝΗΤΟΣ ΣΥΓΧΡΟΝΙΣΜΟΣ (ΜΕ ΕΛΕΓΧΟ DATA)
+  // 3. SILENT TRIGGER SYNC (μετά από task save — respects cellular toggle on web)
+  const triggerSync = async () => {
+    if (isSyncingRef.current) return;
+    if (Platform.OS === "web") {
+      if (typeof navigator === "undefined" || !navigator.onLine) return;
+      const cellularEnabled = (await AsyncStorage.getItem(CELLULAR_DATA_KEY)) === "true";
+      if (cellularEnabled) {
+        performGlobalSync(true);
+      }
+      // Toggle OFF: περιμένουμε passive reconnect (window 'online' event)
+      return;
+    }
+    // Native: δεν χρειάζεται (NetInfo listener + direct upload αρκούν)
+  };
+
+  // 4. ΧΕΙΡΟΚΙΝΗΤΟΣ ΣΥΓΧΡΟΝΙΣΜΟΣ (ΜΕ ΕΛΕΓΧΟ DATA)
   const handleManualSync = async () => {
     if (Platform.OS === "web") {
       if (!navigator.onLine) {
@@ -637,7 +654,7 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
 
   return (
     <SyncContext.Provider
-      value={{ isSyncing, syncNow: handleManualSync, justSyncedProjectId }}
+      value={{ isSyncing, syncNow: handleManualSync, triggerSync, justSyncedProjectId }}
     >
       {children}
     </SyncContext.Provider>

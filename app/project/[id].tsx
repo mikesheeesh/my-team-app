@@ -324,7 +324,7 @@ export default function ProjectDetailsScreen() {
   const { id } = useLocalSearchParams();
   const projectId = id as string;
   const insets = useSafeAreaInsets();
-  const { isSyncing, syncNow, justSyncedProjectId } = useSync();
+  const { isSyncing, syncNow, triggerSync, justSyncedProjectId } = useSync();
   const { user: currentUser } = useUser();
 
   const CACHE_KEY = PROJECT_CACHE_KEY_PREFIX + projectId;
@@ -614,9 +614,11 @@ export default function ProjectDetailsScreen() {
 
     // Check connectivity (WiFi or cellular if enabled)
     const net = await Network.getNetworkStateAsync();
-    const hasWiFi = net.isConnected && net.type === Network.NetworkStateType.WIFI;
-    const hasCellular = net.isConnected && net.type === Network.NetworkStateType.CELLULAR;
     const cellularEnabled = (await AsyncStorage.getItem("cellular_data_enabled")) === "true";
+    // Web: expo-network returns UNKNOWN type — treat as cellular, respect toggle
+    const isWebOnline = Platform.OS === "web" && typeof navigator !== "undefined" && navigator.onLine;
+    const hasWiFi = isWebOnline ? cellularEnabled : (net.isConnected && net.type === Network.NetworkStateType.WIFI);
+    const hasCellular = !isWebOnline && net.isConnected && net.type === Network.NetworkStateType.CELLULAR;
     const canUploadDirectly = hasWiFi || (cellularEnabled && hasCellular);
 
     if (canUploadDirectly && teamId) {
@@ -683,6 +685,7 @@ export default function ProjectDetailsScreen() {
           AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(newLocalList));
           return newLocalList;
         });
+        triggerSync(); // retry αμέσως αν toggle ON
         if (activeTaskForGallery && activeTaskForGallery.id === taskToSave.id)
           setActiveTaskForGallery(taskWithFlag);
       }
@@ -697,6 +700,7 @@ export default function ProjectDetailsScreen() {
         AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(newLocalList));
         return newLocalList;
       });
+      triggerSync(); // sync αμέσως αν toggle ON και online
 
       if (activeTaskForGallery && activeTaskForGallery.id === taskToSave.id)
         setActiveTaskForGallery(taskWithFlag);
