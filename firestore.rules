@@ -149,6 +149,28 @@ service cloud.firestore {
       allow write: if isAuth() && isAdminOrAbove(teamId);
     }
 
+    // ── Join Requests ───────────────────────────────────────────────────────
+    match /joinRequests/{requestId} {
+      // Any authenticated user can create a request for themselves
+      allow create: if isAuth() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.status == 'pending';
+
+      // The requester can read their own requests; Admins/Founders of the team can read all
+      allow read: if isAuth() && (
+        resource.data.userId == request.auth.uid ||
+        isAdminOrAbove(resource.data.teamId)
+      );
+
+      // Only Admins/Founders can update status (approve/reject)
+      allow update: if isAuth() &&
+        isAdminOrAbove(resource.data.teamId) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+        request.resource.data.status in ['approved', 'rejected'];
+
+      allow delete: if false;
+    }
+
     // ── Deny everything else ────────────────────────────────────────────────
     match /{document=**} {
       allow read, write: if false;
