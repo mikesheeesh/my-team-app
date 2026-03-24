@@ -311,22 +311,22 @@ export default function MyTeamsScreen() {
       <View style={styles.header}>
         <Text style={styles.appName}>Ergon Work Management</Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          {/* BELL */}
-          <TouchableOpacity
-            style={styles.bellButton}
-            onPress={() => {
-              if (bellTeamId) router.push(`/team/${bellTeamId}?openRequests=true`);
-            }}
-          >
-            <Ionicons name="notifications-outline" size={24} color="#374151" />
-            {pendingRequests > 0 && (
-              <View style={styles.bellBadge}>
-                <Text style={styles.bellBadgeText}>
-                  {pendingRequests > 9 ? "9+" : pendingRequests}
-                </Text>
-              </View>
-            )}
-          </TouchableOpacity>
+          {/* BELL — only for Founder/Admin */}
+          {bellTeamId !== null && (
+            <TouchableOpacity
+              style={styles.bellButton}
+              onPress={() => router.push(`/team/${bellTeamId}?openRequests=true`)}
+            >
+              <Ionicons name="notifications-outline" size={24} color="#374151" />
+              {pendingRequests > 0 && (
+                <View style={styles.bellBadge}>
+                  <Text style={styles.bellBadgeText}>
+                    {pendingRequests > 9 ? "9+" : pendingRequests}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             onPress={() => router.push("/profile")}
             style={styles.profileButton}
