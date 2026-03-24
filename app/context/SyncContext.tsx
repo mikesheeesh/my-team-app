@@ -612,7 +612,20 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
         showAlert("Offline", "Δεν υπάρχει σύνδεση στο διαδίκτυο.");
         return;
       }
-      await performGlobalSync(true);
+      const cellularEnabled = (await AsyncStorage.getItem(CELLULAR_DATA_KEY)) === "true";
+      if (cellularEnabled) {
+        await performGlobalSync(true);
+        return;
+      }
+      // Toggle OFF → ρώτα για δεδομένα κινητής
+      showAlert(
+        "Χρήση Δεδομένων",
+        "Είστε συνδεδεμένοι με δεδομένα κινητής. Θέλετε να προχωρήσετε σε συγχρονισμό;",
+        [
+          { text: "Άκυρο", style: "cancel" },
+          { text: "Ναι, Συνέχεια", onPress: () => performGlobalSync(true) },
+        ]
+      );
       return;
     }
 
