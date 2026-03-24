@@ -61,7 +61,6 @@ function usePendingRequests() {
 // CONTEXT
 import { showAlert } from "../context/AlertContext";
 import { useSync } from "../context/SyncContext";
-import { useUser } from "../context/UserContext";
 
 type Role = "Founder" | "Admin" | "Supervisor" | "User";
 
@@ -167,7 +166,7 @@ export default function MyTeamsScreen() {
   const insets = useSafeAreaInsets();
   const { isSyncing, syncNow } = useSync();
 
-  const { user: contextUser } = useUser();
+
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
@@ -260,6 +259,7 @@ export default function MyTeamsScreen() {
               );
             } else if (!snapshot.metadata.fromCache) {
               setTeams([]);
+              router.replace("/join-request");
             }
             setLoading(false);
           },
@@ -309,10 +309,7 @@ export default function MyTeamsScreen() {
   const ListHeader = () => (
     <View style={styles.headerContainer}>
       <View style={styles.header}>
-        <View>
-          <Text style={styles.welcomeText}>Λίστα Ομάδων</Text>
-          <Text style={styles.userName}>{contextUser?.fullname || "Χρήστης"}</Text>
-        </View>
+        <Text style={styles.appName}>Ergon Work Management</Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           {/* BELL */}
           <TouchableOpacity
@@ -453,13 +450,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 24,
   },
-  welcomeText: {
-    color: "#64748b",
-    fontSize: 14,
-    fontWeight: "600",
-    marginBottom: 2,
+  appName: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#1e3a8a",
+    flex: 1,
+    letterSpacing: -0.3,
   },
-  userName: { fontSize: 24, fontWeight: "800", color: "#0f172a" },
   profileButton: { padding: 2 },
   bellButton: {
     width: 36,

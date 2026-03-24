@@ -1135,14 +1135,16 @@ export default function TeamProjectsScreen() {
       >
         <SafeAreaView style={{ flex: 1, backgroundColor: "white" }}>
           <View style={styles.header}>
-            <Text style={styles.headerTitle}>Μέλη</Text>
+            <Text style={styles.headerTitle}>
+              {openRequests === "true" ? "Αιτήματα" : "Μέλη"}
+            </Text>
             <TouchableOpacity onPress={() => setUsersModalVisible(false)}>
               <Ionicons name="close" size={28} color="#333" />
             </TouchableOpacity>
           </View>
 
-          {/* TAB SWITCHER */}
-          {(myRole === "Founder" || myRole === "Admin") && (
+          {/* TAB SWITCHER — hidden when opened from bell (requests only) */}
+          {(myRole === "Founder" || myRole === "Admin") && openRequests !== "true" && (
             <View style={styles.tabSwitcher}>
               <TouchableOpacity
                 style={[styles.tabBtn, membersTab === "members" && styles.tabBtnActive]}

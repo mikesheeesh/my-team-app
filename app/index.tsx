@@ -37,11 +37,11 @@ export default function LandingScreen() {
           if (teamsSnap.empty) {
             pendingNavRef.current = () => router.replace("/join-request");
           } else {
-            pendingNavRef.current = () => router.replace("/dashboard");
+            pendingNavRef.current = () => router.replace("/teams/my-teams");
           }
         } catch (e) {
-          // Offline fallback — go to dashboard, it will handle auth
-          pendingNavRef.current = () => router.replace("/dashboard");
+          // Offline fallback
+          pendingNavRef.current = () => router.replace("/teams/my-teams");
         }
       } else {
         pendingNavRef.current = () => router.replace("/login");
