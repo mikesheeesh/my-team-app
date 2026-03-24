@@ -2,8 +2,9 @@ import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import { useRouter } from "expo-router";
 import {
   GoogleAuthProvider,
+  getRedirectResult,
   signInWithCredential,
-  signInWithPopup,
+  signInWithRedirect,
 } from "firebase/auth";
 import {
   collection,
@@ -14,7 +15,7 @@ import {
   setDoc,
   where,
 } from "firebase/firestore";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -39,58 +40,71 @@ export default function LoginScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
+  // Handle redirect result when returning from Google OAuth (web only)
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    setLoading(true);
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (result?.user) {
+          await handlePostSignIn(result.user);
+        }
+      })
+      .catch((err) => {
+        console.log("Redirect result error:", err);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handlePostSignIn = async (user: any) => {
+    const userRef = doc(db, "users", user.uid);
+    const snap = await getDoc(userRef);
+    if (!snap.exists()) {
+      await setDoc(userRef, {
+        fullname: user.displayName || "",
+        email: user.email || "",
+        photoURL: user.photoURL || null,
+        createdAt: new Date().toISOString(),
+        phone: "",
+      });
+    }
+    const teamsSnap = await getDocs(
+      query(
+        collection(db, "teams"),
+        where("memberIds", "array-contains", user.uid),
+      ),
+    );
+    if (teamsSnap.empty) {
+      router.replace("/join-request");
+    } else {
+      router.replace("/teams/my-teams");
+    }
+  };
+
   const handleGoogleSignIn = async () => {
     setLoading(true);
     try {
-      let user;
-
       if (Platform.OS === "web") {
         const provider = new GoogleAuthProvider();
-        const result = await signInWithPopup(auth, provider);
-        user = result.user;
-      } else {
-        await GoogleSignin.hasPlayServices();
-        const signInResult = await GoogleSignin.signIn();
-        const idToken =
-          signInResult.data?.idToken ?? (signInResult as any).idToken;
-        if (!idToken) throw new Error("No ID token received from Google.");
-        const credential = GoogleAuthProvider.credential(idToken);
-        const result = await signInWithCredential(auth, credential);
-        user = result.user;
+        await signInWithRedirect(auth, provider);
+        // Page will redirect — no code after this runs
+        return;
       }
 
-      // Create user doc if new
-      const userRef = doc(db, "users", user.uid);
-      const snap = await getDoc(userRef);
-      if (!snap.exists()) {
-        await setDoc(userRef, {
-          fullname: user.displayName || "",
-          email: user.email || "",
-          photoURL: user.photoURL || null,
-          createdAt: new Date().toISOString(),
-          phone: "",
-        });
-      }
-
-      // Check if user has teams
-      const teamsSnap = await getDocs(
-        query(
-          collection(db, "teams"),
-          where("memberIds", "array-contains", user.uid),
-        ),
-      );
-
-      if (teamsSnap.empty) {
-        router.replace("/join-request");
-      } else {
-        router.replace("/dashboard");
-      }
+      await GoogleSignin.hasPlayServices();
+      const signInResult = await GoogleSignin.signIn();
+      const idToken =
+        signInResult.data?.idToken ?? (signInResult as any).idToken;
+      if (!idToken) throw new Error("No ID token received from Google.");
+      const credential = GoogleAuthProvider.credential(idToken);
+      const result = await signInWithCredential(auth, credential);
+      await handlePostSignIn(result.user);
     } catch (error: any) {
       if (
         error.code !== "SIGN_IN_CANCELLED" &&
-        error.code !== "12501" // user cancelled on Android
+        error.code !== "12501"
       ) {
-        showAlert("Σφάλμα", "Η σύνδεση απέτυχε. Δοκιμάστε ξανά.");
+        showAlert("Σφάλμα", `Σφάλμα: ${error.code || error.message}`);
         console.log("Google Sign-In error:", error);
       }
     } finally {
