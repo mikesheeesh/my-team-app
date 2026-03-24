@@ -471,6 +471,7 @@ export default function MyTeamsScreen() {
         renderItem={renderItem}
         ListHeaderComponent={<ListHeader />}
         ListEmptyComponent={renderEmpty}
+        ListFooterComponent={<Text style={styles.versionLabel}>v2.5.0</Text>}
         contentContainerStyle={styles.scrollContent}
         initialNumToRender={6}
         showsVerticalScrollIndicator={false}
@@ -577,6 +578,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#f8fafc",
   },
   scrollContent: { padding: 20, paddingBottom: 50 },
+  versionLabel: { textAlign: "center", color: "#cbd5e1", fontSize: 12, paddingVertical: 16 },
 
   headerContainer: { marginBottom: 10 },
   header: {
