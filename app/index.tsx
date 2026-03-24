@@ -1,7 +1,7 @@
 import { useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import * as Updates from "expo-updates";
-import { onAuthStateChanged } from "firebase/auth";
+import { getRedirectResult, onAuthStateChanged } from "firebase/auth";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -25,7 +25,7 @@ export default function LandingScreen() {
 
   // 1. AUTH CHECK — decide where to navigate
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const resolveNav = async (user: any) => {
       if (user) {
         try {
           const teamsSnap = await getDocs(
@@ -34,19 +34,33 @@ export default function LandingScreen() {
               where("memberIds", "array-contains", user.uid),
             ),
           );
-          if (teamsSnap.empty) {
-            pendingNavRef.current = () => router.replace("/join-request");
-          } else {
-            pendingNavRef.current = () => router.replace("/teams/my-teams");
-          }
+          return teamsSnap.empty
+            ? () => router.replace("/join-request")
+            : () => router.replace("/teams/my-teams");
         } catch (e) {
-          // Offline fallback
-          pendingNavRef.current = () => router.replace("/teams/my-teams");
+          return () => router.replace("/teams/my-teams");
         }
-      } else {
-        pendingNavRef.current = () => router.replace("/login");
       }
+      return () => router.replace("/login");
+    };
 
+    if (Platform.OS === "web") {
+      // On web: process redirect result first, then navigate immediately
+      getRedirectResult(auth)
+        .then(async (result) => {
+          const user = result?.user ?? auth.currentUser;
+          const nav = await resolveNav(user);
+          nav();
+        })
+        .catch(async () => {
+          const nav = await resolveNav(auth.currentUser);
+          nav();
+        });
+      return;
+    }
+
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      pendingNavRef.current = await resolveNav(user);
       await SplashScreen.hideAsync();
     });
 

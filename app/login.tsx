@@ -3,7 +3,7 @@ import { useRouter } from "expo-router";
 import {
   GoogleAuthProvider,
   signInWithCredential,
-  signInWithPopup,
+  signInWithRedirect,
 } from "firebase/auth";
 import {
   collection,
@@ -69,8 +69,7 @@ export default function LoginScreen() {
     try {
       if (Platform.OS === "web") {
         const provider = new GoogleAuthProvider();
-        const result = await signInWithPopup(auth, provider);
-        await handlePostSignIn(result.user);
+        await signInWithRedirect(auth, provider);
         return;
       }
 
