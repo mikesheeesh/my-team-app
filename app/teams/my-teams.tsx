@@ -6,6 +6,8 @@ import React, { memo, useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Modal,
+  SafeAreaView,
   StatusBar,
   StyleSheet,
   Text,
@@ -16,7 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // FIREBASE
 import { onAuthStateChanged } from "firebase/auth";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { arrayUnion, collection, doc, onSnapshot, query, updateDoc, where } from "firebase/firestore";
 import { auth, db } from "../../firebaseConfig";
 
 // Bell notification for pending join requests (Founder/Admin only)
@@ -170,6 +172,11 @@ export default function MyTeamsScreen() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
+  const [requestsModalVisible, setRequestsModalVisible] = useState(false);
+  type JoinReq = { id: string; userId: string; userName: string; userEmail: string; teamId: string; createdAt: any; };
+  const [joinRequests, setJoinRequests] = useState<JoinReq[]>([]);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [rolePickerFor, setRolePickerFor] = useState<JoinReq | null>(null);
   const { count: pendingRequests, firstTeamId: bellTeamId } = usePendingRequests();
 
   // --- NAVIGATION LOCK (500ms) ---
@@ -281,6 +288,45 @@ export default function MyTeamsScreen() {
     };
   }, []);
 
+  // Listen to pending join requests for admin teams
+  useEffect(() => {
+    if (!bellTeamId) return;
+    const q = query(
+      collection(db, "joinRequests"),
+      where("teamId", "==", bellTeamId),
+      where("status", "==", "pending"),
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const list: JoinReq[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as any) }));
+      setJoinRequests(list);
+    });
+    return () => unsub();
+  }, [bellTeamId]);
+
+  const handleApprove = async (req: JoinReq, role: string) => {
+    setApprovingId(req.id);
+    try {
+      await updateDoc(doc(db, "teams", req.teamId), {
+        memberIds: arrayUnion(req.userId),
+        [`roles.${req.userId}`]: role,
+      });
+      await updateDoc(doc(db, "joinRequests", req.id), { status: "approved" });
+    } catch (e) {
+      showAlert("Σφάλμα", "Η έγκριση απέτυχε.");
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
+  const handleReject = async (reqId: string) => {
+    try {
+      await updateDoc(doc(db, "joinRequests", reqId), { status: "rejected" });
+    } catch (e) {
+      showAlert("Σφάλμα", "Η απόρριψη απέτυχε.");
+    }
+  };
+
   const handleSyncPress = async () => {
     if (pendingCount === 0) {
       return showAlert("Ενημέρωση", "Όλα τα δεδομένα είναι συγχρονισμένα!");
@@ -315,7 +361,7 @@ export default function MyTeamsScreen() {
           {bellTeamId !== null && (
             <TouchableOpacity
               style={styles.bellButton}
-              onPress={() => router.push(`/team/${bellTeamId}?openRequests=true`)}
+              onPress={() => setRequestsModalVisible(true)}
             >
               <Ionicons name="notifications-outline" size={24} color="#374151" />
               {pendingRequests > 0 && (
@@ -429,6 +475,95 @@ export default function MyTeamsScreen() {
         initialNumToRender={6}
         showsVerticalScrollIndicator={false}
       />
+
+      {/* REQUESTS MODAL */}
+      <Modal
+        visible={requestsModalVisible}
+        animationType="slide"
+        onRequestClose={() => setRequestsModalVisible(false)}
+      >
+        <View style={[styles.container, { paddingTop: insets.top }]}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Αιτήματα Σύνδεσης</Text>
+            <TouchableOpacity onPress={() => setRequestsModalVisible(false)}>
+              <Ionicons name="close" size={28} color="#333" />
+            </TouchableOpacity>
+          </View>
+
+          <FlatList
+            data={joinRequests}
+            keyExtractor={(r) => r.id}
+            contentContainerStyle={{ padding: 20, paddingBottom: 50 + insets.bottom }}
+            ListEmptyComponent={
+              <View style={{ alignItems: "center", marginTop: 60, gap: 12 }}>
+                <Ionicons name="clipboard-outline" size={52} color="#cbd5e1" />
+                <Text style={{ color: "#94a3b8", fontSize: 16 }}>Δεν υπάρχουν εκκρεμή αιτήματα.</Text>
+              </View>
+            }
+            renderItem={({ item: req }) => (
+              <View style={styles.reqCard}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.reqName}>{req.userName || "Χρήστης"}</Text>
+                  <Text style={styles.reqEmail}>{req.userEmail}</Text>
+                  {req.createdAt?.toDate && (
+                    <Text style={styles.reqDate}>
+                      {req.createdAt.toDate().toLocaleDateString("el-GR")}
+                    </Text>
+                  )}
+                </View>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  <TouchableOpacity
+                    style={styles.approveBtn}
+                    disabled={approvingId === req.id}
+                    onPress={() => setRolePickerFor(req)}
+                  >
+                    {approvingId === req.id
+                      ? <ActivityIndicator size="small" color="#fff" />
+                      : <Ionicons name="checkmark" size={20} color="#fff" />}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.rejectBtn}
+                    onPress={() => handleReject(req.id)}
+                  >
+                    <Ionicons name="close" size={20} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+          />
+        </View>
+      </Modal>
+
+      {/* ROLE PICKER */}
+      <Modal visible={!!rolePickerFor} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={[styles.rolePicker, { paddingBottom: insets.bottom + 20 }]}>
+            <Text style={styles.rolePickerTitle}>Επιλέξτε Ρόλο</Text>
+            <Text style={{ color: "#64748b", marginBottom: 20, fontSize: 14 }}>
+              Για: {rolePickerFor?.userName}
+            </Text>
+            {["User", "Supervisor", "Admin"].map((role) => (
+              <TouchableOpacity
+                key={role}
+                style={styles.roleBtn}
+                onPress={() => {
+                  const req = rolePickerFor!;
+                  setRolePickerFor(null);
+                  handleApprove(req, role);
+                }}
+              >
+                <Text style={styles.roleBtnText}>{role}</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={{ marginTop: 10, alignItems: "center", padding: 10 }}
+              onPress={() => setRolePickerFor(null)}
+            >
+              <Text style={{ color: "#64748b" }}>Άκυρο</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -558,4 +693,74 @@ const styles = StyleSheet.create({
   cardSubtitle: { color: "#64748b", fontSize: 12, fontWeight: "600" },
 
   emptyState: { alignItems: "center", marginTop: 60 },
+
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 20,
+    paddingTop: 16,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+  },
+  modalTitle: { fontSize: 18, fontWeight: "800", color: "#0f172a" },
+
+  reqCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    shadowColor: "#64748b",
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  reqName: { fontSize: 15, fontWeight: "700", color: "#1e293b" },
+  reqEmail: { fontSize: 12, color: "#64748b", marginTop: 2 },
+  reqDate: { fontSize: 11, color: "#94a3b8", marginTop: 2 },
+  approveBtn: {
+    backgroundColor: "#16a34a",
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  rejectBtn: {
+    backgroundColor: "#ef4444",
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.6)",
+    justifyContent: "flex-end",
+  },
+  rolePicker: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+  },
+  rolePickerTitle: { fontSize: 20, fontWeight: "800", color: "#0f172a", marginBottom: 8 },
+  roleBtn: {
+    backgroundColor: "#eff6ff",
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  roleBtnText: { fontSize: 16, fontWeight: "700", color: "#1d4ed8" },
 });
