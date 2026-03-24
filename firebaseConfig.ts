@@ -20,7 +20,7 @@ import { Platform } from "react-native";
 // Βάλε τα δικά σου στοιχεία εδώ
 const firebaseConfig = {
   apiKey: "AIzaSyCASV17VUlZ8zjmkf8yJIb9LqiLDqB6BH4",
-  authDomain: "teamcameraapp.firebaseapp.com",
+  authDomain: "ergon-work.web.app",
   projectId: "teamcameraapp",
   storageBucket: "teamcameraapp.firebasestorage.app",
   messagingSenderId: "1066934665062",
