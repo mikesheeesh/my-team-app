@@ -5,7 +5,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -17,6 +16,9 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+// CONTEXT
+import { showAlert } from "./context/AlertContext";
 
 // FIREBASE
 import { onAuthStateChanged } from "firebase/auth";
@@ -64,7 +66,7 @@ export default function JoinTeamScreen() {
           }
 
           // Redirect στο sign-in χωρίς alert (για αποφυγή loop)
-          Alert.alert("Προσοχή", "Πρέπει να συνδεθείτε πρώτα για να μπείτε στην ομάδα.", [
+          showAlert("Προσοχή", "Πρέπει να συνδεθείτε πρώτα για να μπείτε στην ομάδα.", [
             { text: "OK", onPress: () => router.replace("/") },
           ]);
         }
@@ -100,14 +102,14 @@ export default function JoinTeamScreen() {
     Keyboard.dismiss();
     const netState = await NetInfo.fetch();
     if (!netState.isConnected) {
-      return Alert.alert(
+      return showAlert(
         "Offline",
         "Απαιτείται σύνδεση στο ίντερνετ για να μπείτε σε ομάδα.",
       );
     }
 
     if (!code || code.length < 6)
-      return Alert.alert("Προσοχή", "Εισάγετε έγκυρο κωδικό.");
+      return showAlert("Προσοχή", "Εισάγετε έγκυρο κωδικό.");
 
     const userId = auth.currentUser?.uid;
     if (!userId) return;
@@ -124,7 +126,7 @@ export default function JoinTeamScreen() {
       const snapshot = await getDocs(q);
 
       if (snapshot.empty) {
-        Alert.alert("Λάθος", "Ο κωδικός δεν υπάρχει ή έχει λήξει.");
+        showAlert("Λάθος", "Ο κωδικός δεν υπάρχει ή έχει λήξει.");
         setLoading(false);
         return;
       }
@@ -142,7 +144,7 @@ export default function JoinTeamScreen() {
         if (diffInSeconds > 120) {
           // 120 δευτερόλεπτα = 2 λεπτά
           await deleteDoc(inviteDoc.ref); // Σβήνουμε το ληγμένο
-          Alert.alert("Έληξε", "Ο κωδικός έχει λήξει.");
+          showAlert("Έληξε", "Ο κωδικός έχει λήξει.");
           setLoading(false);
           return;
         }
@@ -155,7 +157,7 @@ export default function JoinTeamScreen() {
       const teamSnap = await getDoc(teamRef);
 
       if (teamSnap.exists() && teamSnap.data().memberIds?.includes(userId)) {
-        Alert.alert("Είστε ήδη μέλος", "Ανήκετε ήδη σε αυτή την ομάδα.");
+        showAlert("Είστε ήδη μέλος", "Ανήκετε ήδη σε αυτή την ομάδα.");
         // Σβήνουμε το invite για να μην μείνει "σκουπίδι"
         await deleteDoc(inviteDoc.ref);
         router.replace("/dashboard");
@@ -174,14 +176,14 @@ export default function JoinTeamScreen() {
       // 5. ΔΙΑΓΡΑΦΗ ΤΟΥ ΚΩΔΙΚΟΥ (ΜΙΑΣ ΧΡΗΣΗΣ)
       await deleteDoc(inviteDoc.ref);
 
-      Alert.alert(
+      showAlert(
         "Επιτυχία",
         `Καλωσήρθατε στην ομάδα "${inviteData.teamName}" ως ${assignedRole}!`,
       );
       router.replace("/dashboard");
     } catch (error: any) {
       console.log("Join Error:", error);
-      Alert.alert("Σφάλμα", "Κάτι πήγε στραβά. Δοκιμάστε ξανά.");
+      showAlert("Σφάλμα", "Κάτι πήγε στραβά. Δοκιμάστε ξανά.");
       setLoading(false);
     }
   };

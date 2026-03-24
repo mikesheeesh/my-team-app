@@ -5,7 +5,6 @@ import * as WebBrowser from "expo-web-browser";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -19,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "../../firebaseConfig";
+import { showAlert } from "../context/AlertContext";
 
 export default function CreateTeamScreen() {
   const router = useRouter();
@@ -36,7 +36,7 @@ export default function CreateTeamScreen() {
   const handleCreateTeam = async () => {
     const networkState = await NetInfo.fetch();
     if (!networkState.isConnected) {
-      Alert.alert(
+      showAlert(
         "Δεν υπάρχει σύνδεση",
         "Για να δημιουργήσετε νέα ομάδα πρέπει να είστε συνδεδεμένοι στο ίντερνετ.",
       );
@@ -44,19 +44,19 @@ export default function CreateTeamScreen() {
     }
 
     if (teamName.trim().length === 0)
-      return Alert.alert("Προσοχή", "Δώστε ένα όνομα στην ομάδα.");
+      return showAlert("Προσοχή", "Δώστε ένα όνομα στην ομάδα.");
     if (teamType.trim().length === 0)
-      return Alert.alert("Προσοχή", "Δώστε το αντικείμενο εργασιών.");
+      return showAlert("Προσοχή", "Δώστε το αντικείμενο εργασιών.");
 
     // Έλεγχος email
     if (teamEmail.trim().length === 0)
-      return Alert.alert("Προσοχή", "Το email ομάδας είναι υποχρεωτικό.");
+      return showAlert("Προσοχή", "Το email ομάδας είναι υποχρεωτικό.");
     if (!teamEmail.includes("@"))
-      return Alert.alert("Προσοχή", "Εισάγετε ένα έγκυρο email.");
+      return showAlert("Προσοχή", "Εισάγετε ένα έγκυρο email.");
 
     const user = auth.currentUser;
     if (!user)
-      return Alert.alert("Σφάλμα", "Δεν βρέθηκε συνδεδεμένος χρήστης.");
+      return showAlert("Σφάλμα", "Δεν βρέθηκε συνδεδεμένος χρήστης.");
 
     setLoading(true);
 
@@ -75,7 +75,7 @@ export default function CreateTeamScreen() {
 
       router.replace("/dashboard");
     } catch (error: any) {
-      Alert.alert("Σφάλμα", "Η δημιουργία απέτυχε: " + error.message);
+      showAlert("Σφάλμα", "Η δημιουργία απέτυχε: " + error.message);
     } finally {
       setLoading(false);
     }

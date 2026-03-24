@@ -10,7 +10,6 @@ import { doc, getDoc, setDoc } from "firebase/firestore";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -22,6 +21,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { auth, db } from "../firebaseConfig";
+import { showAlert } from "./context/AlertContext";
 
 const PROFILE_CACHE_KEY = "user_profile_data_cache";
 
@@ -52,9 +52,9 @@ export default function LoginScreen() {
 
   const handleAuth = async () => {
     if (!email || !password)
-      return Alert.alert("Προσοχή", "Συμπληρώστε Email και Κωδικό.");
+      return showAlert("Προσοχή", "Συμπληρώστε Email και Κωδικό.");
     if (isRegistering && !fullname.trim())
-      return Alert.alert("Προσοχή", "Το Όνομα είναι απαραίτητο.");
+      return showAlert("Προσοχή", "Το Όνομα είναι απαραίτητο.");
 
     setLoading(true);
     try {
@@ -101,7 +101,7 @@ export default function LoginScreen() {
         router.replace("/dashboard");
       }
     } catch (error: any) {
-      Alert.alert("Σφάλμα", getFriendlyError(error.message));
+      showAlert("Σφάλμα", getFriendlyError(error.message));
     } finally {
       setLoading(false);
     }

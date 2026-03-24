@@ -4,7 +4,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   ScrollView,
   Share,
   StyleSheet,
@@ -22,6 +21,7 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { auth, db } from "../../firebaseConfig";
+import { showAlert } from "../context/AlertContext";
 
 export default function InviteMembersScreen() {
   const router = useRouter();
@@ -53,15 +53,15 @@ export default function InviteMembersScreen() {
   const handleShareInvite = async () => {
     const networkState = await NetInfo.fetch();
     if (!networkState.isConnected) {
-      return Alert.alert(
+      return showAlert(
         "Offline",
         "Χρειάζεστε ίντερνετ για να δημιουργήσετε πρόσκληση.",
       );
     }
 
-    if (!teamId) return Alert.alert("Σφάλμα", "Λείπει το Team ID.");
+    if (!teamId) return showAlert("Σφάλμα", "Λείπει το Team ID.");
     const user = auth.currentUser;
-    if (!user) return Alert.alert("Σφάλμα", "Δεν είστε συνδεδεμένος.");
+    if (!user) return showAlert("Σφάλμα", "Δεν είστε συνδεδεμένος.");
 
     setLoading(true);
     try {
@@ -101,7 +101,7 @@ ${webLink}
         title: `TeamCamera: ${teamName}`,
       });
     } catch (error: any) {
-      Alert.alert("Σφάλμα", error.message);
+      showAlert("Σφάλμα", error.message);
     } finally {
       setLoading(false);
     }

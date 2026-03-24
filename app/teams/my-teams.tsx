@@ -5,7 +5,6 @@ import { useFocusEffect, useRouter } from "expo-router";
 import React, { memo, useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   StatusBar,
   StyleSheet,
@@ -21,6 +20,7 @@ import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { auth, db } from "../../firebaseConfig";
 
 // CONTEXT
+import { showAlert } from "../context/AlertContext";
 import { useSync } from "../context/SyncContext";
 import { useUser } from "../context/UserContext";
 
@@ -243,10 +243,10 @@ export default function MyTeamsScreen() {
 
   const handleSyncPress = async () => {
     if (pendingCount === 0) {
-      return Alert.alert("Ενημέρωση", "Όλα τα δεδομένα είναι συγχρονισμένα!");
+      return showAlert("Ενημέρωση", "Όλα τα δεδομένα είναι συγχρονισμένα!");
     }
     const net = await Network.getNetworkStateAsync();
-    if (!net.isConnected) return Alert.alert("Offline", "Δεν έχετε ίντερνετ.");
+    if (!net.isConnected) return showAlert("Offline", "Δεν έχετε ίντερνετ.");
     await syncNow();
   };
 
