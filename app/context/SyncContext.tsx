@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo, { NetInfoStateType } from "@react-native-community/netinfo"; // <--- ΔΙΟΡΘΩΣΗ 1
+import { Platform } from "react-native";
 import React, {
   createContext,
   useContext,
@@ -41,6 +42,7 @@ const validateFileExists = async (uri: string): Promise<boolean> => {
 
 // Check if we still have WiFi connectivity
 const isWiFiConnected = async (): Promise<boolean> => {
+  if (Platform.OS === "web") return typeof navigator !== "undefined" && navigator.onLine;
   try {
     const state = await NetInfo.fetch();
     return state.isConnected === true && state.type === NetInfoStateType.wifi;
@@ -51,6 +53,7 @@ const isWiFiConnected = async (): Promise<boolean> => {
 
 // Check if we have ANY internet connectivity (WiFi or cellular)
 const isNetworkAvailable = async (): Promise<boolean> => {
+  if (Platform.OS === "web") return typeof navigator !== "undefined" && navigator.onLine;
   try {
     const state = await NetInfo.fetch();
     return state.isConnected === true;
@@ -94,6 +97,33 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
 
   // 1. LISTENER (Αυτόματος συγχρονισμός σε WiFi, ή και cellular αν ενεργοποιημένο)
   useEffect(() => {
+    if (Platform.OS === "web") {
+      const handleOnline = () => {
+        if (isSyncingRef.current) return;
+        if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+        syncTimeoutRef.current = setTimeout(() => {
+          performGlobalSync(true); // web: no WiFi/cellular distinction
+        }, 1000);
+      };
+      const handleOffline = () => {
+        if (isSyncingRef.current && !manualSyncRef.current) {
+          console.log("⚠️ Connection dropped during sync, setting abort flag");
+          shouldAbortRef.current = true;
+        }
+      };
+      window.addEventListener("online", handleOnline);
+      window.addEventListener("offline", handleOffline);
+      // Trigger sync on mount if already online
+      if (navigator.onLine && !isSyncingRef.current) {
+        syncTimeoutRef.current = setTimeout(() => performGlobalSync(true), 1000);
+      }
+      return () => {
+        window.removeEventListener("online", handleOnline);
+        window.removeEventListener("offline", handleOffline);
+        if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+      };
+    }
+
     const unsubscribe = NetInfo.addEventListener(async (state) => {
       const cellularEnabled = (await AsyncStorage.getItem(CELLULAR_DATA_KEY)) === "true";
       const hasWiFi = state.isConnected === true && state.type === NetInfoStateType.wifi;
@@ -560,6 +590,15 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
 
   // 3. ΧΕΙΡΟΚΙΝΗΤΟΣ ΣΥΓΧΡΟΝΙΣΜΟΣ (ΜΕ ΕΛΕΓΧΟ DATA)
   const handleManualSync = async () => {
+    if (Platform.OS === "web") {
+      if (!navigator.onLine) {
+        showAlert("Offline", "Δεν υπάρχει σύνδεση στο διαδίκτυο.");
+        return;
+      }
+      await performGlobalSync(true);
+      return;
+    }
+
     const netState = await NetInfo.fetch();
 
     if (!netState.isConnected) {

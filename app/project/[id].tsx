@@ -1873,8 +1873,20 @@ export default function ProjectDetailsScreen() {
         </html>
         `;
 
-      const { uri } = await Print.printToFileAsync({ html });
-      await Sharing.shareAsync(uri);
+      if (Platform.OS === "web") {
+        const blob = new Blob([html], { type: "text/html" });
+        const url = URL.createObjectURL(blob);
+        const win = window.open(url, "_blank");
+        if (win) {
+          win.onload = () => {
+            win.print();
+            URL.revokeObjectURL(url);
+          };
+        }
+      } else {
+        const { uri } = await Print.printToFileAsync({ html });
+        await Sharing.shareAsync(uri);
+      }
     } catch (e) {
       showAlert("PDF Error", "Δεν ήταν δυνατή η δημιουργία του PDF.");
     } finally {
