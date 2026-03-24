@@ -5,7 +5,6 @@ import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -21,6 +20,7 @@ import { doc, updateDoc } from "firebase/firestore";
 import { auth, db } from "../firebaseConfig";
 
 import InputModal from "./components/InputModal";
+import { showAlert } from "./context/AlertContext";
 import { useUser } from "./context/UserContext";
 
 const PROFILE_CACHE_KEY = "user_profile_data_cache";
@@ -47,7 +47,7 @@ export default function ProfileScreen() {
 
   const handleCellularToggle = (value: boolean) => {
     if (value) {
-      Alert.alert(
+      showAlert(
         "Δεδομένα Κινητής Τηλεφωνίας",
         "Ο αυτόματος συγχρονισμός θα γίνεται και με δεδομένα κινητής τηλεφωνίας. Αυτό μπορεί να επηρεάσει το πλάνο δεδομένων σας. Θέλετε να ενεργοποιήσετε αυτή τη ρύθμιση;",
         [
@@ -106,7 +106,7 @@ export default function ProfileScreen() {
   }, [contextUser]);
 
   const handleLogout = async () => {
-    Alert.alert("Αποσύνδεση", "Είστε σίγουροι;", [
+    showAlert("Αποσύνδεση", "Είστε σίγουροι;", [
       { text: "Άκυρο", style: "cancel" },
       {
         text: "Ναι, Αποσύνδεση",
@@ -117,7 +117,7 @@ export default function ProfileScreen() {
             await AsyncStorage.clear();
             router.replace("/");
           } catch (error: any) {
-            Alert.alert("Σφάλμα", error.message);
+            showAlert("Σφάλμα", error.message);
           }
         },
       },
@@ -130,7 +130,7 @@ export default function ProfileScreen() {
   ) => {
     const net = await Network.getNetworkStateAsync();
     if (!net.isConnected) {
-      Alert.alert("Offline", "Δεν μπορείτε να κάνετε αλλαγές χωρίς ίντερνετ.");
+      showAlert("Offline", "Δεν μπορείτε να κάνετε αλλαγές χωρίς ίντερνετ.");
       return;
     }
     setEditField(field);
@@ -142,7 +142,7 @@ export default function ProfileScreen() {
     if (!auth.currentUser || !userData) return;
 
     const net = await Network.getNetworkStateAsync();
-    if (!net.isConnected) return Alert.alert("Σφάλμα", "Χάθηκε η σύνδεση.");
+    if (!net.isConnected) return showAlert("Σφάλμα", "Χάθηκε η σύνδεση.");
 
     const updatedData = { ...userData, [editField]: editValue };
     setUserData(updatedData);
@@ -154,7 +154,7 @@ export default function ProfileScreen() {
       const userRef = doc(db, "users", auth.currentUser.uid);
       await updateDoc(userRef, { [editField]: editValue });
     } catch (error: any) {
-      Alert.alert("Σφάλμα", "Η αποθήκευση στο cloud απέτυχε.");
+      showAlert("Σφάλμα", "Η αποθήκευση στο cloud απέτυχε.");
     }
   };
 

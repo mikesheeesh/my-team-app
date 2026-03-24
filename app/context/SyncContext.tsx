@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Alert } from "react-native";
+import { showAlert } from "../context/AlertContext";
 // Fix για Expo SDK 52+
 import * as FileSystem from "expo-file-system/legacy";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
@@ -563,7 +563,7 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
     const netState = await NetInfo.fetch();
 
     if (!netState.isConnected) {
-      Alert.alert("Offline", "Δεν υπάρχει σύνδεση στο διαδίκτυο.");
+      showAlert("Offline", "Δεν υπάρχει σύνδεση στο διαδίκτυο.");
       return;
     }
 
@@ -578,7 +578,7 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
         await performGlobalSync(true);
         return;
       }
-      Alert.alert(
+      showAlert(
         "Χρήση Δεδομένων",
         "Είστε συνδεδεμένοι με δεδομένα κινητής. Θέλετε να προχωρήσετε σε συγχρονισμό;",
         [

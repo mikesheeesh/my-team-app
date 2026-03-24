@@ -24,7 +24,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Alert } from "react-native";
+import { showAlert } from "../context/AlertContext";
 import { auth, db } from "../../firebaseConfig";
 import { isDriveConnected } from "../../utils/driveAuth";
 import { syncTeamToDrive } from "../../utils/driveSyncEngine";
@@ -91,12 +91,12 @@ export const DriveSyncProvider = ({
     if (!hasWiFi) {
       const cellularEnabled = (await AsyncStorage.getItem(CELLULAR_DATA_KEY)) === "true";
       if (!cellularEnabled) {
-        Alert.alert("Drive Sync", "Δεν υπάρχει σύνδεση WiFi.");
+        showAlert("Drive Sync", "Δεν υπάρχει σύνδεση WiFi.");
         return;
       }
       // Cellular is enabled — ask for confirmation
       const confirmed = await new Promise<boolean>((resolve) => {
-        Alert.alert(
+        showAlert(
           "Δεδομένα Κινητής",
           "Ο συγχρονισμός Drive θα χρησιμοποιήσει δεδομένα κινητής τηλεφωνίας. Συνέχεια;",
           [
@@ -120,13 +120,13 @@ export const DriveSyncProvider = ({
       );
       setLastDriveSyncTime(Date.now());
       if (success) {
-        Alert.alert("Drive Sync", "Ο συγχρονισμός ολοκληρώθηκε!");
+        showAlert("Drive Sync", "Ο συγχρονισμός ολοκληρώθηκε!");
       } else {
-        Alert.alert("Drive Sync", "Ο συγχρονισμός απέτυχε. Δοκιμάστε ξανά.");
+        showAlert("Drive Sync", "Ο συγχρονισμός απέτυχε. Δοκιμάστε ξανά.");
       }
     } catch (error: any) {
       console.error("Manual drive sync failed:", error);
-      Alert.alert("Drive Sync Error", error.message || "Άγνωστο σφάλμα");
+      showAlert("Drive Sync Error", error.message || "Άγνωστο σφάλμα");
     } finally {
       isSyncingRef.current = false;
       setIsDriveSyncing(false);
