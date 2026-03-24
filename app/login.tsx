@@ -2,9 +2,8 @@ import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import { useRouter } from "expo-router";
 import {
   GoogleAuthProvider,
-  getRedirectResult,
   signInWithCredential,
-  signInWithRedirect,
+  signInWithPopup,
 } from "firebase/auth";
 import {
   collection,
@@ -15,7 +14,7 @@ import {
   setDoc,
   where,
 } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -39,22 +38,6 @@ if (Platform.OS !== "web") {
 export default function LoginScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-
-  // Handle redirect result when returning from Google OAuth (web only)
-  useEffect(() => {
-    if (Platform.OS !== "web") return;
-    setLoading(true);
-    getRedirectResult(auth)
-      .then(async (result) => {
-        if (result?.user) {
-          await handlePostSignIn(result.user);
-        }
-      })
-      .catch((err) => {
-        console.log("Redirect result error:", err);
-      })
-      .finally(() => setLoading(false));
-  }, []);
 
   const handlePostSignIn = async (user: any) => {
     const userRef = doc(db, "users", user.uid);
@@ -86,8 +69,8 @@ export default function LoginScreen() {
     try {
       if (Platform.OS === "web") {
         const provider = new GoogleAuthProvider();
-        await signInWithRedirect(auth, provider);
-        // Page will redirect — no code after this runs
+        const result = await signInWithPopup(auth, provider);
+        await handlePostSignIn(result.user);
         return;
       }
 
