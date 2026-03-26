@@ -491,7 +491,8 @@ export const SyncProvider = ({ children }: { children: React.ReactNode }) => {
             let newStatus = "active";
             if (totalCount > 0) {
               if (completedCount === totalCount) {
-                newStatus = "completed";
+                // Web: admin closes explicitly — don't auto-set completed
+                newStatus = Platform.OS === "web" ? "active" : "completed";
               } else if (completedCount > 0) {
                 newStatus = "pending";
               }
