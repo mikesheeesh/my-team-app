@@ -11,15 +11,16 @@ import * as AuthSession from "expo-auth-session";
 import * as Crypto from "expo-crypto";
 import * as WebBrowser from "expo-web-browser";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { Platform } from "react-native";
 import { db } from "../firebaseConfig";
 
 // Complete the auth session for web browser redirect
 WebBrowser.maybeCompleteAuthSession();
 
 // Web Client ID + Secret: used for auth, token exchange & refresh
-const GOOGLE_WEB_CLIENT_ID =
-  "1066934665062-58dao455r4etr1ublg2tthmrj89c8a1j.apps.googleusercontent.com";
-const GOOGLE_WEB_CLIENT_SECRET = "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";
+const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_DRIVE_CLIENT_ID!;
+const GOOGLE_WEB_CLIENT_SECRET =
+  process.env.EXPO_PUBLIC_GOOGLE_DRIVE_CLIENT_SECRET!;
 
 // HTTPS redirect registered with Google (Firebase Hosting page redirects to custom scheme)
 const GOOGLE_REDIRECT_URI = "https://ergon-work.web.app/auth/callback";
@@ -77,6 +78,54 @@ const generateRandomString = (length: number): string => {
 };
 
 /**
+ * Web-only: open OAuth popup and wait for postMessage from callback page
+ */
+const openDriveAuthPopupWeb = (
+  authUrl: string,
+  returnUrl: string,
+): Promise<{ type: string; url?: string }> => {
+  return new Promise((resolve) => {
+    const width = 600;
+    const height = 700;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+
+    const popup = window.open(
+      authUrl,
+      "googleDriveAuth",
+      `width=${width},height=${height},left=${left},top=${top}`,
+    );
+
+    if (!popup) {
+      resolve({ type: "cancel" });
+      return;
+    }
+
+    const cleanup = () => {
+      clearInterval(closedCheck);
+      window.removeEventListener("message", handleMessage);
+    };
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.url?.startsWith(returnUrl)) {
+        cleanup();
+        if (!popup.closed) popup.close();
+        resolve({ type: "success", url: event.data.url });
+      }
+    };
+
+    const closedCheck = setInterval(() => {
+      if (popup.closed) {
+        cleanup();
+        resolve({ type: "cancel" });
+      }
+    }, 500);
+
+    window.addEventListener("message", handleMessage);
+  });
+};
+
+/**
  * Connect Google Drive for a team
  * Opens OAuth consent screen via browser, callback page redirects to custom scheme
  */
@@ -101,11 +150,11 @@ export const connectGoogleDrive = async (
       `&code_challenge_method=S256` +
       `&state=${encodeURIComponent(state)}`;
 
-    // Open browser - watch for custom scheme redirect (callback page redirects to this)
-    const result = await WebBrowser.openAuthSessionAsync(
-      authUrl,
-      APP_RETURN_URL,
-    );
+    // Open browser - web uses popup+postMessage, native uses Custom Tab
+    const result =
+      Platform.OS === "web"
+        ? await openDriveAuthPopupWeb(authUrl, APP_RETURN_URL)
+        : await WebBrowser.openAuthSessionAsync(authUrl, APP_RETURN_URL);
 
     if (result.type !== "success" || !("url" in result)) {
       return {
