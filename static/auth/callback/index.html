@@ -5,7 +5,17 @@
     <title>Ergon - Redirecting...</title>
     <script>
       var params = window.location.search;
-      window.location.href = "ergonwork://oauthredirect" + params;
+      if (window.opener) {
+        // Web popup flow: post the custom scheme URL back to the opener
+        window.opener.postMessage(
+          { url: "ergonwork://oauthredirect" + params },
+          "*"
+        );
+        window.close();
+      } else {
+        // Native app via Chrome Custom Tab: redirect to custom scheme
+        window.location.href = "ergonwork://oauthredirect" + params;
+      }
     </script>
   </head>
   <body>
