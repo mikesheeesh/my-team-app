@@ -13,6 +13,7 @@
 
 import * as FileSystem from "expo-file-system/legacy";
 import { doc, getDoc, setDoc } from "firebase/firestore";
+import { Platform } from "react-native";
 import { db } from "../firebaseConfig";
 import { getValidAccessToken } from "./driveAuth";
 import {
@@ -256,22 +257,25 @@ const downloadAndUploadMedia = async (
   console.log(`Drive sync: UPLOAD ${filename} (key=${mediaKey}, hasExisting=${!!existing})`);
 
   try {
-    // Download from Firebase Storage to local temp
-    const tempPath = FileSystem.cacheDirectory + filename;
-    const downloadResult = await FileSystem.downloadAsync(storageUrl, tempPath);
-
-    // Convert to blob
-    const response = await fetch(downloadResult.uri);
-    const blob = await response.blob();
+    let blob: Blob;
+    if (Platform.OS === "web") {
+      // Web: fetch directly from Firebase Storage URL (no local file needed)
+      const response = await fetch(storageUrl);
+      blob = await response.blob();
+    } else {
+      // Native: download to temp file then read as blob
+      const tempPath = FileSystem.cacheDirectory + filename;
+      const downloadResult = await FileSystem.downloadAsync(storageUrl, tempPath);
+      const response = await fetch(downloadResult.uri);
+      blob = await response.blob();
+      await FileSystem.deleteAsync(tempPath, { idempotent: true });
+    }
 
     // Upload to Drive - update existing file if URL changed (e.g. edited photo)
     const existingFileId = existing?.driveFileId;
     const driveFileId = await uploadFileResumable(
       filename, blob, mimeType, driveFolderId, accessToken, existingFileId
     );
-
-    // Clean up temp file
-    await FileSystem.deleteAsync(tempPath, { idempotent: true });
 
     // Track as synced (by stable key, not URL)
     if (!syncState.projects[projectId]) {
@@ -561,8 +565,10 @@ export const syncProjectToDrive = async (
         contentHash
       );
 
-      // Clean up temp Excel file
-      await FileSystem.deleteAsync(excel.uri, { idempotent: true });
+      // Clean up temp Excel file (native only)
+      if (Platform.OS !== "web" && excel.uri) {
+        await FileSystem.deleteAsync(excel.uri, { idempotent: true });
+      }
     }
 
     // 9. Update sync state

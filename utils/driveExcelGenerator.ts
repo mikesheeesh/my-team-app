@@ -5,6 +5,7 @@
 
 import * as FileSystem from "expo-file-system/legacy";
 import * as XLSX from "xlsx";
+import { Platform } from "react-native";
 
 interface TaskData {
   title: string;
@@ -90,14 +91,22 @@ export const generateProjectExcel = async (
   ];
   XLSX.utils.book_append_sheet(wb, wsG, "Κείμενο");
 
-  // Write to base64 and save to temp file (React Native Blob from ArrayBuffer is unreliable)
+  if (Platform.OS === "web") {
+    // Web: create blob directly from ArrayBuffer (no FileSystem needed)
+    const wbBuffer = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([wbBuffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    return { uri: "", blob };
+  }
+
+  // Native: write to temp file then read back as blob
   const wbBase64 = XLSX.write(wb, { bookType: "xlsx", type: "base64" });
   const tempPath = FileSystem.cacheDirectory + `excel_${Date.now()}.xlsx`;
   await FileSystem.writeAsStringAsync(tempPath, wbBase64, {
     encoding: FileSystem.EncodingType.Base64,
   });
 
-  // Read back as blob via fetch (proven pattern in React Native)
   const response = await fetch(tempPath);
   const blob = await response.blob();
 
