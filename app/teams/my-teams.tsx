@@ -21,43 +21,24 @@ import { onAuthStateChanged } from "firebase/auth";
 import { arrayUnion, collection, deleteDoc, doc, onSnapshot, query, updateDoc, where } from "firebase/firestore";
 import { auth, db } from "../../firebaseConfig";
 
-// Bell notification for pending join requests (Founder/Admin only)
-function usePendingRequests() {
+// Bell notification count for pending join requests (Founder/Admin only)
+function usePendingRequests(bellTeamId: string | null) {
   const [count, setCount] = useState(0);
-  const [firstTeamId, setFirstTeamId] = useState<string | null>(null);
 
   useEffect(() => {
-    const user = auth.currentUser;
-    if (!user) return;
-
-    let unsubRequests: (() => void) | null = null;
-
-    const unsubTeams = onSnapshot(
-      query(collection(db, "teams"), where("memberIds", "array-contains", user.uid)),
-      (teamsSnap) => {
-        const adminTeamIds: string[] = [];
-        teamsSnap.forEach((d) => {
-          const role = d.data().roles?.[user.uid];
-          if (role === "Founder" || role === "Admin") adminTeamIds.push(d.id);
-        });
-        if (unsubRequests) unsubRequests();
-        if (adminTeamIds.length === 0) { setCount(0); setFirstTeamId(null); return; }
-        setFirstTeamId(adminTeamIds[0]);
-        unsubRequests = onSnapshot(
-          query(
-            collection(db, "joinRequests"),
-            where("teamId", "in", adminTeamIds.slice(0, 30)),
-            where("status", "==", "pending"),
-          ),
-          (snap) => setCount(snap.size),
-        );
-      },
+    if (!bellTeamId) { setCount(0); return; }
+    const unsub = onSnapshot(
+      query(
+        collection(db, "joinRequests"),
+        where("teamId", "==", bellTeamId),
+        where("status", "==", "pending"),
+      ),
+      (snap) => setCount(snap.size),
     );
+    return () => unsub();
+  }, [bellTeamId]);
 
-    return () => { unsubTeams(); if (unsubRequests) unsubRequests(); };
-  }, []);
-
-  return { count, firstTeamId };
+  return count;
 }
 
 // CONTEXT
@@ -177,7 +158,8 @@ export default function MyTeamsScreen() {
   const [joinRequests, setJoinRequests] = useState<JoinReq[]>([]);
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [rolePickerFor, setRolePickerFor] = useState<JoinReq | null>(null);
-  const { count: pendingRequests, firstTeamId: bellTeamId } = usePendingRequests();
+  const bellTeamId = teams.find(t => t.role === "Founder" || t.role === "Admin")?.id ?? null;
+  const pendingRequests = usePendingRequests(bellTeamId);
 
   // --- NAVIGATION LOCK (500ms) ---
   const [isNavigating, setIsNavigating] = useState(false);
