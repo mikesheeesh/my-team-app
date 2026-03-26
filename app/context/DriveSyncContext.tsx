@@ -10,6 +10,7 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo, { NetInfoStateType } from "@react-native-community/netinfo";
+import { Platform } from "react-native";
 import { onAuthStateChanged } from "firebase/auth";
 import {
   collection,
@@ -75,6 +76,7 @@ export const DriveSyncProvider = ({
 
   // Check WiFi
   const isWiFiConnected = async (): Promise<boolean> => {
+    if (Platform.OS === "web") return typeof navigator !== "undefined" && navigator.onLine;
     try {
       const state = await NetInfo.fetch();
       return state.isConnected === true && state.type === NetInfoStateType.wifi;
