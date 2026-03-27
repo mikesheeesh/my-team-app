@@ -1042,39 +1042,6 @@ export default function ProjectDetailsScreen() {
     }
   };
 
-  const [mediaPickerVisible, setMediaPickerVisible] = useState(false);
-
-  const launchWebPicker = async (task: Task) => {
-    if (!teamId) return;
-    try {
-      const r = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: task.type === "video"
-          ? ImagePicker.MediaTypeOptions.Videos
-          : ImagePicker.MediaTypeOptions.Images,
-        quality: 1,
-      });
-      if (r.canceled || !r.assets[0]?.uri) return;
-      setProcessing(true);
-      try {
-        const mediaId = generateMediaId();
-        const uri = r.assets[0].uri;
-        const storageUrl = task.type === "video"
-          ? await uploadVideoToStorage(uri, teamId, projectId, task.id, mediaId)
-          : await uploadImageToStorage(uri, teamId, projectId, task.id, mediaId);
-        await addMediaToTask(task.id, storageUrl, undefined);
-      } catch (e: any) {
-        showAlert("Σφάλμα", e.message || "Αποτυχία ανεβάσματος");
-      } finally {
-        setProcessing(false);
-      }
-    } catch (e) {
-      showAlert("Σφάλμα", "Αποτυχία επιλογής αρχείου");
-    }
-  };
-
-  const showMediaPicker = (_task: Task) => {
-    setMediaPickerVisible(true);
-  };
 
   const handleEditorSave = async (editedUri: string) => {
     setEditorVisible(false);
@@ -2348,50 +2315,6 @@ export default function ProjectDetailsScreen() {
         </View>
       </Modal>
 
-      {/* MEDIA PICKER (Κάμερα / Συλλογή) */}
-      <Modal
-        visible={mediaPickerVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setMediaPickerVisible(false)}
-      >
-        <TouchableOpacity
-          style={styles.pickerOverlay}
-          activeOpacity={1}
-          onPress={() => setMediaPickerVisible(false)}
-        >
-          <View style={[styles.pickerContainer, { paddingBottom: insets.bottom + 20 }]}>
-            <View style={styles.pickerRow}>
-              <TouchableOpacity
-                style={styles.pickerBtn}
-                onPress={() => {
-                  setMediaPickerVisible(false);
-                  if (activeTaskForGallery) launchCamera(activeTaskForGallery);
-                }}
-              >
-                <Ionicons name="camera" size={28} color="#2563eb" />
-                <Text style={styles.pickerBtnText}>Κάμερα</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.pickerBtn}
-                onPress={() => {
-                  setMediaPickerVisible(false);
-                  if (activeTaskForGallery) launchGallery(activeTaskForGallery);
-                }}
-              >
-                <Ionicons name="images" size={28} color="#2563eb" />
-                <Text style={styles.pickerBtnText}>Συλλογή</Text>
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity
-              style={styles.pickerCancel}
-              onPress={() => setMediaPickerVisible(false)}
-            >
-              <Text style={styles.pickerCancelText}>Ακύρωση</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
 
       {/* CUSTOM IMAGE EDITOR */}
       <ImageEditorModal
@@ -2457,27 +2380,29 @@ export default function ProjectDetailsScreen() {
                     ? activeTaskForGallery.images
                     : activeTaskForGallery.videos || []
                   : []),
-                ...(!isClosed ? ["ADD"] : []),
+                ...(!isClosed ? ["ADD_CAMERA", "ADD_GALLERY"] : []),
               ]}
               numColumns={3}
               renderItem={({ item }) =>
-                item === "ADD" ? (
+                item === "ADD_CAMERA" ? (
                   <TouchableOpacity
                     style={styles.addPhotoTile}
                     onPress={() =>
-                      activeTaskForGallery && showMediaPicker(activeTaskForGallery)
+                      activeTaskForGallery && launchCamera(activeTaskForGallery)
                     }
                   >
-                    <Ionicons
-                      name={
-                        activeTaskForGallery?.type === "video"
-                          ? "videocam"
-                          : "camera"
-                      }
-                      size={32}
-                      color="#666"
-                    />
-                    <Text style={styles.addPhotoText}>Προσθήκη</Text>
+                    <Ionicons name="camera" size={32} color="#666" />
+                    <Text style={styles.addPhotoText}>Κάμερα</Text>
+                  </TouchableOpacity>
+                ) : item === "ADD_GALLERY" ? (
+                  <TouchableOpacity
+                    style={styles.addPhotoTile}
+                    onPress={() =>
+                      activeTaskForGallery && launchGallery(activeTaskForGallery)
+                    }
+                  >
+                    <Ionicons name="images" size={32} color="#666" />
+                    <Text style={styles.addPhotoText}>Συλλογή</Text>
                   </TouchableOpacity>
                 ) : activeTaskForGallery?.type === "video" ? (
                   <TouchableOpacity
