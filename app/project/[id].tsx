@@ -351,6 +351,7 @@ export default function ProjectDetailsScreen() {
   const [inputModalVisible, setInputModalVisible] = useState(false);
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [galleryModalVisible, setGalleryModalVisible] = useState(false);
+  const [addPickerVisible, setAddPickerVisible] = useState(false);
   const [optionsModalVisible, setOptionsModalVisible] = useState(false);
 
   // --- EDITOR STATES ---
@@ -2351,7 +2352,7 @@ export default function ProjectDetailsScreen() {
       <Modal
         visible={galleryModalVisible}
         animationType="slide"
-        onRequestClose={() => setGalleryModalVisible(false)}
+        onRequestClose={() => { setGalleryModalVisible(false); setAddPickerVisible(false); }}
       >
         <SafeAreaView style={{ flex: 1, backgroundColor: "black" }}>
           <View style={styles.galleryHeader}>
@@ -2380,29 +2381,21 @@ export default function ProjectDetailsScreen() {
                     ? activeTaskForGallery.images
                     : activeTaskForGallery.videos || []
                   : []),
-                ...(!isClosed ? ["ADD_CAMERA", "ADD_GALLERY"] : []),
+                ...(!isClosed ? ["ADD"] : []),
               ]}
               numColumns={3}
               renderItem={({ item }) =>
-                item === "ADD_CAMERA" ? (
+                item === "ADD" ? (
                   <TouchableOpacity
                     style={styles.addPhotoTile}
-                    onPress={() =>
-                      activeTaskForGallery && launchCamera(activeTaskForGallery)
-                    }
+                    onPress={() => setAddPickerVisible(true)}
                   >
-                    <Ionicons name="camera" size={32} color="#666" />
-                    <Text style={styles.addPhotoText}>Κάμερα</Text>
-                  </TouchableOpacity>
-                ) : item === "ADD_GALLERY" ? (
-                  <TouchableOpacity
-                    style={styles.addPhotoTile}
-                    onPress={() =>
-                      activeTaskForGallery && launchGallery(activeTaskForGallery)
-                    }
-                  >
-                    <Ionicons name="images" size={32} color="#666" />
-                    <Text style={styles.addPhotoText}>Συλλογή</Text>
+                    <Ionicons
+                      name={activeTaskForGallery?.type === "video" ? "videocam" : "camera"}
+                      size={32}
+                      color="#666"
+                    />
+                    <Text style={styles.addPhotoText}>Προσθήκη</Text>
                   </TouchableOpacity>
                 ) : activeTaskForGallery?.type === "video" ? (
                   <TouchableOpacity
@@ -2434,6 +2427,46 @@ export default function ProjectDetailsScreen() {
               keyExtractor={(item, index) => index.toString()}
             />
           </View>
+
+          {/* PICKER OVERLAY — μέσα στο gallery modal, πάντα ορατό */}
+          {addPickerVisible && (
+            <TouchableOpacity
+              style={styles.pickerOverlay}
+              activeOpacity={1}
+              onPress={() => setAddPickerVisible(false)}
+            >
+              <View style={[styles.pickerContainer, { paddingBottom: insets.bottom + 20 }]}>
+                <View style={styles.pickerRow}>
+                  <TouchableOpacity
+                    style={styles.pickerBtn}
+                    onPress={() => {
+                      setAddPickerVisible(false);
+                      if (activeTaskForGallery) launchCamera(activeTaskForGallery);
+                    }}
+                  >
+                    <Ionicons name="camera" size={28} color="#2563eb" />
+                    <Text style={styles.pickerBtnText}>Κάμερα</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.pickerBtn}
+                    onPress={() => {
+                      setAddPickerVisible(false);
+                      if (activeTaskForGallery) launchGallery(activeTaskForGallery);
+                    }}
+                  >
+                    <Ionicons name="images" size={28} color="#2563eb" />
+                    <Text style={styles.pickerBtnText}>Συλλογή</Text>
+                  </TouchableOpacity>
+                </View>
+                <TouchableOpacity
+                  style={styles.pickerCancel}
+                  onPress={() => setAddPickerVisible(false)}
+                >
+                  <Text style={styles.pickerCancelText}>Ακύρωση</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          )}
         </SafeAreaView>
       </Modal>
       <Modal
