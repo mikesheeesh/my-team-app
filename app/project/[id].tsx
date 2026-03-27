@@ -617,7 +617,7 @@ export default function ProjectDetailsScreen() {
     const cellularEnabled = (await AsyncStorage.getItem("cellular_data_enabled")) === "true";
     // Web: expo-network returns UNKNOWN type — treat as cellular, respect toggle
     const isWebOnline = Platform.OS === "web" && typeof navigator !== "undefined" && navigator.onLine;
-    const hasWiFi = isWebOnline ? cellularEnabled : (net.isConnected && net.type === Network.NetworkStateType.WIFI);
+    const hasWiFi = isWebOnline || (!isWebOnline && net.isConnected && net.type === Network.NetworkStateType.WIFI);
     const hasCellular = !isWebOnline && net.isConnected && net.type === Network.NetworkStateType.CELLULAR;
     const canUploadDirectly = hasWiFi || (cellularEnabled && hasCellular);
 
@@ -775,10 +775,8 @@ export default function ProjectDetailsScreen() {
 
   const handleLongPressTask = (task: Task) => {
     if (isClosed) return;
-    if (Platform.OS !== "web") {
-      setSelectedTaskForOptions(task);
-      setOptionsModalVisible(true);
-    }
+    setSelectedTaskForOptions(task);
+    setOptionsModalVisible(true);
   };
 
   const handleEditOption = () => {
@@ -978,8 +976,40 @@ export default function ProjectDetailsScreen() {
 
   const [mediaPickerVisible, setMediaPickerVisible] = useState(false);
 
+  const launchWebPicker = async (task: Task) => {
+    if (!teamId) return;
+    try {
+      const r = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: task.type === "video"
+          ? ImagePicker.MediaTypeOptions.Videos
+          : ImagePicker.MediaTypeOptions.Images,
+        quality: 1,
+      });
+      if (r.canceled || !r.assets[0]?.uri) return;
+      setProcessing(true);
+      try {
+        const mediaId = generateMediaId();
+        const uri = r.assets[0].uri;
+        const storageUrl = task.type === "video"
+          ? await uploadVideoToStorage(uri, teamId, projectId, task.id, mediaId)
+          : await uploadImageToStorage(uri, teamId, projectId, task.id, mediaId);
+        await addMediaToTask(task.id, storageUrl, undefined);
+      } catch (e: any) {
+        showAlert("Σφάλμα", e.message || "Αποτυχία ανεβάσματος");
+      } finally {
+        setProcessing(false);
+      }
+    } catch (e) {
+      showAlert("Σφάλμα", "Αποτυχία επιλογής αρχείου");
+    }
+  };
+
   const showMediaPicker = (task: Task) => {
-    setMediaPickerVisible(true);
+    if (Platform.OS === "web") {
+      launchWebPicker(task);
+    } else {
+      setMediaPickerVisible(true);
+    }
   };
 
   const handleEditorSave = async (editedUri: string) => {
@@ -2342,7 +2372,7 @@ export default function ProjectDetailsScreen() {
                     ? activeTaskForGallery.images
                     : activeTaskForGallery.videos || []
                   : []),
-                ...(Platform.OS !== 'web' && !isClosed ? ["ADD"] : []),
+                ...(!isClosed ? ["ADD"] : []),
               ]}
               numColumns={3}
               renderItem={({ item }) =>
@@ -2421,17 +2451,29 @@ export default function ProjectDetailsScreen() {
             </View>
           ) : (selectedMediaForView?.startsWith("data:video") ||
             activeTaskForGallery?.type === "video") ? (
-            <Video
-              ref={videoRef}
-              style={styles.fullImage}
-              source={{ uri: selectedMediaForView || "" }}
-              useNativeControls
-              resizeMode={ResizeMode.CONTAIN}
-              isLooping
-              shouldPlay
-              onReadyForDisplay={() => setMediaLoaded(true)}
-              onError={() => setMediaViewError(true)}
-            />
+            Platform.OS === "web" ? (
+              <video
+                src={selectedMediaForView || ""}
+                controls
+                autoPlay
+                loop
+                style={{ width: "100%", height: "100%", objectFit: "contain", backgroundColor: "black" } as any}
+                onLoadedData={() => setMediaLoaded(true)}
+                onError={() => setMediaViewError(true)}
+              />
+            ) : (
+              <Video
+                ref={videoRef}
+                style={styles.fullImage}
+                source={{ uri: selectedMediaForView || "" }}
+                useNativeControls
+                resizeMode={ResizeMode.CONTAIN}
+                isLooping
+                shouldPlay
+                onReadyForDisplay={() => setMediaLoaded(true)}
+                onError={() => setMediaViewError(true)}
+              />
+            )
           ) : (
             <Image
               source={{ uri: selectedMediaForView || "" }}
