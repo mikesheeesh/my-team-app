@@ -836,6 +836,40 @@ export default function ProjectDetailsScreen() {
 
   // --- CAMERA LOGIC ---
   const launchCamera = async (task: Task) => {
+    // Web: χωρίς GPS/compression/editor για βίντεο
+    if (Platform.OS === "web") {
+      try {
+        const r = await ImagePicker.launchCameraAsync({
+          mediaTypes: task.type === "video"
+            ? ImagePicker.MediaTypeOptions.Videos
+            : ImagePicker.MediaTypeOptions.Images,
+          quality: 1,
+        });
+        if (!r.canceled && r.assets[0]?.uri) {
+          if (task.type === "video") {
+            setProcessing(true);
+            try {
+              const mediaId = generateMediaId();
+              const url = await uploadVideoToStorage(r.assets[0].uri, teamId, projectId, task.id, mediaId);
+              await addMediaToTask(task.id, url, undefined);
+            } catch (e: any) {
+              showAlert("Σφάλμα", e.message || "Αποτυχία ανεβάσματος");
+            } finally {
+              setProcessing(false);
+            }
+          } else {
+            setTaskForEditing(task);
+            setTempImageUri(r.assets[0].uri);
+            setTempImageDims({ w: r.assets[0].width || 0, h: r.assets[0].height || 0 });
+            setReEditingIndex(null);
+            setEditorVisible(true);
+          }
+        }
+      } catch (e) {
+        showAlert("Σφάλμα", "Αποτυχία πρόσβασης κάμερας");
+      }
+      return;
+    }
     try {
       // 1. Start GPS fetch in background (non-blocking)
       // Fallback to last known position if fresh fix fails (Android throttles after rapid successive calls)
@@ -919,6 +953,40 @@ export default function ProjectDetailsScreen() {
   };
 
   const launchGallery = async (task: Task) => {
+    // Web: χωρίς GPS/compression/editor για βίντεο
+    if (Platform.OS === "web") {
+      try {
+        const r = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: task.type === "video"
+            ? ImagePicker.MediaTypeOptions.Videos
+            : ImagePicker.MediaTypeOptions.Images,
+          quality: 1,
+        });
+        if (!r.canceled && r.assets[0]?.uri) {
+          if (task.type === "video") {
+            setProcessing(true);
+            try {
+              const mediaId = generateMediaId();
+              const url = await uploadVideoToStorage(r.assets[0].uri, teamId, projectId, task.id, mediaId);
+              await addMediaToTask(task.id, url, undefined);
+            } catch (e: any) {
+              showAlert("Σφάλμα", e.message || "Αποτυχία ανεβάσματος");
+            } finally {
+              setProcessing(false);
+            }
+          } else {
+            setTaskForEditing(task);
+            setTempImageUri(r.assets[0].uri);
+            setTempImageDims({ w: r.assets[0].width || 0, h: r.assets[0].height || 0 });
+            setReEditingIndex(null);
+            setEditorVisible(true);
+          }
+        }
+      } catch (e) {
+        showAlert("Σφάλμα", "Αποτυχία επιλογής αρχείου");
+      }
+      return;
+    }
     try {
       const gpsPromise = Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
@@ -1004,17 +1072,36 @@ export default function ProjectDetailsScreen() {
     }
   };
 
-  const showMediaPicker = (task: Task) => {
-    if (Platform.OS === "web") {
-      launchWebPicker(task);
-    } else {
-      setMediaPickerVisible(true);
-    }
+  const showMediaPicker = (_task: Task) => {
+    setMediaPickerVisible(true);
   };
 
   const handleEditorSave = async (editedUri: string) => {
     setEditorVisible(false);
     setProcessing(true);
+
+    // Web: editedUri είναι data URL από canvas — ανέβασμα κατευθείαν στο Storage
+    if (Platform.OS === "web") {
+      try {
+        if (!taskForEditing || !teamId) return;
+        const mediaId = generateMediaId();
+        const storageUrl = await uploadImageToStorage(editedUri, teamId, projectId, taskForEditing.id, mediaId);
+        if (reEditingIndex !== null) {
+          await replaceMediaInTask(taskForEditing.id, reEditingIndex, storageUrl, undefined);
+        } else {
+          await addMediaToTask(taskForEditing.id, storageUrl, undefined);
+        }
+      } catch (e: any) {
+        showAlert("Σφάλμα", e.message || "Αποτυχία αποθήκευσης");
+      } finally {
+        setProcessing(false);
+        setTaskForEditing(null);
+        setTempImageUri(null);
+        setTempImageDims(null);
+        setReEditingIndex(null);
+      }
+      return;
+    }
 
     try {
       console.log("📸 Starting image save process (OFFLINE-FIRST)...");
@@ -2306,22 +2393,20 @@ export default function ProjectDetailsScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* CUSTOM IMAGE EDITOR (Only show if not web) */}
-      {Platform.OS !== "web" && (
-        <ImageEditorModal
-          visible={editorVisible}
-          imageUri={tempImageUri}
-          imageNaturalWidth={tempImageDims?.w}
-          imageNaturalHeight={tempImageDims?.h}
-          onClose={() => {
-            setEditorVisible(false);
-            setTempImageUri(null);
-            setTempImageDims(null);
-            setReEditingIndex(null); // Reset re-edit mode to prevent overwriting new photos
-          }}
-          onSave={handleEditorSave}
-        />
-      )}
+      {/* CUSTOM IMAGE EDITOR */}
+      <ImageEditorModal
+        visible={editorVisible}
+        imageUri={tempImageUri}
+        imageNaturalWidth={tempImageDims?.w}
+        imageNaturalHeight={tempImageDims?.h}
+        onClose={() => {
+          setEditorVisible(false);
+          setTempImageUri(null);
+          setTempImageDims(null);
+          setReEditingIndex(null);
+        }}
+        onSave={handleEditorSave}
+      />
 
       <InputModal
         visible={inputModalVisible}

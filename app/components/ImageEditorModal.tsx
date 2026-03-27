@@ -6,6 +6,7 @@ import {
   Dimensions,
   Modal,
   PanResponder,
+  Platform,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -103,6 +104,10 @@ export default function ImageEditorModal({
   // Dimensions πρέπει να δηλωθούν ΠΡΙΝ τα canvas refs που τα χρησιμοποιούν
   const viewShotRef = useRef<ViewShot>(null);
   const hiResViewShotRef = useRef<ViewShot>(null);
+  // Refs για ασφαλή πρόσβαση σε web canvas capture (αποφυγή stale closures)
+  const pathsRef = useRef<DrawnPath[]>([]);
+  const imageUriRef = useRef(imageUri);
+  const hiResParamsRef = useRef({ letterOffsetX: 0, letterOffsetY: 0, hiResTotalScale: 1, hiResW: 0, hiResH: 0 });
   const { width, height } = Dimensions.get("window");
 
   // Canvas layout measurement (absolute screen coordinates)
@@ -134,10 +139,39 @@ export default function ImageEditorModal({
     if (!isCapturing) return;
     const timer = setTimeout(async () => {
       try {
-        if (hiResViewShotRef.current && (hiResViewShotRef.current as any).capture) {
-          const uri = await (hiResViewShotRef.current as any).capture({ quality: 1.0 });
-          onSave(uri);
+        if (Platform.OS === "web") {
+          // Web: HTML Canvas merge (ViewShot/html2canvas δεν υποστηρίζει SVG αξιόπιστα)
+          const { hiResW: cW, hiResH: cH, letterOffsetX: ox, letterOffsetY: oy, hiResTotalScale: ts } = hiResParamsRef.current;
+          const canvas = document.createElement("canvas");
+          canvas.width = cW || 1000;
+          canvas.height = cH || 1000;
+          const ctx = canvas.getContext("2d")!;
+          const img = new (window as any).Image() as HTMLImageElement;
+          img.crossOrigin = "anonymous";
+          await new Promise<void>((resolve, reject) => {
+            img.onload = () => resolve();
+            img.onerror = () => reject(new Error("Image load failed"));
+            img.src = imageUriRef.current!;
+          });
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          for (const p of pathsRef.current) {
+            const d = transformPath(p.d, ox, oy, ts);
+            const path2d = new Path2D(d);
+            ctx.strokeStyle = p.color;
+            ctx.lineWidth = p.width * ts;
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            ctx.stroke(path2d);
+          }
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+          onSave(dataUrl);
           setTimeout(() => handleClearAll(), 500);
+        } else {
+          if (hiResViewShotRef.current && (hiResViewShotRef.current as any).capture) {
+            const uri = await (hiResViewShotRef.current as any).capture({ quality: 1.0 });
+            onSave(uri);
+            setTimeout(() => handleClearAll(), 500);
+          }
         }
       } catch (e) {
         console.log("Hi-res capture failed, falling back", e);
@@ -153,7 +187,7 @@ export default function ImageEditorModal({
       } finally {
         setIsCapturing(false);
       }
-    }, 150); // Wait 150ms for the off-screen component to render
+    }, Platform.OS === "web" ? 0 : 150);
     return () => clearTimeout(timer);
   }, [isCapturing]);
 
@@ -441,6 +475,11 @@ export default function ImageEditorModal({
   const hiResH = imageNaturalHeight ? Math.round(imageNaturalHeight * hiResDownScale) : 0;
   // Combined scale: container → hi-res space (accounts for letterbox + downscale)
   const hiResTotalScale = letterImgScale > 0 ? hiResDownScale / letterImgScale : 1;
+
+  // Ενημέρωση refs σε κάθε render (για ασφαλή πρόσβαση σε web canvas capture)
+  pathsRef.current = paths;
+  imageUriRef.current = imageUri;
+  hiResParamsRef.current = { letterOffsetX, letterOffsetY, hiResTotalScale, hiResW, hiResH };
 
   if (!imageUri) return null;
 
